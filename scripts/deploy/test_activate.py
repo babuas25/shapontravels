@@ -16,6 +16,12 @@ with open(os.environ['EVENTS'], 'a') as out:
     out.write(name + ' ' + ' '.join(args) + '\n')
 mode = os.environ['FAIL_MODE']
 if name == 'runuser':
+    if 'cat' in args:
+        sys.stdout.write(pathlib.Path(args[-1]).read_text())
+        sys.exit(0)
+    if 'rm' in args:
+        shutil.rmtree(args[-1])
+        sys.exit(0)
     if 'migrate' in args:
         assert os.environ['DATABASE_URL'].startswith('postgres://shapon_migrator:')
         sys.exit(1 if mode == 'migration' else 0)
@@ -44,7 +50,7 @@ class DeploymentTests(unittest.TestCase):
         root = Path(temp.name)
         mock_bin = root / 'bin'
         mock_bin.mkdir()
-        for cmd in ('flock', 'systemctl', 'runuser', 'curl', 'sleep', 'install', 'mv'):
+        for cmd in ('flock', 'systemctl', 'runuser', 'curl', 'sleep', 'install', 'mv', 'chown'):
             target = mock_bin / cmd
             target.write_text(MOCK)
             target.chmod(0o755)

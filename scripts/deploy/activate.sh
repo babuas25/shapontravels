@@ -17,7 +17,11 @@ flock -n 9 || { echo 'Another deployment is active' >&2; exit 1; }
 systemctl cat shapontravels.service >/dev/null
 install -d -o root -g shapontravels -m 750 /opt/shapontravels/releases
 install -d -o root -g shapontravels -m 750 "$release"
-install -o root -g shapontravels -m 750 "$incoming" "$release/shapontravels-api.new"
+# Read caller-controlled paths with the caller's permissions, not root's.
+umask 077
+runuser -u deploy -- cat "$incoming" > "$release/shapontravels-api.new"
+chown root:shapontravels "$release/shapontravels-api.new"
+chmod 750 "$release/shapontravels-api.new"
 mv -f "$release/shapontravels-api.new" "$release/shapontravels-api"
 runuser -u postgres -- /usr/local/sbin/shapontravels-backup
 stopped=false
@@ -62,5 +66,5 @@ done
 [[ $healthy == true ]] || { echo 'Release health check failed' >&2; exit 1; }
 stopped=false
 printf '%s\n' "$sha" > /opt/shapontravels/deployed-sha
-rm -rf -- "/home/deploy/incoming/$sha"
+runuser -u deploy -- rm -rf -- "/home/deploy/incoming/$sha"
 echo "Deployed $sha; live and ready checks passed."
