@@ -1,0 +1,169 @@
+{
+  "item1": {
+    "avlSrc": null,
+    "basePrice": 3224.00,
+    "bookable": true,
+    "bookingComponents": [
+      {
+        "agentAdditionalPrice": 0.0,
+        "ait": 0.0,
+        "basePrice": 3224.00,
+        "discountPrice": -315.95,
+        "fareReference": "redacted-a67d68908e46c1e132ccba773cc86f388b853b143e8eadde17c325c4b1ff031c",
+        "taxes": 1125.0,
+        "totalExtraServicePrice": 0.0,
+        "totalPrice": 4033.05
+      }
+    ],
+    "brandedFares": null,
+    "commissionOnTaxes": [],
+    "currency": "BDT",
+    "directions": [
+      [
+        {
+          "from": "DAC",
+          "fromAirport": "redacted-518aa796a67502c7d8f9e5f4432a713d316ae35bcc1fc520097cb5c7d18c4bed",
+          "otherCarrierCodes": null,
+          "platingCarrierCode": "BS",
+          "platingCarrierName": "redacted-245e90601c3f31e4efc4ac730cde2a543979941e5786e44164b372dd418d787a",
+          "segments": [
+            {
+              "airline": "redacted-245e90601c3f31e4efc4ac730cde2a543979941e5786e44164b372dd418d787a",
+              "airlineCode": "BS",
+              "arrival": "2026-09-29 13:05:00",
+              "baggage": [
+                {
+                  "amount": 20.0,
+                  "passengerTypeCode": "ADT",
+                  "units": "Kg"
+                }
+              ],
+              "bookingClass": "Q",
+              "bookingCount": "",
+              "cabinClass": null,
+              "departure": "2026-09-29 12:00:00",
+              "details": [
+                {
+                  "arrival": "2026-09-29 13:05:00",
+                  "departure": "2026-09-29 12:00:00",
+                  "destination": "CXB",
+                  "destinationName": null,
+                  "destinationTerminal": "redacted-3f39d5c348e5b79d06e842c114e6cc571583bbf44e4b0ebfda1a01ec05745d43",
+                  "equipment": "redacted-8b05e34cbd06d8d0e4bbdce04020aacecb37517734541b6bbba77ad3dd8aff9c",
+                  "flightTime": "redacted-c2a918fec48134aa015d6bcd2d9583f30c06a1b1bf7432fba4b8ea78eab723cc",
+                  "origin": "DAC",
+                  "originName": null,
+                  "originTerminal": "redacted-3f39d5c348e5b79d06e842c114e6cc571583bbf44e4b0ebfda1a01ec05745d43",
+                  "travelTime": "redacted-c2a918fec48134aa015d6bcd2d9583f30c06a1b1bf7432fba4b8ea78eab723cc"
+                }
+              ],
+              "duration": [
+                "redacted-c2a918fec48134aa015d6bcd2d9583f30c06a1b1bf7432fba4b8ea78eab723cc"
+              ],
+              "fareBasisCode": "QDOMO",
+              "flightNumber": "147",
+              "from": "DAC",
+              "fromAirport": "redacted-518aa796a67502c7d8f9e5f4432a713d316ae35bcc1fc520097cb5c7d18c4bed",
+              "group": 1,
+              "handBaggage": "7 KG",
+              "plane": [
+                "redacted-8b05e34cbd06d8d0e4bbdce04020aacecb37517734541b6bbba77ad3dd8aff9c"
+              ],
+              "segmentCodeRef": "redacted-10d8a4a4feb3da61f6e183e79b41614ba0f874de28a936662973f9bf2026bdca",
+              "serviceClass": "Y",
+              "techStops": [],
+              "to": "CXB",
+              "toAirport": "redacted-92cb16463201497d8e51d96d870673dee7bcfee222fd52c0aa946c1b7416bbcc"
+            }
+          ],
+          "stops": 0,
+          "to": "CXB",
+          "toAirport": "redacted-92cb16463201497d8e51d96d870673dee7bcfee222fd52c0aa946c1b7416bbcc",
+          "travelTime": null
+        }
+      ]
+    ],
+    "eqivqlBasePrice": 3224.00,
+    "extraBaggageAllowedPTC": null,
+    "fareTag": null,
+    "hasExtraService": false,
+    "isBaggageChanged": false,
+    "isCodeShared": false,
+    "isPriceChanged": false,
+    "itemCodeRef": "redacted-3f49004e9c8240d4cda1df11e51c978afcfdb314ab4c9b216526f7fba2cc795b",
+    "newPartialPaymentAmount": 0.0,
+    "notes": [],
+    "passengerCounts": {
+      "adt": 1,
+      "chd": 0,
+      "cnn": 0,
+      "inf": 0,
+      "ins": 0
+    },
+    "passengerFares": {
+      "adt": {
+        "ait": 0.0,
+        "basePrice": 3224.00,
+        "discountPrice": -315.95,
+        "equivalentBasePrice": 3224.00,
+        "fareType": 1,
+        "serviceCharge": 0.0,
+        "taxCommissionBreakdowns": [],
+        "taxes": 1125.0,
+        "taxesBreakdown": [
+          {
+            "amount": 25.0,
+            "category": "BD"
+          },
+          {
+            "amount": 700.0,
+            "category": "OW"
+          },
+          {
+            "amount": 30.0,
+            "category": "E5"
+          },
+          {
+            "amount": 200.0,
+            "category": "UT"
+          },
+          {
+            "amount": 100.0,
+            "category": "P7"
+          },
+          {
+            "amount": 70.0,
+            "category": "P8"
+          }
+        ],
+        "totalPrice": 4033.05
+      },
+      "chd": null,
+      "cnn": null,
+      "inf": null,
+      "ins": null
+    },
+    "penalties": null,
+    "platingCarrier": "BS",
+    "platingCarrierName": "redacted-245e90601c3f31e4efc4ac730cde2a543979941e5786e44164b372dd418d787a",
+    "priceCodeRef": "redacted-7d915b146515ff0d11d837d18670466acf4ad25eee5cc445ee59700db889c357",
+    "rePriceForFareBreakDown": false,
+    "refundable": true,
+    "taxes": 1125.0,
+    "totalExtraServicePrice": 0.0,
+    "totalPrice": 4033.05,
+    "uniqueTransID": "redacted-ba279e446bbde00c1407a17a7c82275d838d0369e427521450e949eb60ff20bc"
+  },
+  "item2": {
+    "apiRef": 1,
+    "conversionTime": null,
+    "isMessageShow": false,
+    "isSuccess": true,
+    "message": null,
+    "requestTime": "redacted-01eae0fecb78606e37828ebc210c0a56cbb4be58fe216465deec594dc2caf7c8",
+    "responseTime": "redacted-fafb1f714e45da385527411c2ab33d0aabdc2be35359ad0037a420fc3b620762",
+    "ticketType": null,
+    "timeTicks": 639244693642920294,
+    "uniqueTransID": "redacted-ba279e446bbde00c1407a17a7c82275d838d0369e427521450e949eb60ff20bc"
+  }
+}

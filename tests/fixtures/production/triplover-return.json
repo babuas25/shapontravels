@@ -1,0 +1,761 @@
+{
+  "item1": {
+    "airSearchResponses": [
+      {
+        "avlSrc": "redacted-73d501f6eb381c85b8150c2ebd46c0a7bf88e35d5fbfd26712a172558b17e5b0",
+        "basePrice": 115985.00,
+        "bookable": true,
+        "bookingComponents": [
+          {
+            "agentAdditionalPrice": 0.0,
+            "ait": 0.0,
+            "basePrice": 115985.00,
+            "discountPrice": -8118.95,
+            "fareReference": "redacted-12c984cb1372d0cd55cc80be0e5debaa6c330f9905f89535940de2ed9d22d930",
+            "taxes": 49710.0,
+            "totalExtraServicePrice": 0.0,
+            "totalPrice": 157576.05
+          }
+        ],
+        "brandedFares": null,
+        "commissionOnTaxes": [],
+        "directions": [
+          [
+            {
+              "from": "DAC",
+              "fromAirport": "redacted-518aa796a67502c7d8f9e5f4432a713d316ae35bcc1fc520097cb5c7d18c4bed",
+              "otherCarrierCodes": null,
+              "platingCarrierCode": "SQ",
+              "platingCarrierName": "redacted-78b93b74c069be0367371d3a650629569c91cda878b324d9579da038fba81f34",
+              "segments": [
+                {
+                  "airline": "redacted-78b93b74c069be0367371d3a650629569c91cda878b324d9579da038fba81f34",
+                  "airlineCode": "SQ",
+                  "arrival": "2026-09-30 06:00:00",
+                  "baggage": [
+                    {
+                      "amount": 25.0,
+                      "passengerTypeCode": "ADT",
+                      "units": "Kilograms"
+                    },
+                    {
+                      "amount": 25.0,
+                      "passengerTypeCode": "CHD",
+                      "units": "Kilograms"
+                    },
+                    {
+                      "amount": 0.0,
+                      "passengerTypeCode": "INF",
+                      "units": "Kilograms"
+                    }
+                  ],
+                  "bookingClass": "K",
+                  "bookingCount": null,
+                  "cabinClass": "Economy",
+                  "departure": "2026-09-29 23:55:00",
+                  "details": [
+                    {
+                      "arrival": "2026-09-30 06:00:00",
+                      "departure": "2026-09-29 23:55:00",
+                      "destination": "SIN",
+                      "destinationName": "redacted-42b80d41ef8619836b170860e1e185182da6294604e96d87f17e9ee3b182e4ca",
+                      "destinationTerminal": "redacted-5feceb66ffc86f38d952786c6d696c79c2dbc239dd4e91b46729d73a27fb57e9",
+                      "equipment": "redacted-7aa100afd001fc8211a0858bd0eb5a13a096809352da104d4c2dde3cccb8a293",
+                      "flightTime": "redacted-f838a9d8c17870219257ee29687a6ed6e1ef96309030202cc3a13f1916fc6410",
+                      "origin": "DAC",
+                      "originName": "redacted-518aa796a67502c7d8f9e5f4432a713d316ae35bcc1fc520097cb5c7d18c4bed",
+                      "originTerminal": "redacted-d4735e3a265e16eee03f59718b9b5d03019c07d8b6c51f90da3a666eec13ab35",
+                      "travelTime": "redacted-f838a9d8c17870219257ee29687a6ed6e1ef96309030202cc3a13f1916fc6410"
+                    }
+                  ],
+                  "duration": [
+                    "redacted-f838a9d8c17870219257ee29687a6ed6e1ef96309030202cc3a13f1916fc6410"
+                  ],
+                  "fareBasisCode": "K16BDRA",
+                  "flightNumber": "447",
+                  "from": "DAC",
+                  "fromAirport": "redacted-518aa796a67502c7d8f9e5f4432a713d316ae35bcc1fc520097cb5c7d18c4bed",
+                  "group": 1,
+                  "handBaggage": "7 Kg",
+                  "plane": [
+                    "redacted-7aa100afd001fc8211a0858bd0eb5a13a096809352da104d4c2dde3cccb8a293"
+                  ],
+                  "segmentCodeRef": "redacted-75698558a3e695e7ba85c7e0c47e374b756393f98212b3047797fb122396ae82",
+                  "serviceClass": "Economy",
+                  "techStops": [
+                    0
+                  ],
+                  "to": "SIN",
+                  "toAirport": "redacted-42b80d41ef8619836b170860e1e185182da6294604e96d87f17e9ee3b182e4ca"
+                }
+              ],
+              "stops": 0,
+              "to": "SIN",
+              "toAirport": "redacted-42b80d41ef8619836b170860e1e185182da6294604e96d87f17e9ee3b182e4ca",
+              "travelTime": "redacted-f838a9d8c17870219257ee29687a6ed6e1ef96309030202cc3a13f1916fc6410"
+            }
+          ],
+          [
+            {
+              "from": "SIN",
+              "fromAirport": "redacted-42b80d41ef8619836b170860e1e185182da6294604e96d87f17e9ee3b182e4ca",
+              "otherCarrierCodes": null,
+              "platingCarrierCode": "SQ",
+              "platingCarrierName": "redacted-78b93b74c069be0367371d3a650629569c91cda878b324d9579da038fba81f34",
+              "segments": [
+                {
+                  "airline": "redacted-78b93b74c069be0367371d3a650629569c91cda878b324d9579da038fba81f34",
+                  "airlineCode": "SQ",
+                  "arrival": "2026-10-06 22:40:00",
+                  "baggage": [
+                    {
+                      "amount": 25.0,
+                      "passengerTypeCode": "ADT",
+                      "units": "Kilograms"
+                    },
+                    {
+                      "amount": 25.0,
+                      "passengerTypeCode": "CHD",
+                      "units": "Kilograms"
+                    },
+                    {
+                      "amount": 0.0,
+                      "passengerTypeCode": "INF",
+                      "units": "Kilograms"
+                    }
+                  ],
+                  "bookingClass": "K",
+                  "bookingCount": null,
+                  "cabinClass": "Economy",
+                  "departure": "2026-10-06 20:40:00",
+                  "details": [
+                    {
+                      "arrival": "2026-10-06 22:40:00",
+                      "departure": "2026-10-06 20:40:00",
+                      "destination": "DAC",
+                      "destinationName": "redacted-518aa796a67502c7d8f9e5f4432a713d316ae35bcc1fc520097cb5c7d18c4bed",
+                      "destinationTerminal": "redacted-d4735e3a265e16eee03f59718b9b5d03019c07d8b6c51f90da3a666eec13ab35",
+                      "equipment": "redacted-7aa100afd001fc8211a0858bd0eb5a13a096809352da104d4c2dde3cccb8a293",
+                      "flightTime": "redacted-1002016fc2b19d4c908dcb18c9d3ccea1df7750be8066efba4306b4ca84f609f",
+                      "origin": "SIN",
+                      "originName": "redacted-42b80d41ef8619836b170860e1e185182da6294604e96d87f17e9ee3b182e4ca",
+                      "originTerminal": "redacted-d4735e3a265e16eee03f59718b9b5d03019c07d8b6c51f90da3a666eec13ab35",
+                      "travelTime": "redacted-1002016fc2b19d4c908dcb18c9d3ccea1df7750be8066efba4306b4ca84f609f"
+                    }
+                  ],
+                  "duration": [
+                    "redacted-1002016fc2b19d4c908dcb18c9d3ccea1df7750be8066efba4306b4ca84f609f"
+                  ],
+                  "fareBasisCode": "K16BDRA",
+                  "flightNumber": "446",
+                  "from": "SIN",
+                  "fromAirport": "redacted-42b80d41ef8619836b170860e1e185182da6294604e96d87f17e9ee3b182e4ca",
+                  "group": 2,
+                  "handBaggage": "7 Kg",
+                  "plane": [
+                    "redacted-7aa100afd001fc8211a0858bd0eb5a13a096809352da104d4c2dde3cccb8a293"
+                  ],
+                  "segmentCodeRef": "redacted-0e2dffab08c0d0680bec33c40ba5b3a4592f062aa2b6e3a21b749d7f0a3510e1",
+                  "serviceClass": "Economy",
+                  "techStops": [
+                    0
+                  ],
+                  "to": "DAC",
+                  "toAirport": "redacted-518aa796a67502c7d8f9e5f4432a713d316ae35bcc1fc520097cb5c7d18c4bed"
+                }
+              ],
+              "stops": 0,
+              "to": "DAC",
+              "toAirport": "redacted-518aa796a67502c7d8f9e5f4432a713d316ae35bcc1fc520097cb5c7d18c4bed",
+              "travelTime": "redacted-1002016fc2b19d4c908dcb18c9d3ccea1df7750be8066efba4306b4ca84f609f"
+            }
+          ]
+        ],
+        "eqivqlBasePrice": 115985.00,
+        "extraBaggageAllowedPTC": [],
+        "fareTag": "redacted-13c7ba03e309968bbe9f52854ca2160501508173bcd17991ad8ae7b3b198027c",
+        "hasExtraService": false,
+        "isCodeShared": false,
+        "isVisaRequired": false,
+        "itemCodeRef": "redacted-0391e40376aae02dacd84539b0eabe87b636cd9d7d68380e186bdbe92b1fde99",
+        "passengerCounts": {
+          "adt": 2,
+          "chd": 1,
+          "cnn": 0,
+          "inf": 1,
+          "ins": 0
+        },
+        "passengerFares": {
+          "adt": {
+            "ait": 0.0,
+            "basePrice": 40681.00,
+            "discountPrice": -2847.67,
+            "equivalentBasePrice": 40681.00,
+            "fareType": 1,
+            "serviceCharge": 0.0,
+            "taxCommissionBreakdowns": [],
+            "taxes": 16288.0,
+            "taxesBreakdown": [],
+            "totalPrice": 54121.33
+          },
+          "chd": {
+            "ait": 0.0,
+            "basePrice": 30542.00,
+            "discountPrice": -2137.94,
+            "equivalentBasePrice": 30542.00,
+            "fareType": 1,
+            "serviceCharge": 0.0,
+            "taxCommissionBreakdowns": [],
+            "taxes": 14288.0,
+            "taxesBreakdown": [],
+            "totalPrice": 42692.06
+          },
+          "cnn": null,
+          "inf": {
+            "ait": 0.0,
+            "basePrice": 4081.00,
+            "discountPrice": -285.67,
+            "equivalentBasePrice": 4081.00,
+            "fareType": 1,
+            "serviceCharge": 0.0,
+            "taxCommissionBreakdowns": [],
+            "taxes": 2846.0,
+            "taxesBreakdown": [],
+            "totalPrice": 6641.33
+          },
+          "ins": null
+        },
+        "platingCarrier": "SQ",
+        "platingCarrierName": "redacted-78b93b74c069be0367371d3a650629569c91cda878b324d9579da038fba81f34",
+        "previousTotalFare": 165695.0,
+        "rbdChangeAllowed": false,
+        "refundable": false,
+        "taxes": 49710.0,
+        "totalExtraServicePrice": 0.0,
+        "totalPrice": 157576.05,
+        "uniqueTransID": "redacted-f93c6226a1ddd1a2f9fa646ce91f8f49822430329146d66a8f9c5f5d873c0317"
+      },
+      {
+        "avlSrc": "redacted-73d501f6eb381c85b8150c2ebd46c0a7bf88e35d5fbfd26712a172558b17e5b0",
+        "basePrice": 147393.00,
+        "bookable": true,
+        "bookingComponents": [
+          {
+            "agentAdditionalPrice": 0.0,
+            "ait": 0.0,
+            "basePrice": 147393.00,
+            "discountPrice": -10317.51,
+            "fareReference": "redacted-12c984cb1372d0cd55cc80be0e5debaa6c330f9905f89535940de2ed9d22d930",
+            "taxes": 49710.0,
+            "totalExtraServicePrice": 0.0,
+            "totalPrice": 186785.49
+          }
+        ],
+        "brandedFares": null,
+        "commissionOnTaxes": [],
+        "directions": [
+          [
+            {
+              "from": "DAC",
+              "fromAirport": "redacted-518aa796a67502c7d8f9e5f4432a713d316ae35bcc1fc520097cb5c7d18c4bed",
+              "otherCarrierCodes": null,
+              "platingCarrierCode": "SQ",
+              "platingCarrierName": "redacted-78b93b74c069be0367371d3a650629569c91cda878b324d9579da038fba81f34",
+              "segments": [
+                {
+                  "airline": "redacted-78b93b74c069be0367371d3a650629569c91cda878b324d9579da038fba81f34",
+                  "airlineCode": "SQ",
+                  "arrival": "2026-09-30 06:00:00",
+                  "baggage": [
+                    {
+                      "amount": 25.0,
+                      "passengerTypeCode": "ADT",
+                      "units": "Kilograms"
+                    },
+                    {
+                      "amount": 25.0,
+                      "passengerTypeCode": "CHD",
+                      "units": "Kilograms"
+                    },
+                    {
+                      "amount": 0.0,
+                      "passengerTypeCode": "INF",
+                      "units": "Kilograms"
+                    }
+                  ],
+                  "bookingClass": "N",
+                  "bookingCount": null,
+                  "cabinClass": "Economy",
+                  "departure": "2026-09-29 23:55:00",
+                  "details": [
+                    {
+                      "arrival": "2026-09-30 06:00:00",
+                      "departure": "2026-09-29 23:55:00",
+                      "destination": "SIN",
+                      "destinationName": "redacted-42b80d41ef8619836b170860e1e185182da6294604e96d87f17e9ee3b182e4ca",
+                      "destinationTerminal": "redacted-5feceb66ffc86f38d952786c6d696c79c2dbc239dd4e91b46729d73a27fb57e9",
+                      "equipment": "redacted-7aa100afd001fc8211a0858bd0eb5a13a096809352da104d4c2dde3cccb8a293",
+                      "flightTime": "redacted-f838a9d8c17870219257ee29687a6ed6e1ef96309030202cc3a13f1916fc6410",
+                      "origin": "DAC",
+                      "originName": "redacted-518aa796a67502c7d8f9e5f4432a713d316ae35bcc1fc520097cb5c7d18c4bed",
+                      "originTerminal": "redacted-d4735e3a265e16eee03f59718b9b5d03019c07d8b6c51f90da3a666eec13ab35",
+                      "travelTime": "redacted-f838a9d8c17870219257ee29687a6ed6e1ef96309030202cc3a13f1916fc6410"
+                    }
+                  ],
+                  "duration": [
+                    "redacted-f838a9d8c17870219257ee29687a6ed6e1ef96309030202cc3a13f1916fc6410"
+                  ],
+                  "fareBasisCode": "N16BDRA",
+                  "flightNumber": "447",
+                  "from": "DAC",
+                  "fromAirport": "redacted-518aa796a67502c7d8f9e5f4432a713d316ae35bcc1fc520097cb5c7d18c4bed",
+                  "group": 1,
+                  "handBaggage": "7 Kg",
+                  "plane": [
+                    "redacted-7aa100afd001fc8211a0858bd0eb5a13a096809352da104d4c2dde3cccb8a293"
+                  ],
+                  "segmentCodeRef": "redacted-88db4f01b42751b2581cbb7d88d5f0adbd6747ee4eff322e41952bcfc881eeb3",
+                  "serviceClass": "Economy",
+                  "techStops": [
+                    0
+                  ],
+                  "to": "SIN",
+                  "toAirport": "redacted-42b80d41ef8619836b170860e1e185182da6294604e96d87f17e9ee3b182e4ca"
+                }
+              ],
+              "stops": 0,
+              "to": "SIN",
+              "toAirport": "redacted-42b80d41ef8619836b170860e1e185182da6294604e96d87f17e9ee3b182e4ca",
+              "travelTime": "redacted-f838a9d8c17870219257ee29687a6ed6e1ef96309030202cc3a13f1916fc6410"
+            }
+          ],
+          [
+            {
+              "from": "SIN",
+              "fromAirport": "redacted-42b80d41ef8619836b170860e1e185182da6294604e96d87f17e9ee3b182e4ca",
+              "otherCarrierCodes": null,
+              "platingCarrierCode": "SQ",
+              "platingCarrierName": "redacted-78b93b74c069be0367371d3a650629569c91cda878b324d9579da038fba81f34",
+              "segments": [
+                {
+                  "airline": "redacted-78b93b74c069be0367371d3a650629569c91cda878b324d9579da038fba81f34",
+                  "airlineCode": "SQ",
+                  "arrival": "2026-10-06 22:40:00",
+                  "baggage": [
+                    {
+                      "amount": 25.0,
+                      "passengerTypeCode": "ADT",
+                      "units": "Kilograms"
+                    },
+                    {
+                      "amount": 25.0,
+                      "passengerTypeCode": "CHD",
+                      "units": "Kilograms"
+                    },
+                    {
+                      "amount": 0.0,
+                      "passengerTypeCode": "INF",
+                      "units": "Kilograms"
+                    }
+                  ],
+                  "bookingClass": "K",
+                  "bookingCount": null,
+                  "cabinClass": "Economy",
+                  "departure": "2026-10-06 20:40:00",
+                  "details": [
+                    {
+                      "arrival": "2026-10-06 22:40:00",
+                      "departure": "2026-10-06 20:40:00",
+                      "destination": "DAC",
+                      "destinationName": "redacted-518aa796a67502c7d8f9e5f4432a713d316ae35bcc1fc520097cb5c7d18c4bed",
+                      "destinationTerminal": "redacted-d4735e3a265e16eee03f59718b9b5d03019c07d8b6c51f90da3a666eec13ab35",
+                      "equipment": "redacted-7aa100afd001fc8211a0858bd0eb5a13a096809352da104d4c2dde3cccb8a293",
+                      "flightTime": "redacted-1002016fc2b19d4c908dcb18c9d3ccea1df7750be8066efba4306b4ca84f609f",
+                      "origin": "SIN",
+                      "originName": "redacted-42b80d41ef8619836b170860e1e185182da6294604e96d87f17e9ee3b182e4ca",
+                      "originTerminal": "redacted-d4735e3a265e16eee03f59718b9b5d03019c07d8b6c51f90da3a666eec13ab35",
+                      "travelTime": "redacted-1002016fc2b19d4c908dcb18c9d3ccea1df7750be8066efba4306b4ca84f609f"
+                    }
+                  ],
+                  "duration": [
+                    "redacted-1002016fc2b19d4c908dcb18c9d3ccea1df7750be8066efba4306b4ca84f609f"
+                  ],
+                  "fareBasisCode": "K16BDRA",
+                  "flightNumber": "446",
+                  "from": "SIN",
+                  "fromAirport": "redacted-42b80d41ef8619836b170860e1e185182da6294604e96d87f17e9ee3b182e4ca",
+                  "group": 2,
+                  "handBaggage": "7 Kg",
+                  "plane": [
+                    "redacted-7aa100afd001fc8211a0858bd0eb5a13a096809352da104d4c2dde3cccb8a293"
+                  ],
+                  "segmentCodeRef": "redacted-1c7bcb988604052e831c5b7679d59dead2fcac5ea5a686da21b5db5f115d4af4",
+                  "serviceClass": "Economy",
+                  "techStops": [
+                    0
+                  ],
+                  "to": "DAC",
+                  "toAirport": "redacted-518aa796a67502c7d8f9e5f4432a713d316ae35bcc1fc520097cb5c7d18c4bed"
+                }
+              ],
+              "stops": 0,
+              "to": "DAC",
+              "toAirport": "redacted-518aa796a67502c7d8f9e5f4432a713d316ae35bcc1fc520097cb5c7d18c4bed",
+              "travelTime": "redacted-1002016fc2b19d4c908dcb18c9d3ccea1df7750be8066efba4306b4ca84f609f"
+            }
+          ]
+        ],
+        "eqivqlBasePrice": 147393.00,
+        "extraBaggageAllowedPTC": [],
+        "fareTag": "redacted-13c7ba03e309968bbe9f52854ca2160501508173bcd17991ad8ae7b3b198027c",
+        "hasExtraService": false,
+        "isCodeShared": false,
+        "isVisaRequired": false,
+        "itemCodeRef": "redacted-3f2fe26e1513f3be19526058cb2ee09aaed8aed016a7c0b9f32ca70aa3233a83",
+        "passengerCounts": {
+          "adt": 2,
+          "chd": 1,
+          "cnn": 0,
+          "inf": 1,
+          "ins": 0
+        },
+        "passengerFares": {
+          "adt": {
+            "ait": 0.0,
+            "basePrice": 51686.00,
+            "discountPrice": -3618.02,
+            "equivalentBasePrice": 51686.00,
+            "fareType": 1,
+            "serviceCharge": 0.0,
+            "taxCommissionBreakdowns": [],
+            "taxes": 16288.0,
+            "taxesBreakdown": [],
+            "totalPrice": 64355.98
+          },
+          "chd": {
+            "ait": 0.0,
+            "basePrice": 38827.00,
+            "discountPrice": -2717.89,
+            "equivalentBasePrice": 38827.00,
+            "fareType": 1,
+            "serviceCharge": 0.0,
+            "taxCommissionBreakdowns": [],
+            "taxes": 14288.0,
+            "taxesBreakdown": [],
+            "totalPrice": 50397.11
+          },
+          "cnn": null,
+          "inf": {
+            "ait": 0.0,
+            "basePrice": 5194.00,
+            "discountPrice": -363.58,
+            "equivalentBasePrice": 5194.00,
+            "fareType": 1,
+            "serviceCharge": 0.0,
+            "taxCommissionBreakdowns": [],
+            "taxes": 2846.0,
+            "taxesBreakdown": [],
+            "totalPrice": 7676.42
+          },
+          "ins": null
+        },
+        "platingCarrier": "SQ",
+        "platingCarrierName": "redacted-78b93b74c069be0367371d3a650629569c91cda878b324d9579da038fba81f34",
+        "previousTotalFare": 197103.0,
+        "rbdChangeAllowed": false,
+        "refundable": false,
+        "taxes": 49710.0,
+        "totalExtraServicePrice": 0.0,
+        "totalPrice": 186785.49,
+        "uniqueTransID": "redacted-f93c6226a1ddd1a2f9fa646ce91f8f49822430329146d66a8f9c5f5d873c0317"
+      },
+      {
+        "avlSrc": "redacted-73d501f6eb381c85b8150c2ebd46c0a7bf88e35d5fbfd26712a172558b17e5b0",
+        "basePrice": 164952.00,
+        "bookable": true,
+        "bookingComponents": [
+          {
+            "agentAdditionalPrice": 0.0,
+            "ait": 0.0,
+            "basePrice": 164952.00,
+            "discountPrice": -11546.64,
+            "fareReference": "redacted-12c984cb1372d0cd55cc80be0e5debaa6c330f9905f89535940de2ed9d22d930",
+            "taxes": 49710.0,
+            "totalExtraServicePrice": 0.0,
+            "totalPrice": 203115.36
+          }
+        ],
+        "brandedFares": null,
+        "commissionOnTaxes": [],
+        "directions": [
+          [
+            {
+              "from": "DAC",
+              "fromAirport": "redacted-518aa796a67502c7d8f9e5f4432a713d316ae35bcc1fc520097cb5c7d18c4bed",
+              "otherCarrierCodes": null,
+              "platingCarrierCode": "SQ",
+              "platingCarrierName": "redacted-78b93b74c069be0367371d3a650629569c91cda878b324d9579da038fba81f34",
+              "segments": [
+                {
+                  "airline": "redacted-78b93b74c069be0367371d3a650629569c91cda878b324d9579da038fba81f34",
+                  "airlineCode": "SQ",
+                  "arrival": "2026-09-30 06:00:00",
+                  "baggage": [
+                    {
+                      "amount": 25.0,
+                      "passengerTypeCode": "ADT",
+                      "units": "Kilograms"
+                    },
+                    {
+                      "amount": 25.0,
+                      "passengerTypeCode": "CHD",
+                      "units": "Kilograms"
+                    },
+                    {
+                      "amount": 0.0,
+                      "passengerTypeCode": "INF",
+                      "units": "Kilograms"
+                    }
+                  ],
+                  "bookingClass": "N",
+                  "bookingCount": null,
+                  "cabinClass": "Economy",
+                  "departure": "2026-09-29 23:55:00",
+                  "details": [
+                    {
+                      "arrival": "2026-09-30 06:00:00",
+                      "departure": "2026-09-29 23:55:00",
+                      "destination": "SIN",
+                      "destinationName": "redacted-42b80d41ef8619836b170860e1e185182da6294604e96d87f17e9ee3b182e4ca",
+                      "destinationTerminal": "redacted-5feceb66ffc86f38d952786c6d696c79c2dbc239dd4e91b46729d73a27fb57e9",
+                      "equipment": "redacted-7aa100afd001fc8211a0858bd0eb5a13a096809352da104d4c2dde3cccb8a293",
+                      "flightTime": "redacted-f838a9d8c17870219257ee29687a6ed6e1ef96309030202cc3a13f1916fc6410",
+                      "origin": "DAC",
+                      "originName": "redacted-518aa796a67502c7d8f9e5f4432a713d316ae35bcc1fc520097cb5c7d18c4bed",
+                      "originTerminal": "redacted-d4735e3a265e16eee03f59718b9b5d03019c07d8b6c51f90da3a666eec13ab35",
+                      "travelTime": "redacted-f838a9d8c17870219257ee29687a6ed6e1ef96309030202cc3a13f1916fc6410"
+                    }
+                  ],
+                  "duration": [
+                    "redacted-f838a9d8c17870219257ee29687a6ed6e1ef96309030202cc3a13f1916fc6410"
+                  ],
+                  "fareBasisCode": "N16BDRA",
+                  "flightNumber": "447",
+                  "from": "DAC",
+                  "fromAirport": "redacted-518aa796a67502c7d8f9e5f4432a713d316ae35bcc1fc520097cb5c7d18c4bed",
+                  "group": 1,
+                  "handBaggage": "7 Kg",
+                  "plane": [
+                    "redacted-7aa100afd001fc8211a0858bd0eb5a13a096809352da104d4c2dde3cccb8a293"
+                  ],
+                  "segmentCodeRef": "redacted-d9a3e44c70dc27e80391b25e4f45f1ddec9347b976fc88aceed7ff0e8289b991",
+                  "serviceClass": "Economy",
+                  "techStops": [
+                    0
+                  ],
+                  "to": "SIN",
+                  "toAirport": "redacted-42b80d41ef8619836b170860e1e185182da6294604e96d87f17e9ee3b182e4ca"
+                }
+              ],
+              "stops": 0,
+              "to": "SIN",
+              "toAirport": "redacted-42b80d41ef8619836b170860e1e185182da6294604e96d87f17e9ee3b182e4ca",
+              "travelTime": "redacted-f838a9d8c17870219257ee29687a6ed6e1ef96309030202cc3a13f1916fc6410"
+            }
+          ],
+          [
+            {
+              "from": "SIN",
+              "fromAirport": "redacted-42b80d41ef8619836b170860e1e185182da6294604e96d87f17e9ee3b182e4ca",
+              "otherCarrierCodes": null,
+              "platingCarrierCode": "SQ",
+              "platingCarrierName": "redacted-78b93b74c069be0367371d3a650629569c91cda878b324d9579da038fba81f34",
+              "segments": [
+                {
+                  "airline": "redacted-78b93b74c069be0367371d3a650629569c91cda878b324d9579da038fba81f34",
+                  "airlineCode": "SQ",
+                  "arrival": "2026-10-06 22:40:00",
+                  "baggage": [
+                    {
+                      "amount": 25.0,
+                      "passengerTypeCode": "ADT",
+                      "units": "Kilograms"
+                    },
+                    {
+                      "amount": 25.0,
+                      "passengerTypeCode": "CHD",
+                      "units": "Kilograms"
+                    },
+                    {
+                      "amount": 0.0,
+                      "passengerTypeCode": "INF",
+                      "units": "Kilograms"
+                    }
+                  ],
+                  "bookingClass": "N",
+                  "bookingCount": null,
+                  "cabinClass": "Economy",
+                  "departure": "2026-10-06 20:40:00",
+                  "details": [
+                    {
+                      "arrival": "2026-10-06 22:40:00",
+                      "departure": "2026-10-06 20:40:00",
+                      "destination": "DAC",
+                      "destinationName": "redacted-518aa796a67502c7d8f9e5f4432a713d316ae35bcc1fc520097cb5c7d18c4bed",
+                      "destinationTerminal": "redacted-d4735e3a265e16eee03f59718b9b5d03019c07d8b6c51f90da3a666eec13ab35",
+                      "equipment": "redacted-7aa100afd001fc8211a0858bd0eb5a13a096809352da104d4c2dde3cccb8a293",
+                      "flightTime": "redacted-1002016fc2b19d4c908dcb18c9d3ccea1df7750be8066efba4306b4ca84f609f",
+                      "origin": "SIN",
+                      "originName": "redacted-42b80d41ef8619836b170860e1e185182da6294604e96d87f17e9ee3b182e4ca",
+                      "originTerminal": "redacted-d4735e3a265e16eee03f59718b9b5d03019c07d8b6c51f90da3a666eec13ab35",
+                      "travelTime": "redacted-1002016fc2b19d4c908dcb18c9d3ccea1df7750be8066efba4306b4ca84f609f"
+                    }
+                  ],
+                  "duration": [
+                    "redacted-1002016fc2b19d4c908dcb18c9d3ccea1df7750be8066efba4306b4ca84f609f"
+                  ],
+                  "fareBasisCode": "N16BDRA",
+                  "flightNumber": "446",
+                  "from": "SIN",
+                  "fromAirport": "redacted-42b80d41ef8619836b170860e1e185182da6294604e96d87f17e9ee3b182e4ca",
+                  "group": 2,
+                  "handBaggage": "7 Kg",
+                  "plane": [
+                    "redacted-7aa100afd001fc8211a0858bd0eb5a13a096809352da104d4c2dde3cccb8a293"
+                  ],
+                  "segmentCodeRef": "redacted-088b3e703193baddaf277b5f94b2731768a48eaf2323f2c77fef869fc09fba7f",
+                  "serviceClass": "Economy",
+                  "techStops": [
+                    0
+                  ],
+                  "to": "DAC",
+                  "toAirport": "redacted-518aa796a67502c7d8f9e5f4432a713d316ae35bcc1fc520097cb5c7d18c4bed"
+                }
+              ],
+              "stops": 0,
+              "to": "DAC",
+              "toAirport": "redacted-518aa796a67502c7d8f9e5f4432a713d316ae35bcc1fc520097cb5c7d18c4bed",
+              "travelTime": "redacted-1002016fc2b19d4c908dcb18c9d3ccea1df7750be8066efba4306b4ca84f609f"
+            }
+          ]
+        ],
+        "eqivqlBasePrice": 164952.00,
+        "extraBaggageAllowedPTC": [],
+        "fareTag": "redacted-13c7ba03e309968bbe9f52854ca2160501508173bcd17991ad8ae7b3b198027c",
+        "hasExtraService": false,
+        "isCodeShared": false,
+        "isVisaRequired": false,
+        "itemCodeRef": "redacted-2a42e2dff9569b29c87d18b468760113c38bda50857a97c806280291eafcf196",
+        "passengerCounts": {
+          "adt": 2,
+          "chd": 1,
+          "cnn": 0,
+          "inf": 1,
+          "ins": 0
+        },
+        "passengerFares": {
+          "adt": {
+            "ait": 0.0,
+            "basePrice": 57869.00,
+            "discountPrice": -4050.83,
+            "equivalentBasePrice": 57869.00,
+            "fareType": 1,
+            "serviceCharge": 0.0,
+            "taxCommissionBreakdowns": [],
+            "taxes": 16288.0,
+            "taxesBreakdown": [],
+            "totalPrice": 70106.17
+          },
+          "chd": {
+            "ait": 0.0,
+            "basePrice": 43402.00,
+            "discountPrice": -3038.14,
+            "equivalentBasePrice": 43402.00,
+            "fareType": 1,
+            "serviceCharge": 0.0,
+            "taxCommissionBreakdowns": [],
+            "taxes": 14288.0,
+            "taxesBreakdown": [],
+            "totalPrice": 54651.86
+          },
+          "cnn": null,
+          "inf": {
+            "ait": 0.0,
+            "basePrice": 5812.00,
+            "discountPrice": -406.84,
+            "equivalentBasePrice": 5812.00,
+            "fareType": 1,
+            "serviceCharge": 0.0,
+            "taxCommissionBreakdowns": [],
+            "taxes": 2846.0,
+            "taxesBreakdown": [],
+            "totalPrice": 8251.16
+          },
+          "ins": null
+        },
+        "platingCarrier": "SQ",
+        "platingCarrierName": "redacted-78b93b74c069be0367371d3a650629569c91cda878b324d9579da038fba81f34",
+        "previousTotalFare": 214662.0,
+        "rbdChangeAllowed": false,
+        "refundable": true,
+        "taxes": 49710.0,
+        "totalExtraServicePrice": 0.0,
+        "totalPrice": 203115.36,
+        "uniqueTransID": "redacted-f93c6226a1ddd1a2f9fa646ce91f8f49822430329146d66a8f9c5f5d873c0317"
+      }
+    ],
+    "airlineFilters": [
+      {
+        "airlineCode": "SQ",
+        "airlineName": "redacted-78b93b74c069be0367371d3a650629569c91cda878b324d9579da038fba81f34",
+        "minNetPrice": 157576.05,
+        "minNetPriceAit": 0.0,
+        "minPrice": 165695.00,
+        "totalFlights": 7
+      }
+    ],
+    "currency": null,
+    "minMaxPrice": {
+      "maxNetPrice": 359884.40,
+      "maxNetPriceAit": 0.0,
+      "maxPrice": 383195.00,
+      "minNetPrice": 157576.05,
+      "minNetPriceAit": 0.0,
+      "minPrice": 165695.00
+    },
+    "searchPaginationKey": null,
+    "searchRequestTime": "redacted-1513ea25a7ec1855a737a02418e171dc1741afe7322be7b7384d8f8efb8f60f0",
+    "stops": [
+      0
+    ],
+    "supplierCount": 0,
+    "totalFlights": 7,
+    "totalPages": null
+  },
+  "item2": [
+    {
+      "apiRef": 18,
+      "conversionTime": "redacted-530057433dd7d1ea08b65f323556d81df613e1b3929cb6e7118ed17843e9612b",
+      "isMessageShow": false,
+      "isSuccess": true,
+      "message": null,
+      "requestTime": "redacted-7a64006c0b00624ddba98630ff7e0facc78572c2688e0f7fefab46ee89e6953f",
+      "responseTime": "redacted-530057433dd7d1ea08b65f323556d81df613e1b3929cb6e7118ed17843e9612b",
+      "ticketType": null,
+      "timeTicks": 639244478877513735,
+      "uniqueTransID": "redacted-f93c6226a1ddd1a2f9fa646ce91f8f49822430329146d66a8f9c5f5d873c0317"
+    },
+    {
+      "apiRef": 29,
+      "conversionTime": "redacted-530057433dd7d1ea08b65f323556d81df613e1b3929cb6e7118ed17843e9612b",
+      "isMessageShow": false,
+      "isSuccess": true,
+      "message": null,
+      "requestTime": "redacted-7a64006c0b00624ddba98630ff7e0facc78572c2688e0f7fefab46ee89e6953f",
+      "responseTime": "redacted-530057433dd7d1ea08b65f323556d81df613e1b3929cb6e7118ed17843e9612b",
+      "ticketType": null,
+      "timeTicks": 639244478877555962,
+      "uniqueTransID": "redacted-f93c6226a1ddd1a2f9fa646ce91f8f49822430329146d66a8f9c5f5d873c0317"
+    }
+  ]
+}

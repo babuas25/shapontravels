@@ -1,0 +1,32 @@
+{
+  "item1": {
+    "fareRuleDetails": [
+      {
+        "fareRuleDetail": "redacted-336d91bfce1a434b88709dff3de5f8e3248a29a116538541c2a363f6629bfad4",
+        "type": "redacted-3c40c71550ebaa4a074970cab1c79fdc6069ddd5c55bf6cd5cedbc6533e6e8c5"
+      },
+      {
+        "fareRuleDetail": "redacted-45c679c6eb4d5f81ef6d54d5b6bec82322dc592d080b20df132ded911434987f",
+        "type": "redacted-2ac5122804e6d8a9473d706f1d986e940e410f08cfa794a281227221bd56dcde"
+      },
+      {
+        "fareRuleDetail": "redacted-f2f5a3ab718992d63c1c81f9aca4b8d2fd7da648c27fd5b54e63a5201e0a5d94",
+        "type": "redacted-6631b4b2e1f724b93615ef31f95b5fd5b5389f5b7d810c6400733dc27656e2f8"
+      }
+    ],
+    "itemCodeRef": "redacted-3f49004e9c8240d4cda1df11e51c978afcfdb314ab4c9b216526f7fba2cc795b",
+    "uniqueTransID": "redacted-ba279e446bbde00c1407a17a7c82275d838d0369e427521450e949eb60ff20bc"
+  },
+  "item2": {
+    "apiRef": 1,
+    "conversionTime": "redacted-01eae0fecb78606e37828ebc210c0a56cbb4be58fe216465deec594dc2caf7c8",
+    "isMessageShow": false,
+    "isSuccess": true,
+    "message": null,
+    "requestTime": "redacted-4da37baa56b9ecd7ba953825437a61d8f75757d6015ace8fc800fad89249269c",
+    "responseTime": "redacted-01eae0fecb78606e37828ebc210c0a56cbb4be58fe216465deec594dc2caf7c8",
+    "ticketType": null,
+    "timeTicks": 639244693630699731,
+    "uniqueTransID": "redacted-ba279e446bbde00c1407a17a7c82275d838d0369e427521450e949eb60ff20bc"
+  }
+}
