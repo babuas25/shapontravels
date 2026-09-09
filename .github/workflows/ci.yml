@@ -1,27 +1,98 @@
-name: Backend checks
-on: [push, pull_request]
+name: CI and VPS deployment
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+permissions:
+  contents: read
+# Never cancel a running migration.
+concurrency:
+  group: pipeline-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: false
+defaults:
+  run:
+    shell: bash
 jobs:
   check:
-    runs-on: ubuntu-latest
+    name: Rust and PostgreSQL checks
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
     services:
       postgres:
-        image: postgres:18.3
+        image: postgres:18
         env:
           POSTGRES_USER: test
           POSTGRES_PASSWORD: test
           POSTGRES_DB: shapontravels_test
         ports: ['5432:5432']
         options: >-
-          --health-cmd pg_isready --health-interval 5s
-          --health-timeout 5s --health-retries 10
+          --health-cmd "pg_isready -U test -d shapontravels_test"
+          --health-interval 5s --health-timeout 5s --health-retries 10
     steps:
-      - uses: actions/checkout@v4
-      - uses: dtolnay/rust-toolchain@1.98.1
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
         with:
-          components: rustfmt, clippy
+          persist-credentials: false
+      - name: Install repository Rust toolchain
+        run: rustup show
       - run: cargo fmt --check
       - run: cargo clippy --locked --all-targets -- -D warnings
       - run: cargo test --locked
-      - run: cargo test --locked --test database -- --ignored
+      - name: Disposable database integration tests
+        run: cargo test --locked --test database -- --ignored
         env:
           TEST_DATABASE_URL: postgres://test:test@localhost:5432/shapontravels_test
+      - name: Deployment script checks
+        run: |
+          bash -n scripts/deploy/activate.sh
+          bash -n scripts/deploy/send.sh
+          python3 scripts/deploy/test_activate.py
+  build:
+    name: Build Ubuntu 24.04 release
+    needs: check
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
+      - run: rustup show
+      - run: cargo build --release --locked --bin shapontravels-api
+      - name: Package binary with checksum
+        run: |
+          mkdir -p dist
+          cp target/release/shapontravels-api dist/
+          cd dist
+          sha256sum shapontravels-api > SHA256SUMS
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: shapontravels-${{ github.sha }}
+          path: dist/
+          if-no-files-found: error
+          retention-days: 7
+  deploy:
+    name: Deploy to Bengal Cloud
+    needs: build
+    if: >-
+      github.ref == 'refs/heads/main' &&
+      github.event_name != 'pull_request' &&
+      vars.VPS_DEPLOY_ENABLED == 'true'
+    environment: production
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
+        with:
+          name: shapontravels-${{ github.sha }}
+          path: dist
+      - name: Upload and activate tested release
+        env:
+          VPS_HOST: ${{ vars.VPS_HOST }}
+          VPS_PORT: ${{ vars.VPS_PORT }}
+          VPS_SSH_PRIVATE_KEY: ${{ secrets.VPS_SSH_PRIVATE_KEY }}
+          VPS_KNOWN_HOSTS: ${{ secrets.VPS_KNOWN_HOSTS }}
+          DEPLOY_SHA: ${{ github.sha }}
+        run: bash scripts/deploy/send.sh

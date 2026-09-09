@@ -34,7 +34,11 @@ async fn investigate(config: shapontravels_api::config::SupplierConfig) {
     let id = config.id;
     let adapter = SupplierAdapter::new(config, Duration::from_secs(120))
         .unwrap_or_else(|_| panic!("invalid supplier configuration"));
-    let cases = vec![("roundtrip", false), ("roundtripcnn", true), ("onewaycnn", true)];
+    let cases = vec![
+        ("roundtrip", false),
+        ("roundtripcnn", true),
+        ("onewaycnn", true),
+    ];
     for (trip, cnn) in cases {
         let mut routes =
             vec![json!({"origin":"DAC","destination":"SIN","departureDate":"2026-11-01"})];

@@ -2,10 +2,7 @@
 //! No NewTicket/Cancel and no Book retry. Separate preparation and dispatch phases.
 use bigdecimal::BigDecimal;
 use serde_json::{Value, json};
-use shapontravels_api::{
-    config::Config,
-    supplier::SupplierAdapter,
-};
+use shapontravels_api::{config::Config, supplier::SupplierAdapter};
 use std::{io::Write, time::Duration};
 const DIR: &str = ".local/evidence/tk-cnn-prebook-20260908";
 fn save(name: &str, v: &Value) {
@@ -96,7 +93,10 @@ async fn main() {
     assert_eq!(number(&fare["totalPrice"]), Some(BigDecimal::from(268772)));
     assert_eq!(tax(fare), Some(BigDecimal::from(104958)));
     assert_eq!(number(&fare["taxes"]), Some(BigDecimal::from(53979)));
-    assert_eq!(number(&fare["bookingComponents"][0]["taxes"]), Some(BigDecimal::from(53979)));
+    assert_eq!(
+        number(&fare["bookingComponents"][0]["taxes"]),
+        Some(BigDecimal::from(53979))
+    );
     assert_eq!(selected["platingCarrier"], "TK");
     let passengers = load("passengers");
     assert_eq!(passengers.as_array().unwrap().len(), 2);

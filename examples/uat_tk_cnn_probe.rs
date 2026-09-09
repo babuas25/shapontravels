@@ -31,8 +31,14 @@ fn bad_tax(offer: &Value) -> bool {
     number(&offer["bookingComponents"][0]["taxes"]) != total
 }
 async fn investigate(config: shapontravels_api::config::SupplierConfig) {
-    assert_eq!(config.search_base_url.as_ref().and_then(|u|u.host_str()), Some("searchapi-uat.triplover.com"));
-    assert_eq!(config.base_url.as_ref().and_then(|u|u.host_str()), Some("userapi-uat.triplover.com"));
+    assert_eq!(
+        config.search_base_url.as_ref().and_then(|u| u.host_str()),
+        Some("searchapi-uat.triplover.com")
+    );
+    assert_eq!(
+        config.base_url.as_ref().and_then(|u| u.host_str()),
+        Some("userapi-uat.triplover.com")
+    );
     assert_eq!(config.email.as_deref(), Some("testapi@mail.com"));
     let id = config.id;
     let adapter = SupplierAdapter::new(config, Duration::from_secs(120))

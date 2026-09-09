@@ -90,8 +90,14 @@ async fn main() {
         .into_iter()
         .find(|s| s.id == "triplover")
         .unwrap();
-    assert_eq!(config.search_base_url.as_ref().and_then(|u|u.host_str()), Some("searchapi-uat.triplover.com"));
-    assert_eq!(config.base_url.as_ref().and_then(|u|u.host_str()), Some("userapi-uat.triplover.com"));
+    assert_eq!(
+        config.search_base_url.as_ref().and_then(|u| u.host_str()),
+        Some("searchapi-uat.triplover.com")
+    );
+    assert_eq!(
+        config.base_url.as_ref().and_then(|u| u.host_str()),
+        Some("userapi-uat.triplover.com")
+    );
     assert_eq!(config.email.as_deref(), Some("testapi@mail.com"));
     let adapter = SupplierAdapter::new(config, Duration::from_secs(120))
         .unwrap_or_else(|_| panic!("invalid supplier configuration"));

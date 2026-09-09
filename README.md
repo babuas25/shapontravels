@@ -65,3 +65,7 @@ See [Swagger walkthrough and API contract](docs/MARKUP_API.md). Create a draft, 
 ## Initial public Search
 
 `POST /api/Search` and `POST /api/FareRules` now use machine tokens. [Setup, examples and initial-release limits](docs/SEARCH_API.md). Activate your own markup rule and selected supplier Search controls before testing. Complex fares, complete lowest-fare deduplication and booking/ticket workflows are not finished.
+
+## Deployment
+
+[Ubuntu 24.04 server setup](docs/SERVER_SETUP.md) and [GitHub Actions CI/CD](docs/CI_CD.md). Pushes to main and pull requests run checks and a Linux release build. VPS deployment starts only after server prerequisites and the `VPS_DEPLOY_ENABLED` repository variable are configured.

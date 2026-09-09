@@ -8,6 +8,10 @@
 
 `api.example.com` যেখানে আছে নিজের API domain বসাবে। Password বা `.env` কখনো Git-এ বা চ্যাটে দেবে না। নিচের অধিকাংশ কমান্ড **VPS-এর root terminal-এ**; Mac ও অন্য user-এর কমান্ড আলাদাভাবে চিহ্নিত।
 
+## GitHub Actions দিয়ে deployment
+
+স্বয়ংক্রিয় CI/CD ব্যবহার করলে [CI_CD.md](CI_CD.md) অনুসরণ করো। সে ক্ষেত্রে GitHub runner binary build করবে; এই গাইডের manual VPS build/pull ধাপ প্রয়োজন নেই। Database, users, runtime configuration, systemd, Nginx, HTTPS ও backup সেটআপ এখানকার নির্দেশনা অনুযায়ী হবে।
+
 ## 1. Ubuntu ও firewall
 
 VPS-এ:
