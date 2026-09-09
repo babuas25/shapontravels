@@ -144,7 +144,90 @@ GitHub-এর secret field-এ paste করো। চ্যাটে বা repo
 
 যারা main-এ push করতে পারে তারা deployment চালাতে পারে। Repository branch protection-এ PR ও checks বাধ্যতামূলক করা ভালো। Automatic deployment চাইলে আলাদা required-reviewer gate প্রয়োজন নেই।
 
+### 3.1 পরে secrets কোথায় পাবো?
+
+GitHub-এর [Actions secrets settings](https://github.com/babuas25/shapontravels/settings/secrets/actions)-এ secret-এর **নাম** দেখা যাবে। Save করার পরে settings page বা secrets API দিয়ে পুরোনো **value দেখা বা কপি করা যায় না**; নতুন value দিয়ে update অথবা secret delete করা যায়। Workflow প্রয়োজনমতো value ব্যবহার করতে পারে, কিন্তু value উদ্ধারের জন্য workflow log-এ print করবে না।
+
+| কী দরকার | আসল value কোথায় আছে | কোথায় ব্যবহার হবে |
+| --- | --- | --- |
+| `VPS_SSH_PRIVATE_KEY` | Mac: `/Users/ashifbabu/.ssh/shapontravels_actions` | GitHub Actions secret |
+| Actions-এর public key | Mac: `/Users/ashifbabu/.ssh/shapontravels_actions.pub` | VPS: `/home/deploy/.ssh/authorized_keys` |
+| `VPS_KNOWN_HOSTS` | VPS-এর `/etc/ssh/ssh_host_ed25519_key.pub`-এর public key-এর আগে IP/hostname যোগ করে | GitHub Actions secret |
+| `VPS_HOST`, `VPS_PORT`, `VPS_DEPLOY_ENABLED` | GitHub Actions settings-এর **Variables** tab | এগুলোর value পরে দেখা ও edit করা যায় |
+
+Private key ও public key দুটি আলাদা file। `.pub`-এর content `VPS_SSH_PRIVATE_KEY`-তে বসাবে না। VPS host key-ও Actions-এর নিজের public key থেকে আলাদা।
+
+### 3.2 Private key-এর কতটুকু কপি করব?
+
+Key তৈরি হওয়ার পরে Terminal-এ দেখা `SHA256:...` fingerprint এবং আঁকা randomart box কপি করতে হবে না। **Mac Terminal-এ** এই command চালালেই পুরো private key clipboard-এ যাবে:
+
+```bash
+pbcopy < ~/.ssh/shapontravels_actions
+```
+
+কমান্ড সফল হলেও Terminal-এ কোনো text দেখাবে না—এটা স্বাভাবিক। GitHub-এর `VPS_SSH_PRIVATE_KEY` secret-এর Value/Secret ঘরে **⌘V** দাও। এতে `BEGIN OPENSSH PRIVATE KEY` থেকে `END OPENSSH PRIVATE KEY` পর্যন্ত সম্পূর্ণ content ও line breaks থাকবে। File path, fingerprint বা শুধু মাঝখানের অংশ paste করবে না।
+
+নতুন secret হলে **New repository secret → Name → Secret → Add secret**। আগে থাকলে ওই নামের পাশের **Edit/Update** control দিয়ে পুরো নতুন value paste করে save করো। Save করার পরে ফাঁকা value field দেখা মানে পুরোনো value মুছে গেছে নয়; GitHub সেটি দেখায় না।
+
+### 3.3 Known hosts-এ IP-সহ কপি করব?
+
+**হ্যাঁ, IP-সহ পুরো এক line।** ইতিমধ্যে যাচাই করা SSH connection বা Bengal Cloud console দিয়ে **VPS root terminal-এ** নিচের দুই command চালাও:
+
+```bash
+printf '160.25.226.72 '
+cat /etc/ssh/ssh_host_ed25519_key.pub
+```
+
+Output-এর গঠন এমন হবে। এটি শুধু নমুনা; `...`-সহ এই নমুনা paste করা যাবে না:
+
+```text
+160.25.226.72 ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAI... root@sendbox
+```
+
+আসল output-এর শুরুতে `160.25.226.72`, তারপর `ssh-ed25519`, তারপর সম্পূর্ণ key এবং শেষে comment থাকলে সেটিও কপি করতে পারো। Terminal prompt `root@sendbox:~#` বা চালানো command কপি করবে না। Comment ঐচ্ছিক, কিন্তু IP/hostname, key type এবং সম্পূর্ণ key জরুরি। Terminal-এ line visually wrap হলেও সেটি একটি line হিসেবেই paste করবে।
+
+GitHub secret-এর Name হবে `VPS_KNOWN_HOSTS`; Value হবে ওই পুরো line। এই গাইডে SSH port 22 ধরা হয়েছে। Custom port হলে section 2-এর `[IP]:PORT` format ব্যবহার করো।
+
+### 3.4 Backup ও key হারিয়ে গেলে
+
+Private key-এর copy password manager-এর secure attachment/note বা encrypted backup-এ রাখো। কোন repository, VPS ও user-এর জন্য key, সেটিও লিখে রাখো। Repository folder, plain-text shared document বা চ্যাটে private key রাখবে না।
+
+Mac-এর file হারালে:
+
+1. Encrypted backup থেকে private key restore করতে পারলে একই key ব্যবহার করা যাবে। File permission `600` রাখবে।
+2. Backup না থাকলে GitHub-এর settings থেকে পুরোনো value উদ্ধার করা যাবে না। **নতুন key pair** তৈরি করতে হবে। পুরোনো file থাকলে overwrite এড়াতে আলাদা নাম ব্যবহার করো:
+
+```bash
+ssh-keygen -t ed25519 -C "github-actions-shapontravels-replacement" -f ~/.ssh/shapontravels_actions_replacement
+```
+
+3. Section 2 অনুযায়ী নতুন `.pub` file VPS-এর `deploy` user-এর `authorized_keys`-এ যোগ করো। নতুন private key দিয়ে `VPS_SSH_PRIVATE_KEY` update করো:
+
+```bash
+pbcopy < ~/.ssh/shapontravels_actions_replacement
+```
+
+4. নতুন key দিয়ে SSH authentication এবং deployment যাচাই করো। এরপর `authorized_keys` থেকে শুধু পুরোনো Actions key-এর line সরাও; পুরো file বা অন্য login keys মুছবে না।
+5. নতুন private key-এর encrypted backup রাখো। পুরোনো key leak হয়ে থাকলে আগে সেটির access revoke করো; নতুন deployment প্রস্তুতির জন্য compromised key active রেখো না।
+
+### 3.5 কখন কোন value বদলাবে?
+
+- **প্রতিবার deployment-এ:** secrets বদলানোর প্রয়োজন নেই।
+- **Actions SSH key rotate করলে:** VPS-এর authorized public key ও GitHub-এর `VPS_SSH_PRIVATE_KEY` দুটোই update হবে। এতে VPS-এর host key বদলায় না।
+- **VPS reinstall/host key বদলালে:** provider console থেকে নতুন host key যাচাই করে `VPS_KNOWN_HOSTS` update করো। শুধু error সরাতে host verification বন্ধ করবে না।
+- **VPS IP বা SSH port বদলালে:** `VPS_HOST`/`VPS_PORT` এবং `VPS_KNOWN_HOSTS`-এর address অংশ update করো; নতুন server হলে host key-ও যাচাই করো।
+
+Secret update-এর পরে নতুন workflow run শুরু করো। Repository secrets run queue হওয়ার সময় পড়া হয়; আগে থেকে queued/running run-এ নতুন value সঙ্গে সঙ্গে পৌঁছাবে ধরে নেবে না।
+
 ## 4. প্রথম deployment
+
+শুধু GitHub-এ secrets save হলেই VPS ready হয় না। `VPS_DEPLOY_ENABLED=true` করার আগে নিশ্চিত করো:
+
+- [ ] PostgreSQL 18, database, `shapon_migrator` ও `shapon_app` roles তৈরি।
+- [ ] Linux users ও directories তৈরি এবং `deploy` user-এর authorized public key যোগ।
+- [ ] Runtime `.env` এবং root-only `migration-database-url`-এ সঠিক credentials আছে।
+- [ ] systemd unit, backup helper, deployment helper ও sudo rule install/validate করা হয়েছে।
+- [ ] GitHub-এর দুটি secrets এবং host/port variables সেট করা হয়েছে।
 
 1. Server prerequisites, SSH key ও GitHub settings শেষ করো।
 2. `VPS_DEPLOY_ENABLED` repository variable `true` করো।
@@ -201,5 +284,8 @@ Deployment helper বদলালে reviewed নতুন `activate.sh` আব�
 
 ## References
 
+- [GitHub Actions secrets তৈরি ও ব্যবহার](https://docs.github.com/en/actions/how-tos/write-workflows/choose-what-workflows-do/use-secrets)
+- [Secrets API: metadata ও value update](https://docs.github.com/en/rest/actions/secrets)
+- [কখন workflow secrets পড়ে](https://docs.github.com/en/actions/reference/security/secrets)
 - [GitHub deployments and concurrency](https://docs.github.com/en/actions/how-tos/deploy/configure-and-manage-deployments/control-deployments)
 - [GitHub workflow artifacts](https://docs.github.com/en/enterprise-cloud%40latest/actions/tutorials/store-and-share-data)
