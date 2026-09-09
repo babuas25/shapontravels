@@ -30,7 +30,7 @@ jobs:
           --health-cmd "pg_isready -U test -d shapontravels_test"
           --health-interval 5s --health-timeout 5s --health-retries 10
     steps:
-      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5 (Node.js 24)
         with:
           persist-credentials: false
       - name: Install repository Rust toolchain
@@ -53,7 +53,7 @@ jobs:
     runs-on: ubuntu-24.04
     timeout-minutes: 30
     steps:
-      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5 (Node.js 24)
         with:
           persist-credentials: false
       - run: rustup show
@@ -64,7 +64,7 @@ jobs:
           cp target/release/shapontravels-api dist/
           cd dist
           sha256sum shapontravels-api > SHA256SUMS
-      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+      - uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6 (Node.js 24)
         with:
           name: shapontravels-${{ github.sha }}
           path: dist/
@@ -81,10 +81,10 @@ jobs:
     runs-on: ubuntu-24.04
     timeout-minutes: 15
     steps:
-      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5 (Node.js 24)
         with:
           persist-credentials: false
-      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
+      - uses: actions/download-artifact@37930b1c2abaa49bbe596cd826c3c89aef350131 # v7 (Node.js 24)
         with:
           name: shapontravels-${{ github.sha }}
           path: dist
