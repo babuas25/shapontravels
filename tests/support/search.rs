@@ -22,6 +22,7 @@ struct Mock {
     calls: AtomicUsize,
     fail: AtomicBool,
     payloads: Mutex<Vec<Value>>,
+    response: Mutex<Value>,
 }
 impl ReadSupplier for Mock {
     fn read<'a>(
@@ -36,10 +37,7 @@ impl ReadSupplier for Mock {
                 return Err(SupplierError::Transport);
             }
             match operation {
-                ReadOperation::Search => Ok(serde_json::from_str(include_str!(
-                    "../fixtures/production/triplover-search.json"
-                ))
-                .unwrap()),
+                ReadOperation::Search => Ok(self.response.lock().unwrap().clone()),
                 ReadOperation::FareRules => Ok(
                     json!({"item1":{"uniqueTransID":"supplier-refreshed","itemCodeRef":payload["itemCodeRef"],"fareRuleDetails":[]},"item2":{"isSuccess":true}}),
                 ),
@@ -61,11 +59,14 @@ fn refs(offer: &Value) -> Vec<String> {
 pub async fn verify(original_app: &Router, admin: &str, machine: &str, pool: &PgPool) {
     let mut configured = HashMap::new();
     let mut mocks = Vec::new();
+    let complete: Value =
+        serde_json::from_str(include_str!("../fixtures/production/triplover-search.json")).unwrap();
     for name in ["firsttrip", "takeoff", "triplover"] {
         let mock = Arc::new(Mock {
             calls: AtomicUsize::new(0),
             fail: AtomicBool::new(false),
             payloads: Mutex::new(Vec::new()),
+            response: Mutex::new(complete.clone()),
         });
         configured.insert(
             name.to_string(),
@@ -141,9 +142,49 @@ pub async fn verify(original_app: &Router, admin: &str, machine: &str, pool: &Pg
                 .as_array()
                 .unwrap()
                 .len(),
-            3 * mask.count_ones() as usize
+            3
         );
         assert!(response["item1"].get("airlineFilters").is_some());
+        for offer in response["item1"]["airSearchResponses"].as_array().unwrap() {
+            assert_eq!(
+                offer["directions"][0][0]["segments"][0]["bookingClass"],
+                "Q"
+            );
+            assert!(offer["directions"][0][0]["segments"][0]["cabinClass"].is_null());
+        }
+        let expected = if mask & 2 != 0 {
+            "takeoff"
+        } else if mask & 1 != 0 {
+            "firsttrip"
+        } else {
+            "triplover"
+        };
+        for returned in response["item1"]["airSearchResponses"].as_array().unwrap() {
+            let id = Uuid::parse_str(returned["itemCodeRef"].as_str().unwrap()).unwrap();
+            let (source,): (String,) =
+                sqlx::query_as("SELECT supplier_id FROM flight_offers WHERE id=$1")
+                    .bind(id)
+                    .fetch_one(pool)
+                    .await
+                    .unwrap();
+            assert_eq!(source, expected);
+        }
+        let search_id = Uuid::parse_str(
+            response["item1"]["airSearchResponses"][0]["uniqueTransID"]
+                .as_str()
+                .unwrap(),
+        )
+        .unwrap();
+        let (stored_count,): (i64,) =
+            sqlx::query_as("SELECT count(*) FROM flight_offers WHERE search_id=$1")
+                .bind(search_id)
+                .fetch_one(pool)
+                .await
+                .unwrap();
+        assert_eq!(
+            stored_count, 3,
+            "only selected original offers should be persisted"
+        );
         for (i, mock) in mocks.iter().enumerate() {
             assert_eq!(
                 mock.calls.load(Ordering::SeqCst),
@@ -152,6 +193,59 @@ pub async fn verify(original_app: &Router, admin: &str, machine: &str, pool: &Pg
         }
         latest = response;
     }
+    // A cheaper source overrides the tie priority, then receives markup exactly once.
+    let saved = mocks[0].response.lock().unwrap().clone();
+    {
+        let mut response = mocks[0].response.lock().unwrap();
+        for original in response["item1"]["airSearchResponses"]
+            .as_array_mut()
+            .unwrap()
+        {
+            for path in [
+                "/totalPrice",
+                "/passengerFares/adt/totalPrice",
+                "/bookingComponents/0/totalPrice",
+            ] {
+                *original.pointer_mut(path).unwrap() = json!(4000);
+            }
+        }
+    }
+    let (status, cheapest) =
+        call(&app, "POST", "/api/Search", Some(machine), request.clone()).await;
+    assert_eq!(status, 200, "{cheapest}");
+    assert_eq!(
+        cheapest["item1"]["airSearchResponses"]
+            .as_array()
+            .unwrap()
+            .len(),
+        3
+    );
+    for offer in cheapest["item1"]["airSearchResponses"].as_array().unwrap() {
+        assert_eq!(
+            offer["totalPrice"]
+                .to_string()
+                .parse::<bigdecimal::BigDecimal>()
+                .unwrap(),
+            bigdecimal::BigDecimal::from(4500)
+        );
+        let id = Uuid::parse_str(offer["itemCodeRef"].as_str().unwrap()).unwrap();
+        let (source, original): (String, Value) =
+            sqlx::query_as("SELECT supplier_id, original FROM flight_offers WHERE id=$1")
+                .bind(id)
+                .fetch_one(pool)
+                .await
+                .unwrap();
+        assert_eq!(source, "firsttrip");
+        assert_eq!(original["totalPrice"], 4000);
+    }
+    // Even an otherwise losing offer cannot hide invalid supplier tax coverage.
+    mocks[2].response.lock().unwrap()["item1"]["airSearchResponses"][0]["bookingComponents"][0]["taxes"] =
+        json!(0);
+    let (status, failure) = call(&app, "POST", "/api/Search", Some(machine), request.clone()).await;
+    assert_eq!(status, 422);
+    assert_eq!(failure["error"], "SUPPLIER_PRICING_COVERAGE_UNSUPPORTED");
+    *mocks[0].response.lock().unwrap() = saved.clone();
+    *mocks[2].response.lock().unwrap() = saved;
     let offer = &latest["item1"]["airSearchResponses"][0];
     assert_eq!(offer["totalPrice"].to_string(), "4533.05");
     let id = Uuid::parse_str(offer["itemCodeRef"].as_str().unwrap()).unwrap();
@@ -174,7 +268,7 @@ pub async fn verify(original_app: &Router, admin: &str, machine: &str, pool: &Pg
     .await;
     assert_eq!(status, 200);
     assert_eq!(rules["item1"]["uniqueTransID"], offer["uniqueTransID"]);
-    let sent = mocks[0].payloads.lock().unwrap().last().unwrap().clone();
+    let sent = mocks[1].payloads.lock().unwrap().last().unwrap().clone();
     assert_eq!(sent["itemCodeRef"], raw["itemCodeRef"]);
     assert_eq!(sent["segmentCodeRefs"], json!(refs(&raw)));
     let mut tampered = follow.clone();
@@ -225,7 +319,7 @@ pub async fn verify(original_app: &Router, admin: &str, machine: &str, pool: &Pg
             .as_array()
             .unwrap()
             .len(),
-        6
+        3
     );
     for mock in &mocks {
         mock.fail.store(true, Ordering::SeqCst);

@@ -49,7 +49,7 @@ HTTP logs contain a generated request ID, response status and duration. Headers,
 
 ## Approved pricing rules
 
-Per-passenger supplier total plus exact markup is rounded half-up to two decimal places; discounts derive from that rounded selling total. Rounded passenger totals are multiplied by counts and aggregated. If audience/scope fallback finds no applicable rule, the internal pricing pipeline returns `PRICING_CONFIGURATION_ERROR`, without returning supplier fare. These rules are tested against sanitized production fixtures; admin markup management is now available; public Search integration remains pending.
+Per-passenger supplier total plus exact markup is rounded half-up to two decimal places; discounts derive from that rounded selling total. Rounded passenger totals are multiplied by counts and aggregated. If audience/scope fallback finds no applicable rule, the internal pricing pipeline returns `PRICING_CONFIGURATION_ERROR`, without returning supplier fare. These rules are tested against sanitized production fixtures; admin markup management is now available; public Search uses this pricing pipeline after original supplier-total selection.
 
 ```sh
 cargo test --locked pricing::tests
@@ -64,7 +64,7 @@ See [Swagger walkthrough and API contract](docs/MARKUP_API.md). Create a draft, 
 
 ## Initial public Search
 
-`POST /api/Search` and `POST /api/FareRules` now use machine tokens. [Setup, examples and initial-release limits](docs/SEARCH_API.md). Activate your own markup rule and selected supplier Search controls before testing. Complex fares, complete lowest-fare deduplication and booking/ticket workflows are not finished.
+`POST /api/Search` and `POST /api/FareRules` now use machine tokens. [Setup, examples and initial-release limits](docs/SEARCH_API.md). Activate your own markup rule and selected supplier Search controls before testing. Search now selects the lowest original supplier total for conservatively equivalent fares before markup; equal totals prefer Takeoff, Firsttrip, Triplover. Broader equivalence and complex-fare coverage remain partial. Hold Book/status/reconciliation exist; Cancel and ticketing remain unfinished.
 
 ## Deployment
 

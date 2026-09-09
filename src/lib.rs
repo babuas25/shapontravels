@@ -7,6 +7,7 @@ pub mod pricing;
 pub mod projection;
 pub mod reprice;
 pub mod search;
+mod selection;
 pub mod supplier;
 
 use axum::{

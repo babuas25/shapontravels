@@ -1,6 +1,6 @@
 # Flight Aggregation & Booking API — Requirements
 
-Status: Implementation in progress — Steps 1–2 verified complete (2026-09-08); Steps 3–4 partially implemented; Steps 5–8 pending.
+Status: Implementation in progress — Steps 1–2 verified complete; Step 5 implemented within documented coverage; Steps 3–4 and 6 partially implemented; Step 7 pending; Step 8 partially verified. Latest supplier-total selection update: 2026-09-09. Historical milestone notes below are superseded where later updates say so.
 
 ## 1. উদ্দেশ্য ও scope
 
@@ -56,9 +56,9 @@ Requirements baseline-এর পর 2026-09-08-এ ব্যবহারকা�
 
 ### 5.1 মূল নিয়ম
 
-**প্রতি itinerary-এর সব আলাদা class/fare option রাখতে হবে। প্রতিটি সমমানের option-এর জন্য তিন connection-এর সর্বনিম্ন মোট payable fare নির্বাচন করতে হবে। পুরো itinerary-এর শুধু একটি cheapest class রেখে অন্য class বাদ দেওয়া যাবে না।**
+**প্রতি itinerary-এর সব আলাদা class/fare option রাখতে হবে। প্রতিটি সমমানের option-এর জন্য active connections-এর সর্বনিম্ন original Supplier total price (সব যাত্রীর মোট, আমাদের markup ছাড়া) দিয়ে supplier নির্বাচন করতে হবে। এরপর নির্বাচিত offer-এ applicable markup যোগ করে user-facing Selling Fare হবে। পুরো itinerary-এর শুধু একটি cheapest class রেখে অন্য class বাদ দেওয়া যাবে না।**
 
-উদাহরণ — একই flight, একই passenger mix ও currency:
+উদাহরণ — একই flight, একই passenger mix ও currency; নিচের দামগুলো original Supplier total price, আমাদের markup ছাড়া:
 
 | Class / fare option | Firsttrip | Takeoff | Triplover | Returned option |
 |---|---:|---:|---:|---|
@@ -78,7 +78,7 @@ Requirements baseline-এর পর 2026-09-08-এ ব্যবহারকা�
 
 ### 5.3 Fare-option equivalence
 
-- Cabin, segment-wise booking class/RBD, fare brand/fare basis যেখানে পাওয়া যায়, checked/cabin baggage, refundability এবং প্রাসঙ্গিক change/refund conditions বিবেচনা করতে হবে।
+- Segment-wise `bookingClass`/RBD, `serviceClass`, fare brand/fare basis যেখানে পাওয়া যায়, checked/cabin baggage, refundability এবং প্রাসঙ্গিক change/refund conditions বিবেচনা করতে হবে। User-approved 2026-09-09: class comparison-এর প্রধান field `bookingClass` (যেমন Q/V); `cabinClass` null/missing হলেও অন্য required attributes মিলে গেলে তুলনা হবে। RBD থেকে cabin label অনুমান করা যাবে না। Explicit cabin labels পরস্পর বিরোধী হলে সেই comparison group আলাদা থাকবে।
 - শুধু `Economy` label দেখে merge করা যাবে না। একই cabin-এর ভিন্ন RBD বা fare product আলাদা option থাকবে।
 - Baggage allowance passenger type ও segment অনুযায়ী normalize করতে হবে। Baggage ছাড়া এবং baggage-সহ fare আলাদা option।
 - Supplier brand names আলাদা হলে verified mapping ব্যবহার করতে হবে। Unknown/missing field-কে অনুমান করে equivalent ধরা যাবে না; নিশ্চিত match না হলে আলাদা option রাখতে হবে।
@@ -86,12 +86,12 @@ Requirements baseline-এর পর 2026-09-08-এ ব্যবহারকা�
 
 ### 5.4 Price comparison
 
-- একই passenger mix/count, child ages, itinerary ও currency-তে সব যাত্রীর total payable amount তুলনা করতে হবে; per-adult starting fare নয়।
+- একই passenger mix/count, child ages, itinerary ও currency-তে সব যাত্রীর original Supplier total price তুলনা করতে হবে; আমাদের markup বাদ থাকবে, per-adult starting fare নয়।
 - Base fare, tax ও mandatory fees অন্তর্ভুক্ত থাকবে। Optional ancillary যোগ করলে একই selection-এর দাম তুলনা করতে হবে। কোনো component double-count করা যাবে না।
 - Money calculation exact decimal বা currency minor units দিয়ে করতে হবে; floating-point arithmetic নয়।
 - Cross-currency comparison currency-conversion contract ছাড়া করা যাবে না।
-- §5.5-এর markup calculation প্রত্যেক active supplier-এর normalized offer-এ প্রয়োগ করার পরে final client-payable total দিয়ে lowest নির্বাচন হবে। পুরোনো application-এর অন্য pricing বা business rules স্বয়ংক্রিয়ভাবে inherit করা যাবে না।
-- Equal total হলে documented deterministic connection priority দিয়ে tie resolve করতে হবে। অন্য equivalent supplier offers internalভাবে রাখা যাবে।
+- User correction — 2026-09-09: comparable offers-এর original Supplier total price দিয়ে lowest supplier নির্বাচন হবে। এরপর নির্বাচিত original offer-এ §5.5–§5.6 অনুযায়ী applicable markup যোগ করে client-facing Selling Fare হবে। Markup বা Selling Fare supplier ranking বদলাবে না। এটি আগের markup-পরবর্তী lowest-selection নিয়ম প্রতিস্থাপন করে। পুরোনো application-এর অন্য pricing বা business rules স্বয়ংক্রিয়ভাবে inherit করা যাবে না।
+- Equal original Supplier total price হলে documented deterministic connection priority দিয়ে tie resolve করতে হবে; markup দিয়ে tie resolve হবে না। User-approved priority (2026-09-09): Takeoff → Firsttrip → Triplover। অন্য equivalent supplier offers internalভাবে রাখা যাবে।
 - Search price guaranteed নয়। RePrice-এর পর পরিবর্তিত total ও conditions client-কে জানাতে হবে; পরিবর্তিত দাম গ্রহণ ছাড়া Book/issue চালানো যাবে না।
 - RePrice-এর পর silent supplier switching হবে না। অন্য supplier offer বেছে নিলে তার নিজস্ব reference দিয়ে নতুন RePrice ও client acceptance প্রয়োজন।
 
@@ -166,7 +166,7 @@ S = supplier original per-passenger `totalPrice`; M = winning rule-এর per-pa
 
 #### Search থেকে Confirmed-এ প্রয়োগ
 
-- প্রতিটি active supplier-এর comparable class/fare option-এর জন্য audience fallback ও winning rule resolve করে Selling Fare হিসাব হবে। তারপর Selling Fare তুলনা করে lowest option নির্বাচন হবে; অন্যান্য distinct class/fare options বাদ যাবে না।
+- প্রতিটি active supplier-এর comparable class/fare option-এর original Supplier total price তুলনা করে lowest option নির্বাচন হবে। নির্বাচিত offer-এর জন্য audience fallback ও winning markup rule resolve করে Selling Fare হিসাব হবে; অন্যান্য distinct class/fare options বাদ যাবে না।
 - Search ও RePrice একই calculation engine ব্যবহার করবে। Selected source supplier/account/references, audience/agent, winning rule/version, supplier fare, calculated markup, Selling Fare ও acceptance snapshot সংরক্ষণ হবে।
 - RePrice-এ দাম/terms বদলালে নতুন pricing version এবং client acceptance প্রয়োজন। Book/Issue accepted version ব্যবহার করবে; markup আবার যোগ হবে না। Confirmed record-এ accepted Selling Fare ও verified ticket evidence থাকবে।
 - Rule management-এর schemas, audience/scope, Fixed/Percentage examples ও price responses Swagger-এ document করতে হবে। Rule mutation শুধু authorized human Admin/Super Admin করতে পারবে (§3); Agent/API client নয়।
@@ -283,7 +283,7 @@ Single-component example-এ component entire offer cover করে, তাই �
 
 #### সব trip type ও lifecycle
 
-One-way, round-trip, multicity, direct/connecting flights, single/multiple passengers এবং ADT/CHD/CNN/INF/INS বা অন্য supported type-এ একই নিয়ম। Markup final passenger fare-এর ওপর, individual flight segment-এর ওপর নয়। Lowest selection হবে count-aggregated top-level Selling Fare দিয়ে। Search/RePrice এবং Book/Issue/Confirmed price projection-এ accepted pricing version বজায় থাকবে; original supplier values private source snapshot হিসেবে সংরক্ষিত থাকবে, overwritten selling response পুনরায় markup basis হবে না।
+One-way, round-trip, multicity, direct/connecting flights, single/multiple passengers এবং ADT/CHD/CNN/INF/INS বা অন্য supported type-এ একই নিয়ম। Markup final passenger fare-এর ওপর, individual flight segment-এর ওপর নয়। Lowest selection হবে একই passenger coverage-এর original supplier top-level totalPrice দিয়ে, আমাদের markup ছাড়া। নির্বাচিত offer-এর user-facing Selling Fare passenger-level markup ও rounding থেকে count-aggregate হবে। Search/RePrice এবং Book/Issue/Confirmed price projection-এ accepted pricing version বজায় থাকবে; original supplier values private source snapshot হিসেবে সংরক্ষিত থাকবে, overwritten selling response পুনরায় markup basis হবে না।
 
 ### 5.7 Evidence-based pending decisions — implementation direction (2026-09-08)
 
@@ -384,7 +384,7 @@ Foreign keys, ownership constraints, monetary precision, indexed reference looku
 - Markup transformation-এ recursive response shape অপরিবর্তিত এবং allowlisted pricing paths ছাড়া সব values identical থাকবে। Unknown fields ও null/absent distinction preserve হবে; নতুন metadata বা pricing field যোগ হবে না।
 - Markup checks: S=30,000 + Fixed 500 → Selling Fare 30,500; S=30,000 at 2% → Selling Fare 30,600। §5.5-এর ABC example-এ চারটি expected markup 100/200/400/500 হতে হবে। No-stacking example-এ 200 হবে, 1,400 নয়।
 - Agent All/All rule B2B specific rule-এর আগে জিতবে; unrelated Agent rule B2B fallback বন্ধ করবে না। B2C শুধু নিজের chain ব্যবহার করবে; arbitrary agent identity দিয়ে special pricing পাওয়া যাবে না।
-- Lowest selection markup-পরবর্তী Selling Fare দিয়ে হবে; RePrice acceptance/versioning এবং Book/Issue-তে markup পুনরায় যোগ না হওয়ার checks থাকবে। §5.5-এর unresolved edge-case decisions অনুযায়ী additional checks যুক্ত হবে।
+- Lowest selection original Supplier total price দিয়ে হবে, markup-পরবর্তী Selling Fare দিয়ে নয়। Test-এ supplier-total winner ও selling-total winner ভিন্ন হলে supplier-total winner-ই নির্বাচিত হবে; নির্বাচিত offer-এর markup projection যাচাই হবে। RePrice acceptance/versioning এবং Book/Issue-তে markup পুনরায় যোগ না হওয়ার checks থাকবে। §5.5-এর unresolved edge-case decisions অনুযায়ী additional checks যুক্ত হবে।
 - §5.6 fixture-এ CHD total=27,660.65 ও discount=-805.65; counts 2/1/1/1-এ top-level এবং single-component total=134,745.63, component discount=-3,924.63। Base/taxes/AIT অপরিবর্তিত, AIT double-count নয়; null INS preserve হবে।
 - Fixed 500 এবং তিনটি individual passenger হলে aggregate markup 1,500 হবে, flight segments যতই থাকুক। Existing supplier discount nonzero থাকলেও formula দিয়ে recompute হবে; negative discount suppress হবে না।
 - One supplier failure-এ valid partial result পাওয়া যায়; all-failed outcome স্পষ্ট থাকে।
@@ -399,7 +399,7 @@ Foreign keys, ownership constraints, monetary precision, indexed reference looku
 - [x] Step 1. Rust/Axum foundation, configuration, migrations এবং initial OpenAPI setup; #1–#4-এর speculative decisions দিয়ে কাজ block নয়।
 - [x] Step 2. Final §3 অনুযায়ী machine credentials/token exchange, পৃথক human admin authentication/bootstrap, authorization ও ownership isolation।
 - [ ] Step 3. Shared supplier adapter, per-connection authentication, verified/redacted response fixtures ও evidence capture। §5.7 অনুযায়ী relevant cases-এ decision report/approval।
-- [ ] Step 4. Canonical normalization, final audience-based markup/fallback engine, per-option lowest Selling Fare selection এবং Search/FareRules।
+- [ ] Step 4. Canonical normalization, final audience-based markup/fallback engine, per-option lowest original Supplier total price selection এবং Search/FareRules।
 - [x] Step 5. Public RePrice, versioned reference persistence ও explicit local price acceptance (2026-09-08); supplier coverage limitations remain documented।
 - [ ] Step 6. Book/Cancel/PNR, idempotency ও reconciliation।
 - [ ] Step 7. NewTicket, direct issue, reports এবং commercial execution controls।
@@ -443,7 +443,7 @@ Implementation চলাকালে সংশ্লিষ্ট evidence/design
 
 - §3-এর final auth অনুযায়ী token exchange route/wire schema, human admin session implementation ও controlled bootstrap mechanics document করতে হবে। Client ID/Secret, opaque token, 30 minutes, automatic machine renewal, revocation ও admin-only markup management settled।
 - Supplier account permissions, rate limits, reference TTL, timeout reconciliation এবং mutation idempotency support।
-- Canonical brand/equivalence mappings, verified supplier price/component semantics, ancillary totals এবং equal-price supplier priority। Final audience/priority/fallback ও calculation §5.5-এ settled; Passenger basis, Fixed unit, count aggregation, AIT ও signed discount projection §5.6-এ settled; no-match outcome, rounding, multiple-component representation ও matching/duplicate ambiguities evidenceসহ §5.7 অনুযায়ী resolve করতে হবে। Admin-only rule management final।
+- Canonical brand/equivalence mappings, verified supplier price/component semantics, ancillary totals। Equal-price supplier priority approved on 2026-09-09: Takeoff → Firsttrip → Triplover। Final audience/priority/fallback ও calculation §5.5-এ settled; Passenger basis, Fixed unit, count aggregation, AIT ও signed discount projection §5.6-এ settled; no-match outcome, rounding, multiple-component representation ও matching/duplicate ambiguities evidenceসহ §5.7 অনুযায়ী resolve করতে হবে। Admin-only rule management final।
 - Direct-issue intent field/header, changed-price acceptance contract এবং partial-result metadata transport, supplier response body shape অপরিবর্তিত রেখে।
 - Ticket deadline timezone, conditional booking fields ও undocumented `fareType` enum।
 - Client credit/payment policy, supplier balance failure handling এবং operational resolution workflow।
@@ -563,3 +563,29 @@ Review completed, not full Search acceptance. Working client/supplier/markup set
 - Client `booking` permission, supplier Search/booking enablement, environment booking flag and valid accepted RePrice/passenger/reference checks remain required.
 - Both Search and RePrice must show `bookable=true`. Instant purchase has no hold; direct issue remains unsupported and is not enabled by this policy.
 - No live Book, environment update, main database migration or running-server restart was performed for this policy change. Earlier commercial-authorizer-pending notes are superseded for holds only.
+
+
+### Original supplier-total selection — user-approved 2026-09-09
+
+- [x] Supplier selection uses original totalPrice for the full passenger mix before markup, with exact decimal comparison. Equal totals prefer Takeoff → Firsttrip → Triplover. Markup and selling-price rounding do not change supplier ranking.
+- [x] Search selects within its active supplier snapshot and configured currency, then applies the existing winning markup rule to each selected original offer. Only selected offers are persisted with their original supplier references for FareRules/RePrice/Book.
+- [x] Conservative equivalence compares complete reported itinerary/fare attributes and all remaining unknown fields exactly after removing evidenced transport references and quoted total/discount fields. Distinct RBD/service class/fare basis, baggage, refundability, passenger counts and route/segment order remain separate. Optional cabin-label handling follows the bookingClass update below. Base/tax/AIT and fee metadata remain part of the conservative key.
+- [x] Missing required attributes other than optional cabinClass, codeshare offers and ambiguous route alternatives remain separate. No guessed cabin, brand aliases, baggage-unit conversion or component allocation is introduced. Existing branded-fare and pricing-coverage errors remain in place for all source offers, including potential losers.
+- [ ] Step 4 is still partial: broader canonical equivalence, differing price-breakdown/display metadata normalization, general complex scoped markup, branded/multiple-component fares and aggregate Search summaries remain open. This update does not claim every real cross-supplier duplicate is merged.
+- Validation: local unit/fixture and disposable PostgreSQL integration coverage includes all seven active subsets, per-class winners, source ownership/routing, tie priority, exact sub-cent comparison, uncertain attributes and a lower original total whose rounded selling total is higher. No supplier network call or deployment is part of this update.
+
+
+### bookingClass-based comparison — user-approved 2026-09-09
+
+- [x] `bookingClass` (Q/V/etc.) is the required class/RBD identity alongside `serviceClass` and the other existing itinerary/fare checks. Null, missing or empty `cabinClass` does not prevent matching and is not inferred from RBD or Search cabin input.
+- [x] Optional cabin labels are excluded from the main comparison key. If explicitly reported nonempty cabin labels conflict for the same segment within an otherwise matching group, all offers in that group remain separate; a missing label cannot bridge conflicting cabins. This check is independent of supplier response order.
+- [x] Original supplier responses retain their cabin values and null/missing shape. Q and V remain distinct options; supplier original total and Takeoff → Firsttrip → Triplover tie priority remain unchanged.
+- Validation uses captured Triplover Q/null-cabin offers in all seven active-supplier subsets, plus unit regressions for null/missing/known cabin matching, conflicting labels in every ordering, distinct RBD and source-shape preservation. No supplier network call or deployment is part of this update.
+
+
+### Production selection validation — 2026-09-09
+
+- [x] Current public router verified against all three production Search accounts: 84 raw offers → 45 retained offers, 39 duplicates removed, no partial supplier failure. An independent Decimal audit verified every retained supplier-total winner and fixed-500 selling projection.
+- [x] Representative selected Firsttrip/Takeoff/Triplover public FareRules → RePrice → local acceptance flows passed. No Book/Cancel/Issue was called.
+- [ ] Full servicing acceptance remains open: sampled Triplover VQ FareRules returned supplier business failure; a separate Takeoff BG RePrice sample returned public 502 without a captured root cause. Final passing representative samples do not erase those observations.
+- Evidence and scope: `docs/evidence/SUPPLIER_SELECTION_VALIDATION_2026-09-09.md`. These are isolated local-router tests against real suppliers, not authenticated tests against the deployed API.

@@ -246,7 +246,7 @@ pub(crate) fn bind_references(value: &mut Value, map: &mut serde_json::Map<Strin
     }
 }
 
-#[utoipa::path(post,path="/api/Search",tag="Flights",security(("machine_token"=[])),request_body(content=SearchRequest,example=json!({"routes":[{"origin":"DAC","destination":"CXB","departureDate":"2026-09-29"}],"adults":1,"childs":0,"infants":0,"cabinClass":1,"preferredCarriers":[],"prohibitedCarriers":[],"childrenAges":[]})),responses((status=200,body=Object,description="Supplier-compatible item1/item2 envelope. Unknown fare equivalence stays separate. X-Search-Partial reports failed active connections."),(status=422,description="Pricing, currency or scope configuration incomplete"),(status=503,description="No active suppliers or all active connections failed")))]
+#[utoipa::path(post,path="/api/Search",tag="Flights",security(("machine_token"=[])),request_body(content=SearchRequest,example=json!({"routes":[{"origin":"DAC","destination":"CXB","departureDate":"2026-09-29"}],"adults":1,"childs":0,"infants":0,"cabinClass":1,"preferredCarriers":[],"prohibitedCarriers":[],"childrenAges":[]})),responses((status=200,body=Object,description="Supplier-compatible item1/item2 envelope. Equivalent evidenced offers select the lowest original supplier total before markup; ties prefer Takeoff, Firsttrip, Triplover. bookingClass/RBD matching permits missing cabinClass; explicit cabin conflicts stay separate. Unknown fare equivalence stays separate. X-Search-Partial reports failed active connections."),(status=422,description="Pricing, currency or scope configuration incomplete"),(status=503,description="No active suppliers or all active connections failed")))]
 async fn search(
     machine: Machine,
     State(state): State<AppState>,
@@ -342,10 +342,8 @@ async fn search(
     let mut returned = Vec::new();
     let mut envelope = batches[0].2.clone();
     let mut statuses = Vec::new();
-    let mut tx = state.pool.begin().await?;
-    // Platform reference lifetime, not a claimed supplier TTL. Every next read may still expire upstream.
-    sqlx::query("INSERT INTO flight_searches(id,client_id,request,currency,expires_at) VALUES($1,$2,$3,$4,now()+INTERVAL '10 minutes')").bind(search_id).bind(machine.client_id).bind(payload).bind(&currency).execute(&mut *tx).await?;
-    for (connection, offers, source_body) in batches {
+    let mut candidates = Vec::new();
+    for (connection, offers, source_body) in &batches {
         let entries = match source_body.get("item2") {
             Some(Value::Array(items)) => items.clone(),
             Some(value) => vec![value.clone()],
@@ -376,7 +374,7 @@ async fn search(
             {
                 return Err(error("BRANDED_FARE_MAPPING_UNSUPPORTED"));
             }
-            if !matches_passengers(&original, &request) {
+            if !matches_passengers(original, &request) {
                 return Err(error("SUPPLIER_PASSENGER_MISMATCH"));
             }
             if original
@@ -386,37 +384,61 @@ async fn search(
             {
                 return Err(error("SUPPLIER_CURRENCY_MISMATCH"));
             }
-            let (carrier, origin, destination) = matching_context(&original, &request, &rules)?;
-            let winner =
-                crate::pricing::resolve(&rules, &audience, &carrier, (&origin, &destination))
-                    .map_err(|_| error("PRICING_CONFIGURATION_ERROR"))?;
-            let record = filtered
-                .iter()
-                .find(|r| r.id.to_string() == winner.id)
-                .ok_or(error("PRICING_CONFIGURATION_ERROR"))?;
-            let mut selling = projection::single_component(&original, &winner.markup)
+            // Validate every source offer before selection: unsupported losing offers
+            // must not silently disappear and bypass the existing coverage policy.
+            projection::single_component(original, &Markup::Fixed(0.into()))
                 .map_err(|_| error("SUPPLIER_PRICING_COVERAGE_UNSUPPORTED"))?;
-            let supplier_transaction = original["uniqueTransID"]
-                .as_str()
-                .ok_or(error("SUPPLIER_REFERENCE_MISSING"))?;
-            let supplier_item = original["itemCodeRef"]
-                .as_str()
-                .ok_or(error("SUPPLIER_REFERENCE_MISSING"))?;
+            let supplier_transaction = original["uniqueTransID"].as_str().unwrap_or_default();
+            let supplier_item = original["itemCodeRef"].as_str().unwrap_or_default();
             if supplier_transaction.is_empty()
                 || supplier_item.is_empty()
                 || supplier_transaction == supplier_item
             {
                 return Err(error("SUPPLIER_REFERENCE_MISSING"));
             }
-            let id = Uuid::new_v4();
-            let mut references = serde_json::Map::new();
-            references.insert(supplier_transaction.into(), json!(search_id.to_string()));
-            references.insert(supplier_item.into(), json!(id.to_string()));
-            bind_references(&mut selling, &mut references);
-            sqlx::query("INSERT INTO flight_offers(id,client_id,search_id,supplier_id,availability_epoch,original,selling,reference_map,rule_id,rule_version,expires_at) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,now()+INTERVAL '10 minutes')")
-                .bind(id).bind(machine.client_id).bind(search_id).bind(&connection.id).bind(connection.availability_epoch).bind(original).bind(&selling).bind(Value::Object(references)).bind(record.id).bind(record.version).execute(&mut *tx).await?;
-            returned.push(selling);
+            candidates.push((connection, original));
         }
+    }
+    let source_offers: Vec<_> = candidates
+        .iter()
+        .map(|(c, o)| (c.id.as_str(), *o))
+        .collect();
+    let selected =
+        crate::selection::winners(&source_offers, &["takeoff", "firsttrip", "triplover"]);
+    let mut tx = state.pool.begin().await?;
+    // Platform reference lifetime, not a claimed supplier TTL. Every next read may still expire upstream.
+    sqlx::query("INSERT INTO flight_searches(id,client_id,request,currency,expires_at) VALUES($1,$2,$3,$4,now()+INTERVAL '10 minutes')").bind(search_id).bind(machine.client_id).bind(payload).bind(&currency).execute(&mut *tx).await?;
+    for index in selected {
+        let (connection, original) = candidates[index];
+        let (carrier, origin, destination) = matching_context(original, &request, &rules)?;
+        let winner = crate::pricing::resolve(&rules, &audience, &carrier, (&origin, &destination))
+            .map_err(|_| error("PRICING_CONFIGURATION_ERROR"))?;
+        let record = filtered
+            .iter()
+            .find(|r| r.id.to_string() == winner.id)
+            .ok_or(error("PRICING_CONFIGURATION_ERROR"))?;
+        let mut selling = projection::single_component(original, &winner.markup)
+            .map_err(|_| error("SUPPLIER_PRICING_COVERAGE_UNSUPPORTED"))?;
+        let supplier_transaction = original["uniqueTransID"]
+            .as_str()
+            .ok_or(error("SUPPLIER_REFERENCE_MISSING"))?;
+        let supplier_item = original["itemCodeRef"]
+            .as_str()
+            .ok_or(error("SUPPLIER_REFERENCE_MISSING"))?;
+        if supplier_transaction.is_empty()
+            || supplier_item.is_empty()
+            || supplier_transaction == supplier_item
+        {
+            return Err(error("SUPPLIER_REFERENCE_MISSING"));
+        }
+        let id = Uuid::new_v4();
+        let mut references = serde_json::Map::new();
+        references.insert(supplier_transaction.into(), json!(search_id.to_string()));
+        references.insert(supplier_item.into(), json!(id.to_string()));
+        bind_references(&mut selling, &mut references);
+        sqlx::query("INSERT INTO flight_offers(id,client_id,search_id,supplier_id,availability_epoch,original,selling,reference_map,rule_id,rule_version,expires_at) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,now()+INTERVAL '10 minutes')")
+                .bind(id).bind(machine.client_id).bind(search_id).bind(&connection.id).bind(connection.availability_epoch).bind(original).bind(&selling).bind(Value::Object(references)).bind(record.id).bind(record.version).execute(&mut *tx).await?;
+        returned.push(selling);
     }
     tx.commit().await?;
     let mut headers = HeaderMap::new();
