@@ -161,35 +161,67 @@ impl StoredRule {
     }
 }
 
-/// Limit initial specific matching to one route, one segment, consistent carrier.
-fn context(offer: &Value, request: &SearchRequest) -> Option<(String, String, String)> {
-    if request.routes.len() != 1 || offer["isCodeShared"] == true {
+/// First requested route and its first segment airline govern markup.
+fn journey_context(
+    offer: &Value,
+    request: &SearchRequest,
+    rules: &[Rule],
+) -> Option<(String, String, String)> {
+    let outbound = request.routes.first()?;
+    let groups = offer["directions"].as_array()?;
+    if groups.len() != request.routes.len() {
         return None;
     }
-    let directions = offer["directions"].as_array()?;
-    if directions.len() != 1 {
+    let first_options = groups.first()?.as_array()?;
+    let carrier = first_options.first()?["segments"][0]["airlineCode"]
+        .as_str()
+        .filter(|s| {
+            s.len() == 2
+                && s.bytes()
+                    .all(|b| b.is_ascii_uppercase() || b.is_ascii_digit())
+        });
+    let carrier = carrier.filter(|code| {
+        first_options
+            .iter()
+            .all(|option| option["segments"][0]["airlineCode"].as_str() == Some(*code))
+    });
+    for (group, route) in groups.iter().zip(&request.routes) {
+        let options = group.as_array()?;
+        if options.is_empty() {
+            return None;
+        }
+        for option in options {
+            let segments = option["segments"].as_array()?;
+            if option["from"].as_str()? != route.origin
+                || option["to"].as_str()? != route.destination
+                || segments.first()?["from"].as_str()? != route.origin
+                || segments.last()?["to"].as_str()? != route.destination
+            {
+                return None;
+            }
+            for segment in segments {
+                if segment["from"].as_str().is_none_or(str::is_empty)
+                    || segment["to"].as_str().is_none_or(str::is_empty)
+                {
+                    return None;
+                }
+            }
+            if !segments
+                .windows(2)
+                .all(|pair| pair[0]["to"] == pair[1]["from"])
+            {
+                return None;
+            }
+        }
+    }
+    if carrier.is_none() && rules.iter().any(|rule| rule.airline.is_some()) {
         return None;
     }
-    let options = directions[0].as_array()?;
-    if options.len() != 1 {
-        return None;
-    }
-    let segments = options[0]["segments"].as_array()?;
-    if segments.len() != 1 {
-        return None;
-    }
-    let s = &segments[0];
-    let carrier = s["airlineCode"].as_str()?;
-    if offer["platingCarrier"].as_str()? != carrier
-        || s["from"].as_str()? != request.routes[0].origin
-        || s["to"].as_str()? != request.routes[0].destination
-    {
-        return None;
-    }
+    // Missing or conflicting first-segment airlines cannot select airline rules.
     Some((
-        carrier.into(),
-        request.routes[0].origin.clone(),
-        request.routes[0].destination.clone(),
+        carrier.unwrap_or_default().into(),
+        outbound.origin.clone(),
+        outbound.destination.clone(),
     ))
 }
 // Rules here have already been restricted to the client's audience/agent and currency.
@@ -198,7 +230,7 @@ pub(crate) fn matching_context(
     request: &SearchRequest,
     rules: &[Rule],
 ) -> Result<(String, String, String), ApiError> {
-    if let Some(context) = context(offer, request) {
+    if let Some(context) = journey_context(offer, request, rules) {
         return Ok(context);
     }
     if rules
@@ -691,6 +723,186 @@ pub fn routes() -> Router<AppState> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    fn return_fixture() -> (Value, SearchRequest, Vec<Rule>) {
+        let body: Value = serde_json::from_str(include_str!(
+            "../tests/fixtures/production/triplover-return.json"
+        ))
+        .unwrap();
+        let request = serde_json::from_value(json!({"routes":[
+            {"origin":"DAC","destination":"SIN","departureDate":"2026-09-29"},
+            {"origin":"SIN","destination":"DAC","departureDate":"2026-10-06"}
+        ],"adults":2,"childs":1,"infants":1,"childrenAges":[6],"cabinClass":1,"preferredCarriers":[],"prohibitedCarriers":[]}))
+        .unwrap();
+        let rules = vec![Rule {
+            id: "outbound".into(),
+            audience: Audience::B2b,
+            airline: None,
+            route: Some(("DAC".into(), "SIN".into())),
+            markup: crate::pricing::Markup::Fixed(500.into()),
+        }];
+        (
+            body["item1"]["airSearchResponses"][0].clone(),
+            request,
+            rules,
+        )
+    }
+    #[test]
+    fn return_uses_outbound_rule_once_and_oneway_does_not_reverse_match() {
+        let (offer, mut request, mut rules) = return_fixture();
+        rules.push(Rule {
+            id: "inbound".into(),
+            audience: Audience::B2b,
+            airline: None,
+            route: Some(("SIN".into(), "DAC".into())),
+            markup: crate::pricing::Markup::Fixed(900.into()),
+        });
+        let (airline, from, to) = matching_context(&offer, &request, &rules).unwrap();
+        let winner =
+            crate::pricing::resolve(&rules, &Audience::B2b, &airline, (&from, &to)).unwrap();
+        assert_eq!(winner.id, "outbound");
+        let selling = projection::single_component(&offer, &winner.markup).unwrap();
+        assert_eq!(selling["totalPrice"], json!(159576.05));
+        assert_eq!(
+            selling["passengerFares"]["adt"]["totalPrice"],
+            json!(54621.33)
+        );
+        assert_eq!(selling["directions"], offer["directions"]);
+        request.routes.remove(0);
+        let mut one_way = offer.clone();
+        one_way["directions"] = json!([offer["directions"][1]]);
+        let (airline, from, to) = matching_context(&one_way, &request, &rules).unwrap();
+        assert_eq!(
+            crate::pricing::resolve(&rules, &Audience::B2b, &airline, (&from, &to))
+                .unwrap()
+                .id,
+            "inbound"
+        );
+        rules.pop();
+        assert!(crate::pricing::resolve(&rules, &Audience::B2b, &airline, (&from, &to)).is_err());
+    }
+    #[test]
+    fn return_checks_every_alternative_and_first_airline_ambiguity() {
+        let (mut offer, request, mut rules) = return_fixture();
+        let alternative = offer["directions"][0][0].clone();
+        offer["directions"][0]
+            .as_array_mut()
+            .unwrap()
+            .push(alternative);
+        rules[0].airline = Some("SQ".into());
+        assert!(matching_context(&offer, &request, &rules).is_ok());
+        offer["directions"][0][1]["segments"][0]["airlineCode"] = json!("MH");
+        assert!(matching_context(&offer, &request, &rules).is_err());
+        rules[0].airline = None;
+        assert!(matching_context(&offer, &request, &rules).is_ok());
+        offer["isCodeShared"] = json!(true);
+        assert!(matching_context(&offer, &request, &rules).is_ok());
+        offer["directions"][0][1]["segments"][0]["to"] = json!("BKK");
+        assert!(matching_context(&offer, &request, &rules).is_err());
+    }
+    #[test]
+    fn return_connections_validate_continuity_and_reject_mismatched_routes() {
+        let (mut offer, mut request, rules) = return_fixture();
+        let mut second = offer["directions"][0][0]["segments"][0].clone();
+        second["from"] = json!("KUL");
+        offer["directions"][0][0]["segments"][0]["to"] = json!("KUL");
+        offer["directions"][0][0]["segments"]
+            .as_array_mut()
+            .unwrap()
+            .push(second);
+        assert!(matching_context(&offer, &request, &rules).is_ok());
+        offer["directions"][0][0]["segments"][1]["from"] = json!("BKK");
+        assert!(matching_context(&offer, &request, &rules).is_err());
+        request.routes[1].origin = "BKK".into();
+        assert!(matching_context(&offer, &request, &rules).is_err());
+    }
+    #[test]
+    fn mixed_connecting_oneway_uses_first_segment_not_plating_airline() {
+        let (mut offer, mut request, mut rules) = return_fixture();
+        request.routes.truncate(1);
+        offer["directions"].as_array_mut().unwrap().truncate(1);
+        let mut connection = offer["directions"][0][0]["segments"][0].clone();
+        connection["from"] = json!("KUL");
+        offer["directions"][0][0]["segments"][0]["to"] = json!("KUL");
+        offer["directions"][0][0]["segments"][0]["airlineCode"] = json!("MH");
+        offer["directions"][0][0]["segments"]
+            .as_array_mut()
+            .unwrap()
+            .push(connection);
+        offer["platingCarrier"] = json!("SQ");
+        offer["isCodeShared"] = json!(true);
+        rules[0].airline = Some("MH".into());
+        rules.push(Rule {
+            id: "segment-airline".into(),
+            audience: Audience::B2b,
+            airline: Some("SQ".into()),
+            route: Some(("DAC".into(), "SIN".into())),
+            markup: Markup::Fixed(900.into()),
+        });
+        let (airline, from, to) = matching_context(&offer, &request, &rules).unwrap();
+        assert_eq!((&*airline, &*from, &*to), ("MH", "DAC", "SIN"));
+        assert_eq!(
+            crate::pricing::resolve(&rules, &Audience::B2b, &airline, (&from, &to))
+                .unwrap()
+                .id,
+            "outbound"
+        );
+        for invalid in [Value::Null, json!(""), json!("MALAYSIA"), json!("mh")] {
+            offer["directions"][0][0]["segments"][0]["airlineCode"] = invalid;
+            assert!(matching_context(&offer, &request, &rules).is_err());
+        }
+        rules.truncate(1);
+        rules[0].airline = None;
+        assert!(matching_context(&offer, &request, &rules).is_ok());
+    }
+    #[test]
+    fn multicity_only_first_route_selects_rule_without_averaging() {
+        let (mut offer, mut request, mut rules) = return_fixture();
+        // Synthetic three-route itinerary; keep the existing whole-fare pricing.
+        let mut third = offer["directions"][1].clone();
+        third[0]["from"] = json!("BKK");
+        third[0]["segments"][0]["from"] = json!("BKK");
+        offer["directions"][1][0]["to"] = json!("BKK");
+        offer["directions"][1][0]["segments"][0]["to"] = json!("BKK");
+        offer["directions"].as_array_mut().unwrap().push(third);
+        request.routes[1].destination = "BKK".into();
+        request.routes.push(Route {
+            origin: "BKK".into(),
+            destination: "DAC".into(),
+            departure_date: "2026-10-10".into(),
+        });
+        rules[0].markup = Markup::Percentage(5.into());
+        rules.push(Rule {
+            id: "later".into(),
+            audience: Audience::B2b,
+            airline: None,
+            route: Some(("BKK".into(), "DAC".into())),
+            markup: Markup::Percentage(3.into()),
+        });
+        let (airline, from, to) = matching_context(&offer, &request, &rules).unwrap();
+        let winner =
+            crate::pricing::resolve(&rules, &Audience::B2b, &airline, (&from, &to)).unwrap();
+        assert_eq!(winner.id, "outbound");
+        let selling = projection::single_component(&offer, &winner.markup).unwrap();
+        assert_eq!(
+            selling["passengerFares"]["adt"]["totalPrice"],
+            serde_json::from_str::<Value>("56827.40").unwrap()
+        );
+        rules.remove(0);
+        assert!(crate::pricing::resolve(&rules, &Audience::B2b, &airline, (&from, &to)).is_err());
+        rules.push(Rule {
+            id: "fallback".into(),
+            audience: Audience::B2b,
+            airline: None,
+            route: None,
+            markup: Markup::Fixed(100.into()),
+        });
+        assert_eq!(
+            crate::pricing::resolve(&rules, &Audience::B2b, &airline, (&from, &to))
+                .unwrap()
+                .id,
+            "fallback"
+        );
+    }
     #[test]
     fn complex_all_scope_keeps_agent_priority_and_blocks_specific_rules() {
         let body: Value = serde_json::from_str(include_str!(
@@ -699,7 +911,7 @@ mod tests {
         .unwrap();
         let offer = &body["item1"]["airSearchResponses"][0];
         let request: SearchRequest = serde_json::from_value(json!({"routes":[{"origin":"DAC","destination":"BKK","departureDate":"2026-09-29"}],"adults":2,"childs":1,"infants":1,"cabinClass":1,"preferredCarriers":[],"prohibitedCarriers":[],"childrenAges":[6]})).unwrap();
-        assert!(context(offer, &request).is_none());
+        assert!(journey_context(offer, &request, &[]).is_none());
         let mut rules = vec![Rule {
             id: "default".into(),
             audience: Audience::B2b,

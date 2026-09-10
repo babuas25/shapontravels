@@ -4,6 +4,33 @@ Status: Implementation in progress — Steps 1–2 verified complete; Step 5 imp
 
 Important current priority (2026-09-10): আরও optimization প্রয়োজন, কোনো valid offer/field বাদ দিয়ে নয়। See [Tripfeels source comparison](docs/evidence/TRIPFEELS_OPTIMIZATION_COMPARISON_2026-09-10.md).
 
+### Current completion checklist — 2026-09-11
+
+এটি বর্তমান status-এর সংক্ষিপ্ত তালিকা। নিচের dated logs ঐতিহাসিক evidence; পরবর্তী implementation/approval আগের pending note-কে supersede করে। একটি বড় Step-এর কিছু অংশ বাকি থাকলে পুরো Step unchecked থাকবে। Local/UAT completion production deployment বোঝায় না।
+
+- [x] Rust/API foundation, machine/client authentication ও পৃথক human Admin authentication।
+- [x] Supplier adapters, captured fixtures, public Search/FareRules, markup Admin APIs এবং documented coverage-এর pricing/selection implementation; broader supplier/equivalence coverage এখনও partial।
+- [x] Public RePrice, selected directions, latest-price acceptance ও reference ownership।
+- [x] Approved return/multicity markup: প্রথম requested route + সেই route-এর প্রথম segment airline; whole-journey passenger fare-এ একবার markup।
+- [x] Branded content UAT verification; supplier-এর `null` অপরিবর্তিত রাখা।
+- [x] Hold booking, durable idempotency, saved retrieval, live PNR lookup ও reconciliation evidence/deadline persistence।
+- [x] Coding-free Bengali Admin reconciliation screen, audited manual resolution এবং browser verification।
+- [x] Representative BS return UAT Hold → PNR সফল; BS one-way supplier Hold/PNR পাওয়া গেলেও সংরক্ষিত unknown outcome-এর resolution বাকি।
+- [x] BG three-route multicity UAT Hold ও retrieval সফল; supplier status Created এবং deadline খালি—ticket issue readiness এখনও প্রতিষ্ঠিত নয়।
+- [x] `STR` + GDS PNR + airline PNR public reference, owner-scoped reference retrieval, Admin display; `STR8FE94RKECOCE` দিয়ে retained UAT booking HTTP 200 যাচাই।
+- [x] Latest reference work: ordinary tests, PostgreSQL integration, real saved UAT retrieval, Clippy, formatting ও JavaScript syntax checks pass।
+- [ ] Ticket Issue/NewTicket → Direct Issue, reports এবং প্রয়োজনীয় execution controls/verification।
+- [ ] Cancel flow (user-deferred), unresolved booking cases এবং full lifecycle/supplier acceptance।
+- [ ] Real populated branded/multiple-component evidence পেলে সেই coverage-এর কাজ (user-deferred)।
+- [ ] Broader normalization/equivalence coverage, production private-data protection/retention এবং remaining contract/release acceptance।
+- [ ] Latest Hold/Admin/markup/reference changes-এর production release; এই কাজগুলো local/UAT-এ যাচাই করা হয়েছে।
+
+### Latest execution environment instruction — 2026-09-10
+
+- User prohibits Hold/Book and Issue through production supplier APIs. Booking validation must use Triplover UAT only; the user has updated the local `.env` for this purpose. This restriction supersedes historical production mutation permissions.
+- Local configuration inspection confirms Triplover Search host `searchapi-uat.triplover.com` and servicing host `userapi-uat.triplover.com`, matching the supplied UAT contract. Credentials are present; this inspection does not verify authentication or a running/deployed process's configuration.
+- Before any booking execution, assert both UAT hosts and use fresh UAT Search/RePrice references. Do not reuse production references or fall back to a production supplier. An enabled ticketing configuration flag alone is not an instruction to issue a ticket.
+
 ## 1. উদ্দেশ্য ও scope
 
 Rust backend সরাসরি Firsttrip, Takeoff ও Triplover-এর তিনটি connection ব্যবহার করবে। Supplier response একটি internal canonical model-এ normalize করে আমাদের frontend এবং external API clients-কে supplier-compatible request/response shape-এ API দেবে। আমাদের নিজস্ব PostgreSQL database থাকবে।
@@ -457,7 +484,7 @@ Supplier document-এ referenced `MARKUP.md`, original PDF, Postman collection �
 
 - Rust backend-এর পরিবর্তে পুরোনো Node.js backend proxy করা।
 - আলাদা supplier-এর flight legs জুড়ে নতুন itinerary তৈরি করা।
-- নিজস্ব frontend বা full administrative dashboard নির্মাণ; protected admin API scope-এ আছে।
+- নিজস্ব frontend বা full administrative dashboard নির্মাণ; protected admin API scope-এ আছে। পরবর্তী user approval (2026-09-10) অনুযায়ী শুধু booking reconciliation-এর coding-free Admin screen এখন scope-এ যুক্ত; full dashboard নয়।
 - Payment gateway integration, client wallet/accounting এবং outbound webhooks—আলাদা requirements ছাড়া। Ticket execution-এর authorization policy অবশ্য scope-এ আছে।
 - Refund, reissue ও VOID APIs/workflows এই project-এর বর্তমান scope-এ নেই; purchase flow Issue/Confirmed পর্যন্ত। Eligible unissued held booking-এর বিদ্যমান Cancel endpoint post-ticket refund/VOID নয়।
 
@@ -848,3 +875,136 @@ User explicitly requested same-airline alternative selection through the step be
 - The previously pending constrained comparison is now completed for this workload and these caps. Keep admission defaults unchanged. Further CPU-cost isolation/intermediate-batch comparison and shared snapshot/cache feasibility remain separate; broader production capacity remains unproven. No runtime edits, commit/push or deployment in this verification step.
 - Evidence: [VPS memory comparison](docs/evidence/SEARCH_MEMORY_VPS_2026-09-10.md).
 - Subsequent user decision: defer further CPU/batch-size optimization and capacity testing until VPS replacement. Current deployed code and admission settings stay unchanged. User authorized committing/pushing these verification documents only; use `[skip ci]` to avoid a new deployment.
+
+
+### Step 6 public PNR lookup and deadline persistence — 2026-09-10
+
+- [x] Added `POST /api/pnr` with the documented six-field casing and platform-owned Search/offer/price/booking UUIDs. Requires booking permission; foreign booking IDs and mismatched references are rejected before supplier traffic. Existing booking servicing remains independent of Search/new-booking enablement.
+- [x] Public PNR and existing reconciliation use the same saved supplier references. Corrected field-specific identity projection when supplier reference strings overlap; preserve nullable references and the documented `bookingRef` PNR mirror.
+- [x] Validate PNR/status/echoed references, atomically persist evidence and redacted audit, and update the latest raw ticketing deadline. Missing/invalid latest deadlines clear old authority; failed responses do not overwrite deadlines. Database dispatch timestamps prevent older overlapping observations from overwriting newer persisted ones. Supplier timezone remains unverified.
+- [x] PNR reads never Book/Cancel/Issue and never resolve an uncertain booking automatically. Local status/idempotent Book output remains the original outcome; current supplier status/deadline is exposed through PNR. Manual-resolution header remains true for unresolved bookings, non-Booked supplier status or ticket-number evidence.
+- [x] Formatting, strict all-target Clippy and all 45 ordinary tests pass. Full disposable PostgreSQL integration passed in 37.07 seconds, including public PNR ownership/reference isolation, servicing controls, colliding/null reference projection, invalid supplier responses, deadline clearing and stale-observation protection. Disposable database removed after verification.
+- No supplier network calls, real booking/ticketing, schema migration, commit/push or deployment performed. Actual Hold/Issue validation remains restricted to Triplover UAT under the latest user instruction.
+- [ ] Step 6 remains partial: audited manual resolution, Cancel/idempotency and full lifecycle/supplier acceptance remain unfinished. This update implements the next PNR increment, not the whole booking lifecycle. Step 7 ticketing and other documented coverage gaps are unchanged.
+- Contract: [Booking and PNR API](docs/BOOKING_API.md).
+
+### Admin reconciliation and coding-free screen — 2026-09-10
+
+- User approved the proposed Admin screen and manual reconciliation. This narrowly supersedes the initial frontend exclusion for reconciliation only; full administrative dashboard remains outside scope.
+- [x] Bengali `/admin/reconciliation` screen: existing human-admin login, unresolved/resolved lists, status recheck, supplier-confirmed outcome form and immutable decision history. Admins do not edit code or enter API reference/version fields.
+- [x] Protected Admin list/detail/recheck/resolve APIs; explicit evidence/reference/confirmation, optimistic version plus row lock, atomic audit and manual outcomes (`held`, `not_created`, `issued`, `cancelled`). Client tokens are rejected; Admin sessions remain separate from commercial API credentials.
+- [x] Pending requests younger than five minutes cannot be manually resolved. Delayed supplier completion preserves new evidence, reopens review and retains earlier decisions. Original idempotency keys never redispatch Book after manual resolution.
+- [x] Migration 0013 adds immutable history/late-outcome records, manual state and verified-PNR evidence flag. No passenger payload is exposed in the screen; private manual evidence stays out of client status and operational audit metadata.
+- [x] All 46 ordinary tests and full disposable PostgreSQL integration pass (final integration: 37.00 seconds), with strict Clippy, formatting and JavaScript syntax validation. Browser interaction/visual QA and live UAT acceptance are not claimed.
+- Local implementation only; no working/production database migration, supplier Book/Issue/network call, commit/push or deployment. Actual supplier booking validation remains Triplover UAT only.
+- [ ] Step 6 remains partial: Cancel/idempotency, complete servicing acceptance, private-data production protection/retention and remaining lifecycle coverage. Step 7 ticketing remains pending. Manual resolution records a verified human outcome, not an automatically verified held payload or ticketing authorization.
+- Contract and evidence: [Booking/Admin API](docs/BOOKING_API.md), [verification](docs/evidence/ADMIN_RECONCILIATION_2026-09-10.md).
+
+### Admin browser verification and public Triplover UAT flow — 2026-09-10
+
+- [x] User authorized browser checks and UAT continuation. Actual browser verification passed for login/error handling, selection/status recheck, required fields, synthetic evidence submission, resolved queue/history, missing-reference guidance, logout and reload. Corrected heading/help text to follow the resolved filter; reverified the final screen. No mobile/all-browser coverage claim.
+- [x] Corrected one non-comment heading in local `.env` that prevented parsing. Preserved host/credential assignment values. UAT runner now rejects dotenv parse failures explicitly and asserts exact HTTPS UAT hosts before network access.
+- [x] Public Triplover UAT Search (36 offers), RePrice and local acceptance passed. Exactly one Book was dispatched using the previously authorized UAT passenger input; supplier returned a duplicate-booking business failure without PNR. Public HTTP 202 `outcome_unknown` and identical same-key replay were verified; no second supplier Book.
+- [x] Client reconciliation and Admin recheck correctly returned 409 `MANUAL_RECONCILIATION_REQUIRED` without guessed references. A separate read of the prior UAT hold's original PNR references again returned `Record locator not found`. No real UAT manual decision, Cancel or Issue was performed.
+- [ ] Successful public UAT Hold → live PNR → reconciliation acceptance remains open. Supplier support must clarify duplicate/status/reference behaviour; failure output does not prove booking absence or authorize a blind retry. Step 6 remains partial.
+- [x] 46 ordinary tests, strict Clippy, formatting and JS syntax checks pass. Synthetic browser server stopped and disposable databases removed; UAT booking/audit data preserved in a private database archive and private request/response evidence.
+- No production database update, production Hold/Issue, commit/push or deployment. Browser/UAT-pending statements in the prior update are superseded only for the coverage actually verified here.
+- Evidence: [browser and UAT verification](docs/evidence/ADMIN_BROWSER_UAT_2026-09-10.md).
+
+### Complex route/airline markup review — 2026-09-10
+
+- User deferred the proposed UAT-status/Cancel work and authorized reviewing the next complex markup increment.
+- [x] Reviewed shared Search/RePrice scope matching and 18 saved supplier Search responses (7,104 repeated offer occurrences). Real connecting, mixed-carrier, return and multicity cases require an explicit whole-fare matching policy. Existing All/All guard regression passes.
+- [x] Prepared concrete options, examples and a proposed first-requested-route + plating-carrier convention, keeping directional routes, existing audience priority and one markup per passenger fare.
+- [ ] User decision on that proposed convention remains required under §5.7. No general complex scoped matching is enabled; the proposal is not an approved business rule. Branded/multiple-component coverage and other Step 4 gaps remain separate.
+- No supplier calls, runtime pricing changes, database writes or release. Report: [complex markup decision](docs/evidence/COMPLEX_MARKUP_DECISION_2026-09-10.md).
+
+### Return scope approval and conditional per-leg calculation — 2026-09-10
+
+- User approved return route matching: DAC→SIN→DAC uses the applicable DAC→SIN rule as one journey. A separate SIN→DAC one-way does not reverse-match that rule; a SIN→DAC specific rule must be configured for that scope. Existing audience priority and broader fallback remain unchanged.
+- User requests per-leg markup **if the supplier actually supplies separate passenger-type fares for each leg**. This condition supersedes the earlier blanket per-segment prohibition only for verified leg/pax fare coverage. Do not infer leg prices by splitting totals or treating a booking component as a leg.
+- [x] Offline review of 7,104 Search offers and 33 populated RePrice fares found whole-journey passenger fares, one booking component each, and exact passenger-count sums matching offer totals. Directions/segments do not contain separate leg/pax monetary fares in these samples. Current whole-journey passenger calculation remains applicable to this coverage.
+- [ ] Return scoped matching implementation remains pending. Mixed-airline carrier selection and multicity route selection are not approved by this clarification; the earlier proposal remains a proposal for those cases. Future actual leg/pax breakdowns need verified mapping and reconciliation before enabling per-leg calculation.
+- Evidence and a numeric return example: [passenger/leg fare review](docs/evidence/PASSENGER_LEG_FARE_REVIEW_2026-09-10.md). No supplier traffic or runtime pricing change.
+
+### Approved return markup implemented locally — 2026-09-10
+
+- [x] User authorized proceeding after the fare review. Shared Search/RePrice matching now maps exact A→B→A returns to the outbound A→B rule. A separate B→A one-way does not reverse-match it; established fallback still applies.
+- [x] Validate all alternatives, route endpoints and segment continuity. Return airline-specific matching requires consistent plating/segment carrier and explicit non-codeshare evidence. Airline-independent rules can use the return route without choosing a mixed/codeshare governing airline. Open-jaw/multicity scoped matching and unresolved carrier-specific cases remain guarded.
+- [x] Current whole-journey passenger fares receive one markup; no per-leg multiplication or fabricated split. Mock public Search → RePrice → acceptance confirms the same winning outbound price, with both directional rules active.
+- [x] All 49 ordinary tests, strict Clippy, formatting and full disposable PostgreSQL suite pass (37.28 seconds). Test database removed. No new migration, working/production database update, supplier traffic, commit/push or deployment.
+- The prior return-implementation-pending note is superseded within this coverage. Evidence: [return markup implementation](docs/evidence/RETURN_MARKUP_IMPLEMENTATION_2026-09-10.md).
+
+### Multicity first-route rule — user approved, 2026-09-10
+
+- After rechecking multicity whole-journey fares, the user selected the first route for rule matching. For DAC→SIN, SIN→BKK, BKK→DAC, use DAC→SIN. "First segment" here refers to the first requested journey route, not its first connecting flight segment. Later-route rules are not added, averaged or used as the first available match.
+- [x] Shared Search/RePrice matching now covers return and multicity requests with two or more routes. All route alternatives/endpoints and connection continuity are validated. Existing audience/scope fallback applies when the first route has no matching specific rule; no applicable rule remains `PRICING_CONFIGURATION_ERROR`.
+- [x] Markup applies once to each whole-journey passenger fare, then passenger counts aggregate. Previous proposals for averaging different route percentages are superseded and were not implemented. Mixed/codeshare airline-specific decisions and actual separately priced leg/passenger coverage remain separate.
+- Tests and release boundary: [multicity implementation](docs/evidence/MULTICITY_MARKUP_IMPLEMENTATION_2026-09-10.md).
+
+### First-segment airline — explicit correction, 2026-09-10
+
+- User corrected the proposed plating-carrier policy: airline markup follows the first flight segment's `airlineCode` in the first requested route. This supersedes plating-carrier selection and prior mixed-carrier policy deferrals. First requested route and whole-journey passenger calculation remain as approved.
+- [x] Shared Search/RePrice matching applies this policy to one-way, connecting, return and multicity fares. Later airlines and `platingCarrier` do not select a markup rule. Route/segment continuity and all-alternative validation remain.
+- If first-route alternatives disagree on their first airline, or the first airline is missing/invalid, airline-specific matching remains unresolved rather than choosing an arbitrary alternative. Airline-independent rules still use a validated route. Existing audience priority and no-match fallback semantics are unchanged.
+- Previous route-average proposals were not implemented. No supplier calls or release in this local increment. Evidence: [first-airline implementation](docs/evidence/FIRST_AIRLINE_MARKUP_2026-09-10.md).
+
+### Branded fare availability — fresh UAT check, 2026-09-10
+
+- [x] User requested confirmation. Three UAT-only direct Searches returned 35 one-way, 13 return and 16 multicity offers; all 64 have `brandedFares=null`. Supplier status arrays include partial failures, so this is not full-inventory or all-source acceptance.
+- Supplied documentation has optional `brandedFares`/`brandedFareRefs` but no separate Brand Content endpoint. Actual populated brand content, account entitlement and selection schema remain unverified; do not classify the feature as universally unavailable.
+- No Book/Issue, database writes, production supplier calls or release. Evidence: [fresh UAT brand check](docs/evidence/UAT_BRANDED_FARE_CHECK_2026-09-10.md).
+
+### Optional brand content and component work deferred — 2026-09-10
+
+- User instructed preserving supplier `brandedFares=null` exactly and planning brand content only when populated supplier data becomes available. Existing behavior preserves null; no content is synthesized. Brand implementation is deferred.
+- [x] Authorized offline component review examined all 944 then-present evidence JSON files without parse failures. 579 files contain 133,923 `bookingComponents` occurrences, all arrays of length one. Repeated original/selling/captured copies are included; these are not unique offers.
+- No multiple-component sample was found. Allocation work is deferred until real coverage evidence exists; current single-component pricing and rejection of unsupported multiple-component pricing remain. This audit does not settle historical tax discrepancies or prove that all supplier inventory is single-component.
+- Existing synthetic unsupported-component regression passes. No new runtime change, supplier traffic, database writes or release. Evidence: [component review](docs/evidence/BOOKING_COMPONENT_COVERAGE_2026-09-10.md).
+
+### Purchase flow order — user instruction, 2026-09-10
+
+- User prioritizes Hold → retrieve held booking/PNR → Ticket Issue → Direct Issue. Before issue, retrieval is the booking/PNR record, not an already-issued ticket. Cancel remains deferred; all supplier mutations remain restricted to Triplover UAT.
+- A fresh read of the previously successful UAT hold's original six references again returned `Record locator not found`, without a status/deadline. The later duplicate-booking attempt remains unresolved. No new Book or Issue was dispatched in this recheck; do not infer booking absence or retry automatically.
+- Addressed the previously documented public Hold shape gap: missing Book flightInfo aggregate total/base/tax is accepted only with the existing matching passenger/component/itinerary checks. Missing fields stay absent; present mismatches/nulls remain unresolved. Accepted selling values are projected once into existing fields.
+- Live successful public Hold → PNR acceptance and ticketing implementation/authorization/deadline verification remain open. Evidence: [hold continuation](docs/evidence/HOLD_CONTINUATION_2026-09-10.md).
+
+### BS domestic Hold/PNR acceptance — 2026-09-10
+
+- User authorized BS domestic one-way/return/multicity attempts and instructed not to use Robot/AI/System passenger names. Previously supplied private UAT passenger input was reused and checked.
+- [x] One-way DAC→CGP: supplier Created + PNR; public 202 exposed a nullable-cabin comparison gap. Verified PNR and Admin recheck both return Booked. Fixed the comparison without changing flight/RBD/money checks or inventing cabin labels; existing one-way unknown state is preserved for reconciliation.
+- [x] Return DAC→CXB→DAC after the fix: public Book 200/held, supplier Created, PNR and Admin recheck 200/Booked. Accepted selling fare stays unchanged; same-key replay sends no second Book. This closes a representative successful public UAT Hold→PNR acceptance case, not every supplier/carrier/lifecycle scenario.
+- [ ] Two BS multicity Searches (JSR/SPD and CGP/RJH alternatives) returned supplier no-availability/no-eligible-fare errors. No multicity Book was sent. Broader multicity hold acceptance remains open.
+- Exactly two supplier Hold calls; no Issue/Cancel/production traffic. 52 ordinary tests, full PostgreSQL suite and strict checks pass. Successful isolated UAT databases and private backups retained for continuation; failed-search/synthetic test databases removed. No commit/push/deploy.
+- Evidence: [BS domestic validation](docs/evidence/BS_DOMESTIC_HOLD_2026-09-10.md). Ticket Issue and Direct Issue remain the next requested stages and are not completed by these Hold tests.
+
+### User-selected BS five-route multicity recheck — 2026-09-10
+
+- [x] Direct UAT Search for SPD→DAC (22 Sep), DAC→CGP (23 Sep), CGP→DAC (24 Sep), DAC→CXB (25 Sep), CXB→CGP (26 Sep), all 2026, BS preference and prior 1 ADT + 1 child mix.
+- Supplier returned zero offers, isSuccess=false and no availability for the given criteria. No platform pricing rejection caused this result; a particular failing leg is not established. No RePrice/Book/Issue was sent.
+- Evidence: [five-route Search](docs/evidence/BS_FIVE_ROUTE_SEARCH_2026-09-10.md). Multicity availability/hold acceptance remains open.
+
+- Subsequent user-requested four-route recheck removed SPD→DAC and retained DAC→CGP 23 Sep, CGP→DAC 24 Sep, DAC→CXB 25 Sep, CXB→CGP 26 Sep 2026. Direct BS UAT Search again returned zero offers and supplier no availability. No Book/Issue; evidence appended to the same report.
+
+- Three-route follow-up (DAC→CGP 23 Sep, CGP→DAC 24 Sep, DAC→CXB 25 Sep 2026) returned an explicit supplier limitation: `Current vendor cannot sell more than 2 OriginDestination. for USBangla`. Treat this as current BS UAT vendor-path evidence, not a global platform/supplier limit or proof of two-route availability. No automatic splitting into bookings, RePrice or Issue. Evidence appended to the same report.
+
+- User-requested all-airline recheck of those three routes returned four BG bookable/refundable Search offers (supplier totals BDT 24,228 / 29,843 / 30,720 / 39,496 for 1 ADT + 1 child). BS vendor-limit and Sabre-token failures coexist with successful sources. No RePrice/Book/Issue; multicity Search availability is evidenced for BG, not yet its Hold acceptance. Same report contains evidence.
+
+### BG multicity Hold — 2026-09-10
+
+- [x] User authorized booking. Fresh BG Search → lowest eligible RePrice → acceptance → exactly one Hold succeeded for DAC→CGP 23 Sep, CGP→DAC 24 Sep, DAC→CXB 25 Sep 2026. Public Book 200/held, supplier Created + PNR. Same-key replay is identical without another dispatch.
+- [x] PNR and Admin retrieval return 200, but status is Created and latest ticketing deadline empty. Multicity Hold/retrieval is evidenced; issue readiness and complete lifecycle acceptance remain open. No ticketing/direct issue/cancellation executed.
+- Original supplier total BDT 24,228; accepted selling BDT 25,228 for the two previously supplied passengers. Independent exact pricing audit passes. Private evidence, isolated booking DB and backup retained; no production change or release. Evidence: [BG multicity Hold](docs/evidence/BG_MULTICITY_HOLD_2026-09-10.md).
+
+### Public booking reference — 2026-09-11
+
+- [x] User-selected `STR` + GDS PNR + airline PNR, e.g. `STR8FE94RKECOCE`, stored with the existing booking UUID. No numeric ST reference.
+- [x] Owner-scoped `GET /api/bookings/by-reference/{reference}` retrieves the saved order. Book/replay/retrieve expose `X-Booking-Reference`; Admin shows Order Ref.
+- [x] Migration backfill, immutable established reference, missing/multiple airline-PNR fallback to UUID, and duplicate-pair 409 handling. Reference possession does not bypass authentication.
+- [x] Retained isolated BG UAT booking successfully retrieved by `STR8FE94RKECOCE` and UUID with identical saved responses, HTTP 200. No supplier calls, ticket issue or production migration in this step.
+- Evidence: [public reference verification](docs/evidence/PUBLIC_BOOKING_REFERENCE_2026-09-11.md).
+
+### Pending changes release authorization — 2026-09-11
+
+- User explicitly authorized committing/pushing all pending work and updating the database. Include migrations 0013–0014 in the existing main-branch CI/CD backup → migrate → deploy workflow.
+- Production Hold/Issue remains prohibited; this release authorization does not authorize supplier mutations or copying private UAT booking data into production. Deployment result will be recorded after verification.

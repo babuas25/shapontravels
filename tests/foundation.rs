@@ -248,3 +248,64 @@ async fn gzip_leaves_small_health_and_auth_errors_unchanged() {
         }
     }
 }
+
+#[tokio::test]
+async fn admin_panel_is_a_same_origin_login_shell() {
+    let app = router(unavailable_state());
+    let response = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .uri("/admin/reconciliation")
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(response.status(), StatusCode::OK);
+    assert!(
+        response.headers()["content-security-policy"]
+            .to_str()
+            .unwrap()
+            .contains("frame-ancestors 'none'")
+    );
+    let html = String::from_utf8(
+        response
+            .into_body()
+            .collect()
+            .await
+            .unwrap()
+            .to_bytes()
+            .to_vec(),
+    )
+    .unwrap();
+    assert!(html.contains("Admin লগইন"));
+    assert!(html.contains("/admin/reconciliation.js"));
+    let response = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .uri("/admin/reconciliation.js")
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(response.status(), StatusCode::OK);
+    assert!(
+        response.headers()["content-type"]
+            .to_str()
+            .unwrap()
+            .contains("javascript")
+    );
+    let response = app
+        .oneshot(
+            Request::builder()
+                .uri("/admin/bookings")
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(response.status(), StatusCode::UNAUTHORIZED);
+}

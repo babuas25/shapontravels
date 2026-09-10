@@ -3,6 +3,7 @@ pub mod cleanup;
 mod markup;
 mod prebooking;
 mod reprice;
+mod return_markup;
 mod search;
 use axum::{Router, body::Body, http::Request};
 use http_body_util::BodyExt;
@@ -210,7 +211,8 @@ pub async fn authentication(pool: &PgPool) {
     markup::verify(&app, admin, token, pool).await;
     markup::activation(&app, admin, token, pool).await;
     search::verify(&app, admin, token, pool).await;
-    booking::verify(pool, token).await;
+    booking::verify(pool, token, admin).await;
+    return_markup::verify(pool, admin, token).await;
     let (lifetime,):(i64,)=sqlx::query_as("SELECT EXTRACT(EPOCH FROM (expires_at-created_at))::bigint FROM machine_tokens WHERE client_id=$1").bind(client_uuid).fetch_one(pool).await.unwrap();
     assert_eq!(lifetime, 1800);
     assert_eq!(

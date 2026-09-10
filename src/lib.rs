@@ -1,3 +1,4 @@
+pub mod admin_bookings;
 pub mod auth;
 pub mod booking;
 pub mod cleanup;
@@ -117,6 +118,7 @@ pub fn router_with_search_limits(
     doc.merge(search::SearchDoc::openapi());
     doc.merge(reprice::RepriceDoc::openapi());
     doc.merge(booking::BookingDoc::openapi());
+    doc.merge(admin_bookings::AdminBookingDoc::openapi());
     if let Some(components) = doc.components.as_mut() {
         use utoipa::openapi::security::{Http, HttpAuthScheme, SecurityScheme};
         components.add_security_scheme(
@@ -136,6 +138,7 @@ pub fn router_with_search_limits(
         .merge(search::routes())
         .merge(reprice::routes())
         .merge(booking::routes())
+        .merge(admin_bookings::routes())
         .route("/health/live", get(live))
         .route("/health/ready", get(ready))
         .merge(SwaggerUi::new("/docs").url("/openapi.json", doc))

@@ -7,7 +7,7 @@ use crate::{
 use axum::{
     Json, Router,
     extract::{Path, State},
-    http::{HeaderMap, StatusCode},
+    http::{HeaderMap, HeaderValue, StatusCode},
     routing::{get, post},
 };
 use chrono::NaiveDate;
@@ -97,14 +97,24 @@ struct Quote {
 #[derive(sqlx::FromRow)]
 struct Booking {
     id: Uuid,
+    public_ref: Option<String>,
     request_hash: Vec<u8>,
     state: String,
     public_response: Option<Value>,
 }
-fn reply(row: Booking) -> (StatusCode, Json<Value>) {
-    if row.state == "held" {
+type BookingReply = (StatusCode, HeaderMap, Json<Value>);
+fn reply(row: Booking) -> BookingReply {
+    let mut headers = HeaderMap::new();
+    if let Some(reference) = row.public_ref.as_ref() {
+        headers.insert(
+            "x-booking-reference",
+            HeaderValue::from_str(reference).expect("database-constrained reference"),
+        );
+    }
+    if row.state == "held" || row.state == "manually_resolved" {
         return (
             StatusCode::OK,
+            headers,
             Json(
                 row.public_response
                     .unwrap_or(json!({"error":"BOOKING_RESPONSE_UNAVAILABLE"})),
@@ -113,6 +123,7 @@ fn reply(row: Booking) -> (StatusCode, Json<Value>) {
     }
     (
         StatusCode::ACCEPTED,
+        headers,
         Json(json!({"bookingId":row.id,"state":row.state,"requiresReconciliation":true})),
     )
 }
@@ -241,7 +252,7 @@ async fn book(
     State(state): State<AppState>,
     headers: HeaderMap,
     Json(request): Json<BookRequest>,
-) -> Result<(StatusCode, Json<Value>), ApiError> {
+) -> Result<BookingReply, ApiError> {
     machine.require("booking")?;
     let key = headers
         .get("idempotency-key")
@@ -256,7 +267,7 @@ async fn book(
         .bind(machine.client_id)
         .execute(&mut *tx)
         .await?;
-    if let Some(previous)=sqlx::query_as::<_,Booking>("SELECT id,request_hash,state,public_response FROM flight_bookings WHERE client_id=$1 AND idempotency_key=$2").bind(machine.client_id).bind(key).fetch_optional(&mut *tx).await? {
+    if let Some(previous)=sqlx::query_as::<_,Booking>("SELECT id,public_ref,request_hash,state,public_response FROM flight_bookings WHERE client_id=$1 AND idempotency_key=$2").bind(machine.client_id).bind(key).fetch_optional(&mut *tx).await? {
   if previous.request_hash!=hash{return Err(ApiError(StatusCode::CONFLICT,"IDEMPOTENCY_KEY_REUSED"));}
   return Ok(reply(previous));
  }
@@ -348,11 +359,21 @@ async fn book(
   let supplier_ref=original.as_ref().and_then(|v|v.pointer("/item1/bookingCodeRef")).and_then(Value::as_str).map(str::to_owned);
   let deadline=original.as_ref().and_then(|v|v.pointer("/item1/ticketingTimeLimit")).and_then(Value::as_str).map(str::to_owned);
   let mut tx=pool.begin().await?;
-  sqlx::query("UPDATE flight_bookings SET state=$2,original_response=$3,public_response=$4,pnr=$5,supplier_booking_ref=$6,ticketing_time_limit=$7,error_code=$8,updated_at=clock_timestamp() WHERE id=$1")
-   .bind(booking_id).bind(status).bind(original).bind(&public).bind(pnr).bind(supplier_ref).bind(deadline).bind(if public.is_some(){None}else{Some("BOOKING_OUTCOME_UNKNOWN")}).execute(&mut *tx).await?;
+  let written=sqlx::query("UPDATE flight_bookings SET state=$2,original_response=$3,public_response=$4,pnr=$5,supplier_booking_ref=$6,ticketing_time_limit=$7,error_code=$8,updated_at=clock_timestamp() WHERE id=$1 AND state='pending'")
+   .bind(booking_id).bind(status).bind(&original).bind(&public).bind(&pnr).bind(&supplier_ref).bind(&deadline).bind(if public.is_some(){None}else{Some("BOOKING_OUTCOME_UNKNOWN")}).execute(&mut *tx).await?.rows_affected();
+  if written == 0 {
+   // A late worker must preserve new evidence and reopen review, not overwrite a human decision.
+   sqlx::query("INSERT INTO booking_late_outcomes(booking_id,response) VALUES($1,$2)").bind(booking_id).bind(&original).execute(&mut *tx).await?;
+   sqlx::query("UPDATE flight_bookings SET state='outcome_unknown',public_response=NULL,original_response=COALESCE($2,original_response),pnr=COALESCE($3,pnr),supplier_booking_ref=COALESCE($4,supplier_booking_ref),error_code='LATE_BOOKING_OUTCOME',updated_at=clock_timestamp() WHERE id=$1").bind(booking_id).bind(&original).bind(&pnr).bind(&supplier_ref).execute(&mut *tx).await?;
+   sqlx::query("INSERT INTO audit_events(actor_kind,action,resource_kind,resource_id) VALUES('system','booking.late_outcome','booking',$1)").bind(booking_id.to_string()).execute(&mut *tx).await?;
+   let saved=sqlx::query_as::<_,Booking>("SELECT id,public_ref,request_hash,state,public_response FROM flight_bookings WHERE id=$1").bind(booking_id).fetch_one(&mut *tx).await?;
+   tx.commit().await?;
+   return Ok::<_,sqlx::Error>(saved);
+  }
   sqlx::query("INSERT INTO audit_events(actor_kind,action,resource_kind,resource_id,metadata) VALUES('system','booking.outcome','booking',$1,$2)").bind(booking_id.to_string()).bind(json!({"state":status})).execute(&mut *tx).await?;
+  let saved = sqlx::query_as::<_,Booking>("SELECT id,public_ref,request_hash,state,public_response FROM flight_bookings WHERE id=$1").bind(booking_id).fetch_one(&mut *tx).await?;
   tx.commit().await?;
-  Ok::<_,sqlx::Error>(Booking{id:booking_id,request_hash:vec![],state:status.into(),public_response:public})
+  Ok::<_,sqlx::Error>(saved)
  }).await.map_err(|_|ApiError(StatusCode::SERVICE_UNAVAILABLE,"BOOKING_OUTCOME_UNKNOWN"))?.map(reply).map_err(ApiError::from)
 }
 fn itinerary(fare: &Value) -> Option<Value> {
@@ -392,6 +413,62 @@ fn money(v: &Value) -> Option<bigdecimal::BigDecimal> {
     }
     v.to_string().parse().ok()
 }
+fn same_held_itinerary(a: &Value, b: &Value) -> Option<bool> {
+    let mut a = itinerary(a)?;
+    let mut b = itinerary(b)?;
+    let groups_a = a.as_array_mut()?;
+    let groups_b = b.as_array_mut()?;
+    if groups_a.len() != groups_b.len() {
+        return Some(false);
+    }
+    for (ga, gb) in groups_a.iter_mut().zip(groups_b) {
+        let (oa, ob) = (ga.as_array_mut()?, gb.as_array_mut()?);
+        if oa.len() != ob.len() {
+            return Some(false);
+        }
+        for (da, db) in oa.iter_mut().zip(ob) {
+            let (sa, sb) = (da.as_array_mut()?, db.as_array_mut()?);
+            if sa.len() != sb.len() {
+                return Some(false);
+            }
+            for (fa, fb) in sa.iter_mut().zip(sb) {
+                // Cabin labels are optional in observed Book responses. Keep
+                // all flight/RBD checks and reject conflicting explicit labels.
+                let ca = &fa[7];
+                let cb = &fb[7];
+                let missing = |v: &Value| v.is_null() || v.as_str() == Some("");
+                if (!missing(ca) && !ca.is_string()) || (!missing(cb) && !cb.is_string()) {
+                    return Some(false);
+                }
+                if missing(ca) || missing(cb) {
+                    fa[7] = Value::Null;
+                    fb[7] = Value::Null;
+                }
+            }
+        }
+    }
+    Some(a == b)
+}
+#[cfg(test)]
+mod held_itinerary_tests {
+    use super::*;
+    #[test]
+    fn optional_cabin_does_not_hide_explicit_conflicts_or_flight_changes() {
+        let body: Value = serde_json::from_str(include_str!(
+            "../tests/fixtures/production/triplover-return.json"
+        ))
+        .unwrap();
+        let original = &body["item1"]["airSearchResponses"][0];
+        let mut book = original.clone();
+        book["directions"][0][0]["segments"][0]["cabinClass"] = Value::Null;
+        assert_eq!(same_held_itinerary(&book, original), Some(true));
+        book["directions"][0][0]["segments"][0]["cabinClass"] = json!("Business");
+        assert_eq!(same_held_itinerary(&book, original), Some(false));
+        book["directions"][0][0]["segments"][0]["cabinClass"] = Value::Null;
+        book["directions"][0][0]["segments"][0]["flightNumber"] = json!("changed");
+        assert_eq!(same_held_itinerary(&book, original), Some(false));
+    }
+}
 fn held_response(body: &Value, q: &Quote, id: Uuid) -> Option<Value> {
     let info = &body["item1"];
     if body.pointer("/item2/isSuccess") != Some(&json!(true))
@@ -412,7 +489,7 @@ fn held_response(body: &Value, q: &Quote, id: Uuid) -> Option<Value> {
     if let Some(flight) = info.get("flightInfo") {
         let original = &q.original["item1"];
         let selling = &q.selling["item1"];
-        if itinerary(flight)? != itinerary(original)? {
+        if !same_held_itinerary(flight, original)? {
             return None;
         }
         if flight.get("currency").is_some() && flight["currency"] != original["currency"] {
@@ -425,7 +502,10 @@ fn held_response(body: &Value, q: &Quote, id: Uuid) -> Option<Value> {
             return None;
         }
         for key in ["totalPrice", "basePrice", "taxes"] {
-            if money(&flight[key])? != money(&original[key])? {
+            // Observed UAT Book flightInfo omits these aggregate fields.
+            // Present values must still match; passenger/component checks below
+            // remain mandatory and establish the accepted monetary coverage.
+            if flight.get(key).is_some() && money(&flight[key])? != money(&original[key])? {
                 return None;
             }
         }
@@ -457,7 +537,9 @@ fn held_response(body: &Value, q: &Quote, id: Uuid) -> Option<Value> {
                 return None;
             }
         }
-        result["item1"]["flightInfo"]["totalPrice"] = selling["totalPrice"].clone();
+        if flight.get("totalPrice").is_some() {
+            result["item1"]["flightInfo"]["totalPrice"] = selling["totalPrice"].clone();
+        }
         for key in ["totalPrice", "discountPrice"] {
             if result["item1"]["flightInfo"]["bookingComponents"][0]
                 .get(key)
@@ -477,13 +559,16 @@ fn held_response(body: &Value, q: &Quote, id: Uuid) -> Option<Value> {
     Some(result)
 }
 fn bind_booking_identities(v: &mut Value, q: &Quote, id: Uuid) {
+    bind_pnr_identities(v, q.search_id, q.offer_id, q.price_id, id);
+}
+fn bind_pnr_identities(v: &mut Value, search: Uuid, offer: Uuid, price: Uuid, id: Uuid) {
     match v {
         Value::Object(m) => {
             for (k, v) in m {
                 let identity = match k.as_str() {
-                    "uniqueTransID" => Some(q.search_id),
-                    "itemCodeRef" => Some(q.offer_id),
-                    "priceCodeRef" => Some(q.price_id),
+                    "uniqueTransID" => Some(search),
+                    "itemCodeRef" => Some(offer),
+                    "priceCodeRef" => Some(price),
                     "bookingCodeRef" => Some(id),
                     _ => None,
                 };
@@ -493,12 +578,12 @@ fn bind_booking_identities(v: &mut Value, q: &Quote, id: Uuid) {
                     *v = json!(identity);
                     continue;
                 }
-                bind_booking_identities(v, q, id);
+                bind_pnr_identities(v, search, offer, price, id);
             }
         }
         Value::Array(a) => {
             for v in a {
-                bind_booking_identities(v, q, id);
+                bind_pnr_identities(v, search, offer, price, id);
             }
         }
         _ => {}
@@ -519,10 +604,82 @@ async fn status(
     machine: Machine,
     State(state): State<AppState>,
     Path(id): Path<Uuid>,
-) -> Result<(StatusCode, Json<Value>), ApiError> {
+) -> Result<BookingReply, ApiError> {
     machine.require("booking")?;
-    let row=sqlx::query_as::<_,Booking>("SELECT id,request_hash,state,public_response FROM flight_bookings WHERE id=$1 AND client_id=$2").bind(id).bind(machine.client_id).fetch_optional(&state.pool).await?.ok_or(ApiError(StatusCode::NOT_FOUND,"NOT_FOUND"))?;
+    let row=sqlx::query_as::<_,Booking>("SELECT id,public_ref,request_hash,state,public_response FROM flight_bookings WHERE id=$1 AND client_id=$2").bind(id).bind(machine.client_id).fetch_optional(&state.pool).await?.ok_or(ApiError(StatusCode::NOT_FOUND,"NOT_FOUND"))?;
     Ok(reply(row))
+}
+#[utoipa::path(get,path="/api/bookings/by-reference/{reference}",operation_id="booking_status_by_reference",tag="Flights",security(("machine_token"=[])),params(("reference"=String,Path,description="Platform public booking reference, e.g. STR8FE94RKECOCE")),responses((status=200,body=Object,description="Saved booking response; X-Booking-Reference carries the stable public reference"),(status=202,body=Object,description="Unresolved booking; X-Booking-Reference remains stable"),(status=404,description="Malformed, unknown or foreign reference"),(status=409,description="Reference matches multiple bookings; use booking UUID")))]
+async fn status_by_reference(
+    machine: Machine,
+    State(state): State<AppState>,
+    Path(reference): Path<String>,
+) -> Result<BookingReply, ApiError> {
+    machine.require("booking")?;
+    if reference.len() != 15
+        || !reference.starts_with("STR")
+        || !reference.as_bytes()[3..]
+            .iter()
+            .all(|b| b.is_ascii_uppercase() || b.is_ascii_digit())
+    {
+        return Err(ApiError(StatusCode::NOT_FOUND, "NOT_FOUND"));
+    }
+    let mut rows = sqlx::query_as::<_, Booking>("SELECT id,public_ref,request_hash,state,public_response FROM flight_bookings WHERE public_ref=$1 AND client_id=$2 LIMIT 2")
+        .bind(reference).bind(machine.client_id).fetch_all(&state.pool).await?;
+    if rows.len() > 1 {
+        return Err(ApiError(
+            StatusCode::CONFLICT,
+            "BOOKING_REFERENCE_AMBIGUOUS",
+        ));
+    }
+    let row = rows
+        .pop()
+        .ok_or(ApiError(StatusCode::NOT_FOUND, "NOT_FOUND"))?;
+    Ok(reply(row))
+}
+/// Public supplier-shaped references always identify platform-owned records.
+#[derive(Deserialize, ToSchema)]
+#[serde(deny_unknown_fields)]
+pub struct PnrRequest {
+    #[serde(rename = "PNR")]
+    pnr: String,
+    #[serde(rename = "BookingRefNumber")]
+    booking_ref_number: String,
+    #[serde(rename = "UniqueTransID")]
+    #[schema(value_type = String)]
+    search_id: Uuid,
+    #[serde(rename = "PriceCodeRef")]
+    #[schema(value_type = String)]
+    price_id: Uuid,
+    #[serde(rename = "ItemCodeRef")]
+    #[schema(value_type = String)]
+    offer_id: Uuid,
+    #[serde(rename = "BookingCodeRef")]
+    #[schema(value_type = String)]
+    booking_id: Uuid,
+}
+#[utoipa::path(post,path="/api/pnr",operation_id="pnr",tag="Flights",security(("machine_token"=[])),request_body=PnrRequest,responses((status=200,body=Object,description="Live supplier PNR status and latest raw lastTicketTime; timezone is unverified. X-Booking-State and X-Manual-Resolution-Required describe local outcome. Does not Book, Cancel or Issue."),(status=403,description="Booking permission or supplier servicing disabled"),(status=404,description="Unknown or foreign booking"),(status=409,description="Missing stored supplier references; manual reconciliation required"),(status=422,description="Platform reference mismatch"),(status=502,description="Supplier lookup failed or mismatched response"),(status=504,description="Supplier deadline exceeded")))]
+async fn pnr(
+    machine: Machine,
+    State(state): State<AppState>,
+    Json(request): Json<PnrRequest>,
+) -> Result<(HeaderMap, Json<Value>), ApiError> {
+    machine.require("booking")?;
+    let row: Option<(Uuid, Uuid, Uuid, Option<String>)> = sqlx::query_as(
+        "SELECT o.search_id,b.offer_id,b.price_id,b.pnr FROM flight_bookings b JOIN flight_offers o ON o.id=b.offer_id WHERE b.id=$1 AND b.client_id=$2",
+    ).bind(request.booking_id).bind(machine.client_id).fetch_optional(&state.pool).await?;
+    let (search, offer, price, saved_pnr) =
+        row.ok_or(ApiError(StatusCode::NOT_FOUND, "NOT_FOUND"))?;
+    if request.search_id != search
+        || request.offer_id != offer
+        || request.price_id != price
+        || !text(&request.pnr, 128)
+        || request.booking_ref_number != request.pnr
+        || saved_pnr.as_deref() != Some(request.pnr.as_str())
+    {
+        return Err(error("BOOKING_REFERENCE_MISMATCH"));
+    }
+    reconcile(machine, State(state), Path(request.booking_id)).await
 }
 /// Reconciliation is read-only. Never release a reservation or resend Book.
 #[utoipa::path(post,path="/api/bookings/{id}/reconcile",operation_id="booking_reconcile",tag="Flights",security(("machine_token"=[])),params(("id"=String,Path)),responses((status=200,body=Object,description="Live PNR evidence; unresolved booking remains blocked"),(status=409,description="Missing supplier references; manual reconciliation required"),(status=502,description="Supplier read failed")))]
@@ -532,9 +689,21 @@ async fn reconcile(
     Path(id): Path<Uuid>,
 ) -> Result<(HeaderMap, Json<Value>), ApiError> {
     machine.require("booking")?;
-    let row:Option<(String,Value,Option<Value>,Value,String)>=sqlx::query_as("SELECT b.supplier_id,b.request,b.original_response,r.reference_map,b.state FROM flight_bookings b JOIN flight_reprices r ON r.id=b.price_id WHERE b.id=$1 AND b.client_id=$2").bind(id).bind(machine.client_id).fetch_optional(&state.pool).await?;
+    reconcile_owned(&state, machine.client_id, id, "client", machine.client_id).await
+}
+pub(crate) async fn reconcile_owned(
+    state: &AppState,
+    client_id: Uuid,
+    id: Uuid,
+    actor_kind: &str,
+    actor_id: Uuid,
+) -> Result<(HeaderMap, Json<Value>), ApiError> {
+    let row:Option<(String,Value,Option<Value>,Value,String)>=sqlx::query_as("SELECT b.supplier_id,b.request,b.original_response,r.reference_map,b.state FROM flight_bookings b JOIN flight_reprices r ON r.id=b.price_id WHERE b.id=$1 AND b.client_id=$2").bind(id).bind(client_id).fetch_optional(&state.pool).await?;
     let (supplier, request, original, reference_map, booking_state) =
         row.ok_or(ApiError(StatusCode::NOT_FOUND, "NOT_FOUND"))?;
+    let (search_id, offer_id, price_id): (Uuid, Uuid, Uuid) = sqlx::query_as(
+        "SELECT o.search_id,b.offer_id,b.price_id FROM flight_bookings b JOIN flight_offers o ON o.id=b.offer_id WHERE b.id=$1 AND b.client_id=$2",
+    ).bind(id).bind(client_id).fetch_one(&state.pool).await?;
     let original = original.ok_or(ApiError(
         StatusCode::CONFLICT,
         "MANUAL_RECONCILIATION_REQUIRED",
@@ -587,6 +756,10 @@ async fn reconcile(
         .get(&supplier)
         .ok_or(error("SUPPLIER_CONFIGURATION_ERROR"))?
         .transport;
+    // Database time orders overlapping lookups by dispatch, not completion.
+    let (started,): (chrono::DateTime<chrono::Utc>,) = sqlx::query_as("SELECT clock_timestamp()")
+        .fetch_one(&state.pool)
+        .await?;
     let body = tokio::time::timeout(
         std::time::Duration::from_secs(timeout as u64),
         transport.read(crate::supplier::ReadOperation::Pnr, &payload),
@@ -594,24 +767,56 @@ async fn reconcile(
     .await
     .map_err(|_| ApiError(StatusCode::GATEWAY_TIMEOUT, "SUPPLIER_TIMEOUT"))?
     .map_err(|_| ApiError(StatusCode::BAD_GATEWAY, "SUPPLIER_READ_FAILED"))?;
-    // Preserve even failure evidence without changing the booking outcome.
-    sqlx::query("UPDATE flight_bookings SET last_reconciliation=$2,reconciled_at=clock_timestamp() WHERE id=$1").bind(id).bind(&body).execute(&state.pool).await?;
-    if body.pointer("/item2/isSuccess") != Some(&json!(true))
-        || body["item1"]["pnr"] != payload["PNR"]
-    {
+    let valid = body.pointer("/item2/isSuccess") == Some(&json!(true))
+        && body["item1"]["pnr"] == payload["PNR"]
+        && body["item1"]["status"]
+            .as_str()
+            .is_some_and(|s| text(s, 100))
+        && [
+            ("bookingCodeRef", "BookingCodeRef"),
+            ("priceCodeRef", "PriceCodeRef"),
+            ("itemCodeRef", "ItemCodeRef"),
+            ("uniqueTransID", "UniqueTransID"),
+        ]
+        .iter()
+        .all(|(key, source)| {
+            let value = &body["item1"][key];
+            value.is_null() || value == &json!("") || value == &payload[source]
+        });
+    // Missing/invalid latest deadlines clear old authority; never invent a timezone.
+    let deadline = body["item1"]["lastTicketTime"]
+        .as_str()
+        .filter(|s| chrono::NaiveDateTime::parse_from_str(s, "%m/%d/%Y %H:%M:%S").is_ok());
+    let mut tx = state.pool.begin().await?;
+    let changed = sqlx::query("UPDATE flight_bookings SET last_reconciliation=$2,last_reconciliation_verified=$4,reconciled_at=$3,ticketing_time_limit=CASE WHEN $4 THEN $5 ELSE ticketing_time_limit END,updated_at=clock_timestamp() WHERE id=$1 AND (reconciled_at IS NULL OR reconciled_at <= $3)")
+        .bind(id).bind(&body).bind(started).bind(valid).bind(deadline)
+        .execute(&mut *tx).await?.rows_affected();
+    if changed > 0 {
+        sqlx::query("INSERT INTO audit_events(actor_kind,actor_id,action,resource_kind,resource_id,metadata) VALUES($4,$1,'booking.pnr','booking',$2,$3)")
+            .bind(actor_id.to_string()).bind(id.to_string())
+            .bind(json!({"verified":valid,"deadlineAvailable":valid && deadline.is_some()})).bind(actor_kind)
+            .execute(&mut *tx).await?;
+    }
+    tx.commit().await?;
+    if !valid {
         return Err(ApiError(
             StatusCode::BAD_GATEWAY,
             "SUPPLIER_RECONCILIATION_FAILED",
         ));
     }
+    let booking_ref = body["item1"].get("bookingRef").cloned();
+    let requires_manual =
+        booking_state != "held" || body["item1"]["status"] != "Booked" || contains_ticket(&body);
     let mut public = body;
     let mut refs = reference_map
         .as_object()
         .cloned()
         .ok_or(error("INVALID_SAVED_REFERENCES"))?;
     bind_references(&mut public, &mut refs);
-    if let Some(v) = public["item1"].get_mut("bookingCodeRef") {
-        *v = json!(id);
+    bind_pnr_identities(&mut public, search_id, offer_id, price_id, id);
+    // bookingRef is the documented PNR mirror, not an opaque platform reference.
+    if let Some(value) = booking_ref {
+        public["item1"]["bookingRef"] = value;
     }
     let mut headers = HeaderMap::new();
     headers.insert(
@@ -622,25 +827,26 @@ async fn reconcile(
     );
     headers.insert(
         "x-manual-resolution-required",
-        if booking_state == "held" {
-            "false"
-        } else {
-            "true"
-        }
-        .parse()
-        .unwrap(),
+        if requires_manual { "true" } else { "false" }
+            .parse()
+            .unwrap(),
     );
     Ok((headers, Json(public)))
 }
 #[derive(OpenApi)]
 #[openapi(
-    paths(book, status, reconcile),
-    components(schemas(BookRequest, Passenger, Name, Document, Contact))
+    paths(book, status, status_by_reference, reconcile, pnr),
+    components(schemas(BookRequest, Passenger, Name, Document, Contact, PnrRequest))
 )]
 pub struct BookingDoc;
 pub fn routes() -> Router<AppState> {
     Router::new()
         .route("/api/Book", post(book))
+        .route("/api/pnr", post(pnr))
         .route("/api/bookings/{id}", get(status))
+        .route(
+            "/api/bookings/by-reference/{reference}",
+            get(status_by_reference),
+        )
         .route("/api/bookings/{id}/reconcile", post(reconcile))
 }

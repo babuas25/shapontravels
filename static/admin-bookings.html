@@ -1,0 +1,279 @@
+<!doctype html>
+<html lang="bn">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width,initial-scale=1" />
+    <meta name="description" content="Shapon Travels booking যাচাই ও সমাধান" />
+    <title>Booking যাচাই · Shapon Travels</title>
+    <style>
+      :root {
+        font-family: system-ui, sans-serif;
+        color: #172638;
+        background: #f2f5f8;
+        font-size: 16px;
+      }
+      * {
+        box-sizing: border-box;
+      }
+      body {
+        margin: 0;
+      }
+      header {
+        background: #10273b;
+        color: white;
+        padding: 20px 5%;
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 20px;
+      }
+      header strong {
+        font-size: 1.2rem;
+      }
+      main {
+        max-width: 1200px;
+        margin: 32px auto;
+        padding: 0 24px;
+      }
+      h1 {
+        font-size: 1.65rem;
+        margin: 0 0 12px;
+      }
+      h2 {
+        font-size: 1.2rem;
+        margin: 0 0 16px;
+      }
+      p {
+        line-height: 1.7;
+      }
+      .muted {
+        color: #57687a;
+        font-size: 0.9rem;
+      }
+      header .muted {
+        color: #c0d3e0;
+      }
+      .card {
+        background: white;
+        border: 1px solid #d7e0e8;
+        border-radius: 12px;
+        padding: 24px;
+        margin-bottom: 20px;
+      }
+      .login {
+        max-width: 440px;
+        margin: 64px auto;
+      }
+      label {
+        display: block;
+        font-weight: 600;
+        margin: 16px 0 6px;
+      }
+      input,
+      textarea,
+      select,
+      button {
+        font: inherit;
+      }
+      input,
+      textarea,
+      select {
+        width: 100%;
+        padding: 12px;
+        border: 1px solid #9bafbf;
+        border-radius: 6px;
+        background: white;
+        color: #172638;
+      }
+      textarea {
+        min-height: 95px;
+        resize: vertical;
+      }
+      button {
+        border: 0;
+        border-radius: 6px;
+        padding: 11px 17px;
+        background: #076c68;
+        color: white;
+        cursor: pointer;
+        font-weight: 600;
+      }
+      button.secondary {
+        background: #e7eef4;
+        color: #153e5b;
+      }
+      button:disabled {
+        opacity: 0.55;
+        cursor: wait;
+      }
+      button:focus-visible,
+      input:focus-visible,
+      textarea:focus-visible,
+      select:focus-visible {
+        outline: 3px solid #24a9ce;
+        outline-offset: 3px;
+      }
+      .toolbar {
+        display: flex;
+        gap: 12px;
+        align-items: center;
+        justify-content: space-between;
+        flex-wrap: wrap;
+      }
+      .grid {
+        display: grid;
+        grid-template-columns: minmax(270px, 1fr) minmax(0, 1.8fr);
+        gap: 24px;
+      }
+      .booking {
+        width: 100%;
+        text-align: left;
+        background: #f4f8fa;
+        color: #172638;
+        padding: 16px;
+        margin-top: 12px;
+        border: 1px solid #d7e0e8;
+      }
+      .booking span {
+        display: block;
+        font-size: 0.9rem;
+        font-weight: 400;
+        margin-top: 6px;
+      }
+      .notice {
+        padding: 14px 18px;
+        border-left: 4px solid #c68014;
+        background: #fff4dc;
+        line-height: 1.7;
+      }
+      #message {
+        margin: 0 0 20px;
+        color: #773100;
+        white-space: pre-wrap;
+      }
+      dl {
+        display: grid;
+        grid-template-columns: 140px 1fr;
+        gap: 10px;
+        margin: 20px 0;
+      }
+      dt {
+        color: #57687a;
+      }
+      dd {
+        margin: 0;
+        overflow-wrap: anywhere;
+        white-space: pre-wrap;
+      }
+      .check {
+        display: flex;
+        gap: 10px;
+        align-items: flex-start;
+        font-weight: 400;
+        line-height: 1.65;
+      }
+      .check input {
+        width: auto;
+        margin-top: 7px;
+      }
+      .actions {
+        display: flex;
+        gap: 12px;
+        margin-top: 22px;
+        flex-wrap: wrap;
+      }
+      .badge {
+        font-size: 0.9rem;
+        background: #24475f;
+        padding: 5px 10px;
+        border-radius: 4px;
+      }
+      [hidden] {
+        display: none !important;
+      }
+      @media (max-width: 760px) {
+        main {
+          padding: 0 16px;
+        }
+        .grid {
+          grid-template-columns: 1fr;
+        }
+        .card {
+          padding: 18px;
+        }
+        header {
+          padding: 18px;
+        }
+        .login {
+          margin: 25px auto;
+        }
+        dl {
+          grid-template-columns: 1fr;
+          gap: 4px;
+        }
+        dd {
+          margin-bottom: 10px;
+        }
+      }
+    </style>
+  </head>
+  <body>
+    <header>
+      <div>
+        <strong>Shapon Travels</strong>
+        <div class="muted">Booking যাচাই ও সমাধান</div>
+      </div>
+      <div class="toolbar">
+        <span id="environment" class="badge">Admin</span
+        ><button id="logout" class="secondary" hidden>লগ আউট</button>
+      </div>
+    </header>
+    <main>
+      <p id="message" role="status" aria-live="polite"></p>
+      <section id="login" class="card login">
+        <h1>Admin লগইন</h1>
+        <p class="muted">আপনার Admin account দিয়ে প্রবেশ করুন।</p>
+        <form id="loginForm">
+          <label for="username">ইউজারনেম</label
+          ><input id="username" autocomplete="username" required /><label
+            for="password"
+            >পাসওয়ার্ড</label
+          ><input
+            id="password"
+            type="password"
+            autocomplete="current-password"
+            required
+          />
+          <div class="actions"><button>লগইন করুন</button></div>
+        </form>
+      </section>
+      <section id="workspace" hidden>
+        <div class="toolbar">
+          <div>
+            <h1 id="queueTitle">যাচাইয়ের অপেক্ষায়</h1>
+            <p class="muted" id="queueDescription">
+              Supplier থেকে নিশ্চিত ফল না পাওয়া bookingগুলো এখানে দেখুন।
+            </p>
+          </div>
+          <button id="refresh" class="secondary">তালিকা আপডেট করুন</button>
+        </div>
+        <div class="grid">
+          <section class="card">
+            <h2>Booking তালিকা</h2>
+            <label for="view">দেখুন</label
+            ><select id="view">
+              <option value="">যাচাইয়ের অপেক্ষায়</option>
+              <option value="resolved">সমাধান নথিভুক্ত</option>
+            </select>
+            <div id="bookings"></div>
+            <button id="more" class="secondary" hidden>আরও দেখুন</button>
+          </section>
+          <section id="detail" class="card">
+            <p class="muted">বিস্তারিত দেখতে একটি booking নির্বাচন করুন।</p>
+          </section>
+        </div>
+      </section>
+    </main>
+    <script src="/admin/reconciliation.js" defer></script>
+  </body>
+</html>

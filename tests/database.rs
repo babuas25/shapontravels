@@ -41,6 +41,46 @@ async fn migrations_and_constraints() {
     ] {
         assert!(sqlx::query(statement).execute(&pool).await.is_err());
     }
+    // Missing/malformed airline data must leave the reference pending, never abort Book persistence.
+    for (airlines, expected) in [
+        (serde_json::json!(["KECOCE"]), Some("STR8FE94RKECOCE")),
+        (
+            serde_json::json!(["KECOCE", "KECOCE"]),
+            Some("STR8FE94RKECOCE"),
+        ),
+        (serde_json::json!(["KECOCE", "ABCDEF"]), None),
+        (serde_json::json!(null), None),
+        (serde_json::json!([]), None),
+        (serde_json::json!("KECOCE"), None),
+        (serde_json::json!([123]), None),
+        (serde_json::json!(["bad"]), None),
+    ] {
+        let book = serde_json::json!({"item1":{"pnr":"8FE94R","airlinesPNR":airlines},"item2":{"isSuccess":true}});
+        let (reference,): (Option<String>,) =
+            sqlx::query_as("SELECT booking_reference_from_evidence($1,NULL,false)")
+                .bind(book)
+                .fetch_one(&pool)
+                .await
+                .unwrap();
+        assert_eq!(reference.as_deref(), expected);
+    }
+    for (verified, pnr, expected) in [
+        (true, "8FE94R", Some("STR8FE94RKECOCE")),
+        (false, "8FE94R", None),
+        (true, "ABCDEF", None),
+    ] {
+        let book = serde_json::json!({"item1":{"pnr":"8FE94R"},"item2":{"isSuccess":true}});
+        let lookup = serde_json::json!({"item1":{"pnr":pnr,"airlinePNRs":["KECOCE","KECOCE"]}});
+        let (reference,): (Option<String>,) =
+            sqlx::query_as("SELECT booking_reference_from_evidence($1,$2,$3)")
+                .bind(book)
+                .bind(lookup)
+                .bind(verified)
+                .fetch_one(&pool)
+                .await
+                .unwrap();
+        assert_eq!(reference.as_deref(), expected);
+    }
     support::authentication(&pool).await;
     support::cleanup::verify(&pool).await;
     // A schema from a different build is not considered ready.

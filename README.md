@@ -19,7 +19,7 @@ Supplier connections start disabled in PostgreSQL. Configuration validates HTTPS
 
 ## Current implementation
 
-Foundation and authentication are verified. See [authentication contract](docs/AUTHENTICATION.md) for machine tokens, one-time bootstrap and admin/client management. Public Search selects equivalent offers by original supplier total, then applies markup. [Prebooking flow](docs/PREBOOKING_FLOW.md) covers selected-direction FareRules/RePrice, explicit local acceptance and customer-selected alternatives. Hold booking/status/reconciliation are partially implemented; Cancel, ticketing and reports remain unfinished. `REQUIREMENTS.md` tracks completion per step; later evidence supersedes historical baseline notes.
+Foundation and authentication are verified. See [authentication contract](docs/AUTHENTICATION.md) for machine tokens, one-time bootstrap and admin/client management. Public Search selects equivalent offers by original supplier total, then applies markup. [Prebooking flow](docs/PREBOOKING_FLOW.md) covers selected-direction FareRules/RePrice, explicit local acceptance and customer-selected alternatives. Hold booking, public PNR status/deadline lookup and reconciliation evidence are implemented within documented coverage; an Admin reconciliation screen and audited manual outcomes are implemented locally. Cancel, ticketing and reports remain unfinished. `REQUIREMENTS.md` tracks completion per step; later evidence supersedes historical baseline notes.
 
 On this workspace a PostgreSQL 18.3 development runtime has been built under the ignored `.local/` directory. Its cluster listens only on a private Unix socket. The helper sets the Rust PATH and dedicated local database URL without changing `.env`:
 
@@ -69,3 +69,8 @@ See [Swagger walkthrough and API contract](docs/MARKUP_API.md). Create a draft, 
 ## Deployment
 
 [Ubuntu 24.04 server setup](docs/SERVER_SETUP.md) and [GitHub Actions CI/CD](docs/CI_CD.md). Pushes to main and pull requests run checks and a Linux release build. VPS deployment starts only after server prerequisites and the `VPS_DEPLOY_ENABLED` repository variable are configured.
+
+
+## Admin reconciliation screen
+
+After applying migrations through `0014_booking_public_reference.sql` and starting the updated backend, open `/admin/reconciliation` on the same API origin. Sign in with an existing human Admin/Super Admin account. The Bengali screen lists unresolved bookings, performs read-only supplier status checks and records evidence-backed manual outcomes with history. No client token, code editing or Swagger input is needed. See [manual reconciliation](docs/BOOKING_API.md#admin-manual-reconciliation-and-screen) for boundaries. This change is local until released through the existing deployment workflow; no production Hold/Issue is authorized.
