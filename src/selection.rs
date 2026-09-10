@@ -1,6 +1,10 @@
 //! Conservative, request-local fare equivalence and original supplier-total selection.
 //! Keys are private: original offers and their source references are never modified.
 use bigdecimal::BigDecimal;
+use serde::{
+    Serialize, Serializer,
+    ser::{SerializeMap, SerializeSeq},
+};
 use serde_json::Value;
 use std::collections::{HashMap, HashSet};
 
@@ -10,6 +14,87 @@ fn text(value: &Value, field: &str) -> Option<()> {
         .as_str()
         .filter(|s| !s.trim().is_empty())?;
     Some(())
+}
+
+/// Serialize only the previously retained fields, borrowing all source data.
+/// Context is structural: identically named fields inside unknown objects stay intact.
+#[derive(Clone, Copy)]
+enum KeyContext {
+    Offer,
+    Components,
+    Component,
+    Fares,
+    Fare,
+    Directions,
+    Route,
+    Direction,
+    Segments,
+    Segment,
+    Other,
+}
+impl KeyContext {
+    fn excludes(self, field: &str) -> bool {
+        match self {
+            Self::Offer => [
+                "avlSrc",
+                "uniqueTransID",
+                "itemCodeRef",
+                "totalPrice",
+                "previousTotalFare",
+            ]
+            .contains(&field),
+            Self::Component => ["fareReference", "totalPrice", "discountPrice"].contains(&field),
+            Self::Fare => ["totalPrice", "discountPrice"].contains(&field),
+            Self::Segment => ["cabinClass", "segmentCodeRef"].contains(&field),
+            _ => false,
+        }
+    }
+    fn field(self, key: &str) -> Self {
+        match (self, key) {
+            (Self::Offer, "bookingComponents") => Self::Components,
+            (Self::Offer, "passengerFares") => Self::Fares,
+            (Self::Offer, "directions") => Self::Directions,
+            (Self::Fares, _) => Self::Fare,
+            (Self::Direction, "segments") => Self::Segments,
+            _ => Self::Other,
+        }
+    }
+    fn element(self) -> Self {
+        match self {
+            Self::Components => Self::Component,
+            Self::Directions => Self::Route,
+            Self::Route => Self::Direction,
+            Self::Segments => Self::Segment,
+            _ => Self::Other,
+        }
+    }
+}
+struct KeyView<'a>(&'a Value, KeyContext);
+impl Serialize for KeyView<'_> {
+    fn serialize<S: Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+        if matches!(self.1, KeyContext::Other) {
+            return self.0.serialize(serializer);
+        }
+        match self.0 {
+            Value::Object(fields) => {
+                let mut map = serializer.serialize_map(None)?;
+                for (key, value) in fields {
+                    if !self.1.excludes(key) {
+                        map.serialize_entry(key, &KeyView(value, self.1.field(key)))?;
+                    }
+                }
+                map.end()
+            }
+            Value::Array(values) => {
+                let mut seq = serializer.serialize_seq(Some(values.len()))?;
+                for value in values {
+                    seq.serialize_element(&KeyView(value, self.1.element()))?;
+                }
+                seq.end()
+            }
+            value => value.serialize(serializer),
+        }
+    }
 }
 
 /// Exact known attributes only. No brand aliases, inferred operating carrier,
@@ -30,50 +115,28 @@ fn equivalence_key(original: &Value) -> Option<(String, Vec<Option<String>>)> {
             required_baggage.push(kind.to_ascii_uppercase());
         }
     }
-    let mut key = original.clone();
-    let offer = key.as_object_mut()?;
-    // Only evidenced transport identities and quoted total/discount values are
-    // excluded. Base/tax/AIT, fee coverage and all other conditions remain exact.
-    for field in [
-        "avlSrc",
-        "uniqueTransID",
-        "itemCodeRef",
-        "totalPrice",
-        "previousTotalFare",
-    ] {
-        offer.remove(field);
-    }
-    let components = offer.get_mut("bookingComponents")?.as_array_mut()?;
+    let offer = original.as_object()?;
+    let components = offer.get("bookingComponents")?.as_array()?;
     if components.len() != 1 {
         return None;
     }
-    let component = components[0].as_object_mut()?;
-    for field in ["fareReference", "totalPrice", "discountPrice"] {
-        component.remove(field);
-    }
-    for fare in offer
-        .get_mut("passengerFares")?
-        .as_object_mut()?
-        .values_mut()
-    {
-        if fare.is_null() {
-            continue;
+    components[0].as_object()?;
+    for fare in offer.get("passengerFares")?.as_object()?.values() {
+        if !fare.is_null() {
+            fare.as_object()?;
         }
-        let fare = fare.as_object_mut()?;
-        fare.remove("totalPrice");
-        fare.remove("discountPrice");
     }
-    let directions = offer.get_mut("directions")?.as_array_mut()?;
+    let directions = offer.get("directions")?.as_array()?;
     if directions.is_empty() {
         return None;
     }
     let mut cabins = Vec::new();
     for route in directions {
-        let alternatives = route.as_array_mut()?;
+        let alternatives = route.as_array()?;
         if alternatives.len() != 1 {
             return None;
         }
-        let segments = alternatives[0].get_mut("segments")?.as_array_mut()?;
+        let segments = alternatives[0].get("segments")?.as_array()?;
         if segments.is_empty() {
             return None;
         }
@@ -116,12 +179,12 @@ fn equivalence_key(original: &Value) -> Option<(String, Vec<Option<String>>)> {
                 Some(Value::String(label)) => Some(label.clone()),
                 _ => return None,
             });
-            let fields = segment.as_object_mut()?;
-            fields.remove("cabinClass");
-            fields.remove("segmentCodeRef");
         }
     }
-    Some((serde_json::to_string(&key).ok()?, cabins))
+    Some((
+        serde_json::to_string(&KeyView(original, KeyContext::Offer)).ok()?,
+        cabins,
+    ))
 }
 
 /// All offers must first pass the existing passenger, currency and pricing
@@ -211,6 +274,8 @@ mod tests {
     use crate::{pricing::Markup, projection};
     use serde_json::json;
 
+    include!("selection_legacy_test.rs");
+
     const PRIORITY: &[&str] = &["takeoff", "firsttrip", "triplover"];
     fn fixture() -> Value {
         serde_json::from_str::<Value>(include_str!(
@@ -227,6 +292,74 @@ mod tests {
         v["bookingComponents"][0]["totalPrice"] = price;
         projection::single_component(&v, &Markup::Fixed(0.into())).unwrap();
         v
+    }
+
+    #[test]
+    fn borrowed_keys_match_previous_exact_bytes_and_unknown_field_scope() {
+        for raw in [
+            include_str!("../tests/fixtures/production/firsttrip-search.json"),
+            include_str!("../tests/fixtures/production/takeoff-search.json"),
+            include_str!("../tests/fixtures/production/triplover-search.json"),
+            include_str!("../tests/fixtures/production/triplover-multicity.json"),
+        ] {
+            let envelope: Value = serde_json::from_str(raw).unwrap();
+            for original in envelope["item1"]["airSearchResponses"].as_array().unwrap() {
+                let verify = |offer: &Value| {
+                    let before = offer.to_string();
+                    assert_eq!(equivalence_key(offer), legacy_equivalence_key(offer));
+                    assert_eq!(offer.to_string(), before);
+                };
+                verify(original);
+                for parent in [
+                    "",
+                    "/bookingComponents/0",
+                    "/passengerFares/adt",
+                    "/directions/0/0",
+                    "/directions/0/0/segments/0",
+                ] {
+                    for field in [
+                        "unknown",
+                        "totalPrice",
+                        "discountPrice",
+                        "segmentCodeRef",
+                        "cabinClass",
+                        "fareReference",
+                        "bookingComponents",
+                        "directions",
+                        "passengerFares",
+                        "segments",
+                        "bookingClass",
+                        "baggage",
+                    ] {
+                        for value in [
+                            Value::Null,
+                            json!(false),
+                            json!("\"বাংলা\\text"),
+                            json!([]),
+                            json!({"totalPrice":null,"segmentCodeRef":"retain","cabinClass":"retain"}),
+                            serde_json::from_str("9007199254740993.00500").unwrap(),
+                        ] {
+                            let mut offer = original.clone();
+                            offer
+                                .pointer_mut(parent)
+                                .unwrap()
+                                .as_object_mut()
+                                .unwrap()
+                                .insert(field.into(), value);
+                            verify(&offer);
+                        }
+                        let mut offer = original.clone();
+                        offer
+                            .pointer_mut(parent)
+                            .unwrap()
+                            .as_object_mut()
+                            .unwrap()
+                            .remove(field);
+                        verify(&offer);
+                    }
+                }
+            }
+        }
     }
 
     #[test]

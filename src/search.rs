@@ -395,7 +395,7 @@ async fn search(
             }
             // Validate every source offer before selection: unsupported losing offers
             // must not silently disappear and bypass the existing coverage policy.
-            projection::single_component(original, &Markup::Fixed(0.into()))
+            projection::validate_single_component(original)
                 .map_err(|_| error("SUPPLIER_PRICING_COVERAGE_UNSUPPORTED"))?;
             let supplier_transaction = original["uniqueTransID"].as_str().unwrap_or_default();
             let supplier_item = original["itemCodeRef"].as_str().unwrap_or_default();

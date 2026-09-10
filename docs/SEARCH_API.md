@@ -112,3 +112,10 @@ Clients may send `Accept-Encoding: gzip`. Eligible responses of at least 1,024 b
 Clients omitting Accept-Encoding, requesting identity, or rejecting gzip with `gzip;q=0` receive the original representation. Gzip decoding recovers the original JSON bytes: every retained offer, unknown field, null/missing distinction, exact numeric lexeme and reference remains intact. Existing Search summary/partial headers, authentication, no-store and request IDs remain in effect. Small health/error responses stay uncompressed.
 
 Compression reduces transferred bytes; it does not reduce decoded JSON size, database snapshots or the work of preparing offers. Current request/phase logs finish before response-body transmission/compression is fully polled; use full-body HTTP timings for that cost. The local replay example accepts `LOAD_ACCEPT_ENCODING=identity|gzip` and reports wire bytes, decoded bytes and decode time separately. See [gzip measurements](evidence/SEARCH_GZIP_2026-09-10.md).
+
+
+### Borrowed coverage validation and equivalence keys
+
+Source-offer coverage validation now reads the original offer without constructing a discarded selling snapshot. It uses the same calculation and optional-field checks as projection; every source offer is still validated before selection. Comparison keys serialize a borrowed view with exactly the prior field exclusions and bytes, preserving unknown fields at their original scope. Supplier winner and cabin-conflict rules remain unchanged.
+
+[Final replay evidence](evidence/SEARCH_BORROWED_VALIDATION_2026-09-10.md) shows lower preparation CPU, with mixed full-body latency and no measured peak-RAM reduction. Selling snapshots, serialized comparison keys and persisted inventory remain allocated; broader memory optimization is still required.

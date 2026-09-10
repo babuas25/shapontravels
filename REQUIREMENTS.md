@@ -699,3 +699,12 @@ User explicitly requested same-airline alternative selection through the step be
 - Evidence: [gzip verification](docs/evidence/SEARCH_GZIP_2026-09-10.md). This milestone does not complete the broader optimization requirement.
 
 - [x] Gzip deployed as `fca1e85cf8aaa638122704c79dc26cfad758e78b`, GitHub Actions `34459503903`; all CI/build/deploy jobs passed. Public HTTPS gzip/identity decoded bytes match exactly, encoding negotiation and health/auth checks pass. No new migration or supplier calls were needed for this milestone.
+
+
+### Borrowed validation and comparison — 2026-09-10
+
+- [x] Removed full-offer copies used solely for zero-markup validation and equivalence-key construction. Original field exclusions/key bytes, coverage rejection, price precision, supplier winners and cabin conflicts remain unchanged.
+- [x] Differential tests against frozen prior implementations, existing unit/fixture checks and disposable PostgreSQL integration pass. Final offline replay preserves 2,177 returned/persisted offers per Search and unchanged decoded size/business fingerprints.
+- [x] Final three-run local medians: preparation 93→20 ms (one request) / 158→21 ms (four concurrent); process CPU about 10%/14% lower. Full-body latency is mixed and peak RSS about 3% higher, so this is not claimed as a RAM reduction or VPS capacity improvement.
+- [ ] Peak-memory profiling/reduction, expiry cleanup policy, safely isolated sharing/caching and production-equivalent capacity verification remain incomplete.
+- Evidence: [borrowed validation and comparison](docs/evidence/SEARCH_BORROWED_VALIDATION_2026-09-10.md).
