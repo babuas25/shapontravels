@@ -96,3 +96,10 @@ Use the other offer's own item/selected segment references for FareRules and ReP
 
 
 FareRules supplier business/transport failures return HTTP 502 `{"error":"UPSTREAM_FARE_RULES_ERROR"}` without exposing raw supplier messages. The request deadline still returns 504 `SUPPLIER_TIMEOUT`. Show “Fare rules are currently unavailable” and allow customer-initiated RePrice for the selected offer; this error does not mark the fare unavailable or invalidate its price. Do not invent cancellation/refund rules. RePrice success still requires explicit local acceptance, and this flow stops before Book/Issue.
+
+
+## Processing and load measurement
+
+Large supplier inventories are moved rather than copied between response envelopes. Retained offers persist in batches of at most 64 rows inside one transaction; a later insert failure rolls back all batches. Offer data, selection, pricing and response shape are unchanged. Non-sensitive `search_performance` logs contain source/returned counts and supplier/preparation/persistence/total phase durations; persistence includes pricing/summary/JSON binding as well as database execution.
+
+See [the measured comparison](evidence/SEARCH_PERFORMANCE_2026-09-10.md) for one/four-concurrent offline replays. These are local process measurements, not a production VPS capacity guarantee. Response compression, pagination, admission limits and expired-row cleanup are separate work.

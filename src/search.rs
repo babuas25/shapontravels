@@ -252,6 +252,7 @@ async fn search(
     State(state): State<AppState>,
     Json(request): Json<SearchRequest>,
 ) -> Result<(HeaderMap, Json<Value>), ApiError> {
+    let started = std::time::Instant::now();
     machine.require("search:read")?;
     request.validate()?;
     let active = crate::connections::search_snapshot(&state.pool).await?;
@@ -308,17 +309,17 @@ async fn search(
     let mut successes = 0;
     let mut batches = Vec::new();
     while let Some(task) = tasks.join_next().await {
-        let Ok((connection, Ok(Ok(body)))) = task else {
+        let Ok((connection, Ok(Ok(mut body)))) = task else {
             failures += 1;
             continue;
         };
-        let Some(offers) = body
+        if !body
             .pointer("/item1/airSearchResponses")
-            .and_then(Value::as_array)
-        else {
+            .is_some_and(Value::is_array)
+        {
             failures += 1;
             continue;
-        };
+        }
         let valid = match &body["item2"] {
             Value::Array(items) => items.iter().any(|s| s["isSuccess"] == true),
             Value::Object(_) => body["item2"]["isSuccess"] == true,
@@ -329,7 +330,12 @@ async fn search(
             continue;
         }
         successes += 1;
-        batches.push((connection, offers.clone(), body));
+        // Move large inventory out; envelope metadata never carries a second copy.
+        let Value::Array(offers) = body["item1"]["airSearchResponses"].take() else {
+            unreachable!()
+        };
+        body["item1"]["airSearchResponses"] = Value::Array(Vec::new());
+        batches.push((connection, offers, body));
     }
     if successes == 0 {
         return Err(ApiError(
@@ -337,6 +343,8 @@ async fn search(
             "ALL_SUPPLIERS_FAILED",
         ));
     }
+    let supplier_ms = started.elapsed().as_millis() as u64;
+    let processing_started = std::time::Instant::now();
     batches.sort_by(|a, b| a.0.id.cmp(&b.0.id));
     let search_id = Uuid::new_v4();
     let mut returned = Vec::new();
@@ -406,9 +414,13 @@ async fn search(
         .collect();
     let selected =
         crate::selection::winners(&source_offers, &["takeoff", "firsttrip", "triplover"]);
+    let preparation_ms = processing_started.elapsed().as_millis() as u64;
+    let persistence_started = std::time::Instant::now();
     let mut tx = state.pool.begin().await?;
     // Platform reference lifetime, not a claimed supplier TTL. Every next read may still expire upstream.
     sqlx::query("INSERT INTO flight_searches(id,client_id,request,currency,expires_at) VALUES($1,$2,$3,$4,now()+INTERVAL '10 minutes')").bind(search_id).bind(machine.client_id).bind(payload).bind(&currency).execute(&mut *tx).await?;
+    // Keep only small row metadata; original and selling JSON are borrowed when binding.
+    let mut pending = Vec::with_capacity(selected.len());
     for index in selected {
         let (connection, original) = candidates[index];
         let (carrier, origin, destination) = matching_context(original, &request, &rules)?;
@@ -437,8 +449,14 @@ async fn search(
         references.insert(supplier_transaction.into(), json!(search_id.to_string()));
         references.insert(supplier_item.into(), json!(id.to_string()));
         bind_references(&mut selling, &mut references);
-        sqlx::query("INSERT INTO flight_offers(id,client_id,search_id,supplier_id,availability_epoch,original,selling,reference_map,rule_id,rule_version,expires_at) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,now()+INTERVAL '10 minutes')")
-                .bind(id).bind(machine.client_id).bind(search_id).bind(&connection.id).bind(connection.availability_epoch).bind(original).bind(&selling).bind(Value::Object(references)).bind(record.id).bind(record.version).execute(&mut *tx).await?;
+        pending.push((
+            id,
+            connection,
+            original,
+            Value::Object(references),
+            record.id,
+            record.version,
+        ));
         retained_suppliers.insert(connection.id.as_str());
         returned.push(selling);
     }
@@ -449,7 +467,35 @@ async fn search(
         retained_suppliers.len(),
     )
     .map_err(|_| error("SUPPLIER_SUMMARY_UNSUPPORTED"))?;
+    // Bound each SQL statement: 64 rows, 640 parameters, without per-offer round trips.
+    for (batch, selling_batch) in pending.chunks(64).zip(returned.chunks(64)) {
+        let mut query = sqlx::QueryBuilder::<sqlx::Postgres>::new(
+            "INSERT INTO flight_offers(id,client_id,search_id,supplier_id,availability_epoch,original,selling,reference_map,rule_id,rule_version,expires_at) ",
+        );
+        query.push_values(
+            batch.iter().zip(selling_batch),
+            |mut row, (entry, selling)| {
+                row.push_bind(entry.0)
+                    .push_bind(machine.client_id)
+                    .push_bind(search_id)
+                    .push_bind(&entry.1.id)
+                    .push_bind(entry.1.availability_epoch)
+                    .push_bind(entry.2)
+                    .push_bind(selling)
+                    .push_bind(&entry.3)
+                    .push_bind(entry.4)
+                    .push_bind(entry.5)
+                    .push("now()+INTERVAL '10 minutes'");
+            },
+        );
+        query.build().execute(&mut *tx).await?;
+    }
     tx.commit().await?;
+    tracing::info!(target: "search_performance", supplier_ms, preparation_ms,
+        persistence_ms = persistence_started.elapsed().as_millis() as u64,
+        total_ms = started.elapsed().as_millis() as u64,
+        source_offers = candidates.len(), returned_offers = returned.len(),
+        "Search processing completed");
     let mut headers = HeaderMap::new();
     headers.insert(
         "x-search-partial",
@@ -459,8 +505,8 @@ async fn search(
         "x-search-currency",
         HeaderValue::from_str(&currency).map_err(|_| error("INVALID_CURRENCY"))?,
     );
-    envelope["item1"]["airSearchResponses"] = json!(returned);
-    envelope["item2"] = json!(statuses);
+    envelope["item1"]["airSearchResponses"] = Value::Array(returned);
+    envelope["item2"] = Value::Array(statuses);
     // Metadata describes the final returned selling offers, after supplier selection.
     headers.insert(
         "x-search-summary-scope",

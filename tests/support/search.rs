@@ -352,6 +352,78 @@ pub async fn verify(original_app: &Router, admin: &str, machine: &str, pool: &Pg
         .unwrap();
     assert_eq!(before, after);
     mocks[0].response.lock().unwrap()["item1"]["totalFlights"] = json!(27);
+    // Cross two complete 64-row batches plus a short final batch.
+    let mut bulk = complete.clone();
+    bulk["item1"]["airSearchResponses"] = json!(
+        (0..130)
+            .map(|n| {
+                let mut offer = complete["item1"]["airSearchResponses"][0].clone();
+                offer["itemCodeRef"] = json!(format!("bulk-offer-{n}"));
+                offer["bulkRow"] = json!(n); // Distinct unknown fare metadata must stay distinct.
+                offer
+            })
+            .collect::<Vec<_>>()
+    );
+    for mock in &mocks {
+        *mock.response.lock().unwrap() = bulk.clone();
+    }
+    let (status, result) = call(&app, "POST", "/api/Search", Some(machine), request.clone()).await;
+    assert_eq!(status, 200, "{result}");
+    let offers = result["item1"]["airSearchResponses"].as_array().unwrap();
+    assert_eq!(offers.len(), 130);
+    let sid = Uuid::parse_str(offers[0]["uniqueTransID"].as_str().unwrap()).unwrap();
+    let rows:Vec<(Uuid,Value,Value,Value,String)>=sqlx::query_as("SELECT id,original,selling,reference_map,supplier_id FROM flight_offers WHERE search_id=$1 ORDER BY (original->>'bulkRow')::integer").bind(sid).fetch_all(pool).await.unwrap();
+    assert_eq!(rows.len(), 130);
+    for (n, (id, original, selling, map, source)) in rows.iter().enumerate() {
+        assert_eq!(original["bulkRow"], json!(n));
+        assert_eq!(selling, &offers[n]);
+        assert_eq!(source, "takeoff");
+        assert_eq!(
+            map[original["itemCodeRef"].as_str().unwrap()],
+            id.to_string()
+        );
+        assert_eq!(selling["totalPrice"].to_string(), "4533.05");
+    }
+    // A database failure in batch two rolls back batch one and the search header.
+    sqlx::query("CREATE FUNCTION fail_bulk_test() RETURNS trigger LANGUAGE plpgsql AS $$ BEGIN IF NEW.original->>'bulkRow'='64' THEN RAISE EXCEPTION 'deliberate batch failure'; END IF; RETURN NEW; END $$").execute(pool).await.unwrap();
+    sqlx::query("CREATE TRIGGER fail_bulk_test BEFORE INSERT ON flight_offers FOR EACH ROW EXECUTE FUNCTION fail_bulk_test()").execute(pool).await.unwrap();
+    let before: (i64, i64) = sqlx::query_as(
+        "SELECT (SELECT count(*) FROM flight_searches),(SELECT count(*) FROM flight_offers)",
+    )
+    .fetch_one(pool)
+    .await
+    .unwrap();
+    assert_eq!(
+        call(&app, "POST", "/api/Search", Some(machine), request.clone())
+            .await
+            .0,
+        503
+    );
+    let after: (i64, i64) = sqlx::query_as(
+        "SELECT (SELECT count(*) FROM flight_searches),(SELECT count(*) FROM flight_offers)",
+    )
+    .fetch_one(pool)
+    .await
+    .unwrap();
+    assert_eq!(before, after);
+    sqlx::query("DROP TRIGGER fail_bulk_test ON flight_offers")
+        .execute(pool)
+        .await
+        .unwrap();
+    sqlx::query("DROP FUNCTION fail_bulk_test()")
+        .execute(pool)
+        .await
+        .unwrap();
+    // A successful empty set must not build an empty INSERT statement.
+    for mock in &mocks {
+        mock.response.lock().unwrap()["item1"]["airSearchResponses"] = json!([]);
+    }
+    let (status, empty) = call(&app, "POST", "/api/Search", Some(machine), request.clone()).await;
+    assert_eq!(status, 200);
+    assert_eq!(empty["item1"]["totalFlights"], 0);
+    for mock in &mocks {
+        *mock.response.lock().unwrap() = complete.clone();
+    }
     mocks[0].fail.store(true, Ordering::SeqCst);
     let (status, partial) = call(&app, "POST", "/api/Search", Some(machine), request.clone()).await;
     assert_eq!(status, 200);

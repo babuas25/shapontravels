@@ -665,3 +665,12 @@ User explicitly requested same-airline alternative selection through the step be
 - Contract: [Search summaries](docs/SEARCH_API.md). Evidence: [summary verification](docs/evidence/SEARCH_SUMMARY_2026-09-10.md).
 
 - [x] Summary aggregation deployed as application commit `ee3de025cf5b5069b211051337059b3218c2875d`, GitHub Actions run `34448160884`; all CI/build/deploy jobs passed. Public HTTPS health, served summary contract and unauthorized access rejection verified. No new migration or booking/issue execution.
+
+
+### Search memory and persistence optimization — 2026-09-10
+
+- [x] Offline replay profiled a 2,177-returned-offer roundtrip workload at one/four concurrent Searches. Three runs per version showed about 48%/44% lower peak replay-process RSS and 15%/18% lower median local HTTP latency after removing full inventory/response copies and batching offer inserts (64 rows maximum).
+- [x] Offer snapshots, pricing, selection and references remain unchanged. All batch inserts share one transaction. Tests cover 130 rows, failure in a later batch with full rollback, empty result and existing workflow checks.
+- [x] Added safe phase/count logs and a reusable local-capture-only load example. No supplier traffic or live booking/issue was required.
+- [ ] The 23.3 MiB sample response and snapshot storage size remain unchanged. Compression, expiry cleanup policy, admission controls and controlled production-equivalent load validation are not completed or implied by these local measurements.
+- Evidence and environment limits: [Search performance](docs/evidence/SEARCH_PERFORMANCE_2026-09-10.md).
