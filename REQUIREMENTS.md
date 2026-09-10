@@ -736,3 +736,6 @@ User explicitly requested same-airline alternative selection through the step be
 - [x] Owner-scoped IDs (no payload) retain 410 behavior for 24 hours after deletion; foreign/unknown references and expired markers return 404.
 - [x] Added tests for batch limits, rollback, locks, protected records, fresh/grace/valid-parent cases, client isolation, marker expiry and actual scheduler/shutdown.
 - Evidence: [cleanup policy and verification](docs/evidence/SEARCH_CLEANUP_2026-09-10.md).
+
+
+- [x] Combined memory optimization and temporary Search cleanup deployed as `b739a579fce5792b1ef4c80d57dbe434ccbbbad4`, GitHub Actions `34464006037`; CI/build/deploy and migration 0012 activation succeeded. Public HTTPS health/auth/gzip checks passed. Production cleanup counts were not inspected because the deploy account lacks system-journal access; actual scheduling and cleanup policy passed local/CI integration tests.

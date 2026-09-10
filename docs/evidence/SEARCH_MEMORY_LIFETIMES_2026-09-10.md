@@ -8,7 +8,7 @@ Phase RSS sampling found that a single replay rose from approximately 252 MiB af
 
 Search now moves selected original offers into processing order. For at most 64 offers at a time, it encodes the immutable original snapshot as JSON, calculates/validates a small set of price changes, and reuses the original parsed tree for the selling response. Original JSON and reference maps are bound into the existing SQL batch and discarded after execution. This preserves original snapshots without keeping a second full parsed offer tree. Borrowed projection callers still receive a separate selling tree; both projection paths share the exact same calculation.
 
-Every source offer is still validated before selection. The same winners, supplier priority, offer order, fields, exact numbers and reference mapping are retained. All batches remain inside one transaction. Summary aggregation now runs after batch inserts and before commit; a summary failure rolls back every inserted row. No incomplete response is returned. No schema, validity period, cache or cleanup policy changed.
+Every source offer is still validated before selection. The same winners, supplier priority, offer order, fields, exact numbers and reference mapping are retained. All batches remain inside one transaction. Summary aggregation now runs after batch inserts and before commit; a summary failure rolls back every inserted row. No incomplete response is returned. The memory change itself does not alter schema, validity, cache or retention; the subsequent cleanup policy is documented separately.
 
 ## Validation
 
@@ -17,7 +17,7 @@ Every source offer is still validated before selection. The same winners, suppli
 - PostgreSQL 18 integration passes: all seven supplier subsets, reference ownership, partial failures, empty inventory, 130-row batches and later-batch SQL failure rollback.
 - Integration now compares every stored original against the complete expected source offer and every stored selling value against the returned offer. An unknown `9007199254740993.00500` value remains precise, including its public numeric lexeme.
 - A test-only nontransactional sequence proves 130 row inserts were attempted before a deliberately invalid summary. Search and offer counts remain unchanged afterward, demonstrating rollback after all three batches.
-- No supplier network requests, booking, issuance or live database cleanup was performed.
+- Memory profiling and local verification used no supplier network requests, booking, issuance or live database cleanup.
 
 ## Final paired replay measurements
 
@@ -63,3 +63,8 @@ The user explicitly requires permission before commit or push. Their subsequent 
 The user also questioned retaining temporary Search data beyond 15 minutes. General unused Search inventory can be a candidate for cleanup after 15 minutes; current usability remains 10 minutes. Selected offers are referenced by RePrice and booking rows, so a separate dependency-aware policy is required. It must address active operations and whether expired references should retain a lightweight marker for the current 410 behavior. A subsequent cleanup patch now implements that policy without extending the 10-minute validity period; see cleanup evidence.
 
 This milestone’s disposable profiling and integration databases were removed after verification; local evidence files remain available.
+
+
+## Release status
+
+The user-authorized combined memory/cleanup release deployed as `b739a579fce5792b1ef4c80d57dbe434ccbbbad4`, with successful CI and public post-deployment checks. See [cleanup deployment evidence](SEARCH_CLEANUP_2026-09-10.md) for the workflow, migration and operational visibility details. The RAM figures above remain local replay measurements, not measured production capacity.

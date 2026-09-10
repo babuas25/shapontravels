@@ -32,3 +32,14 @@ The prior memory tests additionally prove original/selling fidelity, exact decim
 Linked RePrice/booking data remains under a separate future retention policy. The 24-hour ID marker contains no offer payload. SQL deletion makes storage available for PostgreSQL reuse/vacuum; immediate disk-file shrinkage is not claimed. No supplier calls or booking/issue mutations are needed to verify cleanup. Production capacity under concurrent Search plus a cleanup backlog remains unmeasured.
 
 Cleanup applies to the active database; backup retention is a separate existing policy.
+
+
+## Deployment verification
+
+Combined memory/cleanup application commit `b739a579fce5792b1ef4c80d57dbe434ccbbbad4` deployed through [GitHub Actions 34464006037](https://github.com/babuas25/shapontravels/actions/runs/34464006037). All Rust/PostgreSQL/deployment-script checks, Ubuntu release build and deployment jobs passed. Activation logs confirm migrations applied and this exact SHA with live/ready checks passing at 2026-09-10 10:09 UTC. The systemd service is active with activation time 16:08:59 Asia/Dhaka.
+
+After activation, all eight public HTTPS checks passed: live/ready 200, unauthorized Search/admin supplier routes 401, gzip/weighted-gzip/identity/gzip-q-zero negotiation, byte-identical decoded OpenAPI, no-store and request IDs. Public readiness confirms the application's current migration set, including migration 0012.
+
+Operational visibility limit: the deploy account cannot read the system journal (`No journal files were opened due to insufficient permissions`). Therefore production cleanup deletion counts/worker journal messages were not independently inspected. The actual scheduler and deletion policy passed the local and CI database integration tests; serve-mode activation is verified by the deployed code and active service. No production cleanup counts are claimed here.
+
+Disposable local cleanup test databases were removed after verification. Local public verification results remain under `.local/evidence/search-cleanup-20260910/`.

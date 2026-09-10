@@ -61,7 +61,7 @@ Specific carrier/route matching currently accepts only one route with one direct
 
 ## References and FareRules
 
-Search replaces supplier transaction/item/segment references with platform UUIDs. Original references, supplier connection, owner, rule version and availability epoch are stored privately. Platform references expire after ten minutes; this is a local retention/use limit, not a guarantee of supplier TTL. Supplier references can still expire earlier.
+Search replaces supplier transaction/item/segment references with platform UUIDs. Original references, supplier connection, owner, rule version and availability epoch are stored privately. Platform references expire after ten minutes; this is a local use limit, not a guarantee of supplier TTL. Supplier references can still expire earlier.
 
 To call POST `/api/FareRules`, take the selected returned offer's `uniqueTransID`, `itemCodeRef`, and the ordered `segmentCodeRef` values from exactly one complete selected direction per route:
 
@@ -82,7 +82,7 @@ Platform auth/configuration/validation errors currently retain the established p
 
 - Public RePrice and local price acceptance are documented in [REPRICE_API.md](REPRICE_API.md). Hold Book/status/reconciliation are documented in [BOOKING_API.md](BOOKING_API.md); hold booking uses the approved no-payment policy; Cancel, NewTicket and ticket issue remain unavailable.
 - Search response bodies have a 64 MiB cap; other supplier reads retain an 8 MiB cap. Connection timeouts come from admin configuration; the supplier adapter and whole request remain bounded.
-- Complete canonical equivalence, dynamic complex-route matching, branded fares and multiple components remain unfinished. Search and offer expiry indexes are added; retention cleanup scheduling remains deployment work.
+- Complete canonical equivalence, dynamic complex-route matching, branded fares and multiple components remain unfinished. Search and offer expiry indexes are present; temporary Search cleanup is described below.
 - The working database's clients/rules/supplier activation settings are not changed by integration tests. Explicit production smoke uses a separate empty local database with temporary test identities/default rule.
 
 Tests cover all seven active supplier subsets, no-active/no-rule outcomes, partial/all failure, exact markup, reference rebinding and persistence, FareRules same-supplier routing, ownership/tampering/expiry, and machine/admin isolation. A production read-only public-flow smoke returned 78 offers with `X-Search-Partial: false`, verified the fixed-500 projection and successfully retrieved FareRules. No supplier mutations were sent.
@@ -102,7 +102,7 @@ FareRules supplier business/transport failures return HTTP 502 `{"error":"UPSTRE
 
 Large supplier inventories are moved rather than copied between response envelopes. Retained offers persist in batches of at most 64 rows inside one transaction; a later insert failure rolls back all batches. Offer data, selection, pricing and response shape are unchanged. Non-sensitive `search_performance` logs contain source/returned counts and supplier/preparation/persistence/total phase durations; persistence includes pricing/summary/JSON binding as well as database execution.
 
-See [the measured comparison](evidence/SEARCH_PERFORMANCE_2026-09-10.md) for one/four-concurrent offline replays. These are local process measurements, not a production VPS capacity guarantee. Negotiated response compression is described below; pagination, admission limits and expired-row cleanup remain separate work.
+See [the measured comparison](evidence/SEARCH_PERFORMANCE_2026-09-10.md) for one/four-concurrent offline replays. These are local process measurements, not a production VPS capacity guarantee. Negotiated response compression is described below; pagination and admission limits remain separate work; temporary Search cleanup is described below.
 
 
 ## Lossless response compression
