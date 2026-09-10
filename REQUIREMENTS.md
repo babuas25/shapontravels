@@ -799,3 +799,8 @@ User explicitly requested same-airline alternative selection through the step be
 ### Admission release authorization
 
 - User explicitly requested "Commit/push/deploy KORO" after the VPS results and two-second timer limitations were explained. This supersedes the earlier pending release permission. Release scope is four active Search requests, eight queued slots and a 2000 ms admission wait; existing 150-second Nginx timeout remains.
+
+### Admission release completed
+
+- [x] Authorized application commit `7c24ab0818f8315cba113e07d75143d2952178de` pushed to main and deployed successfully through CI on 2026-09-10 at 18:11 Asia/Dhaka. All checks/build/deploy jobs passed; eight independent public HTTPS checks passed afterward. Cleanup worker retained 15-minute retention / 30-second interval, with zero observed eligible backlog.
+- Evidence and measurement limits: [admission deployment](docs/evidence/SEARCH_ADMISSION_DEPLOY_2026-09-10.md).
