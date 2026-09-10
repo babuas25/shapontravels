@@ -1,5 +1,7 @@
 # Search response memory — local verification, 2026-09-10
 
+Release update: subsequently authorized and deployed as `b08b34d` on 2026-09-10; see [verified release](SEARCH_MEMORY_DEPLOY_2026-09-10.md). Local/deferred status below records the original milestone.
+
 The user authorized continuing memory optimization and explicitly deferred push/deployment. This work builds on the uncommitted 16-row persistence batches; neither change has been deployed.
 
 ## Investigation and change

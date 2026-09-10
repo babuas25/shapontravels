@@ -1,5 +1,7 @@
 # Search persistence profiling and smaller SQL batches — 2026-09-10
 
+Release update: subsequently authorized and deployed as `b08b34d` on 2026-09-10; see [verified release](SEARCH_MEMORY_DEPLOY_2026-09-10.md). Local/deferred status below records the original milestone.
+
 Status: local implementation, replay comparison and integration verification completed. Awaiting commit/push permission; not deployed.
 
 ## Finding and implementation

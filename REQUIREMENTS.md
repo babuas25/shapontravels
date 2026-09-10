@@ -831,3 +831,9 @@ User explicitly requested same-airline alternative selection through the step be
 - User explicitly requested completing Git push and remaining database/deployment work. This supersedes the prior push/deploy deferral for the verified 16-row SQL batches, aggregate timing logs and consuming Search response serializer.
 - Release uses the existing CI/VPS activation workflow, including backup, migration/checksum validation, grants and health checks. No new migration or production test data upload is needed; no supplier Search/Book/Issue is part of release verification.
 - Shared caching and expanded VPS capacity verification remain separate; deployment does not establish twelve-request success.
+
+### Persistence/response optimization release completed — 2026-09-10
+
+- [x] Application commit `b08b34d8dbc223f3c37fb75d64db3f813f19ff6d` pushed to main and deployed through successful CI run `34482728952` at 19:34:45 Asia/Dhaka. All checks/build/deploy jobs passed.
+- [x] Existing deployment backup/migration/grants sequence completed; no new schema migration or local-data upload was required. Eight independent post-activation HTTPS checks passed; active service PID 75311 and cleanup worker startup verified through the read-only observer.
+- Evidence: [release verification](docs/evidence/SEARCH_MEMORY_DEPLOY_2026-09-10.md). Local-only/deferred-release descriptions above are historical and superseded for these two changes; cache/capacity gaps remain separate.
