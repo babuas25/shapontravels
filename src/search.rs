@@ -444,17 +444,24 @@ async fn search(
     }
     let preparation_ms = processing_started.elapsed().as_millis() as u64;
     let persistence_started = std::time::Instant::now();
+    let mut projection_time = std::time::Duration::ZERO;
+    let mut sql_encode_time = std::time::Duration::ZERO;
+    let mut sql_execute_time = std::time::Duration::ZERO;
+    let mut sql_batches = 0_u64;
     let mut tx = state.pool.begin().await?;
     // Platform reference lifetime, not a claimed supplier TTL. Every next read may still expire upstream.
     sqlx::query("INSERT INTO flight_searches(id,client_id,request,currency,expires_at) VALUES($1,$2,$3,$4,now()+INTERVAL '10 minutes')").bind(search_id).bind(machine.client_id).bind(payload).bind(&currency).execute(&mut *tx).await?;
     let mut remaining = owned_offers.into_iter();
     loop {
+        // Smaller statements bound PostgreSQL's per-statement JSON/parameter
+        // memory. Keep all batches in this transaction for atomic persistence.
         // Original snapshot JSON is retained only until this batch is written.
-        let originals: Vec<_> = remaining.by_ref().take(64).collect();
+        let originals: Vec<_> = remaining.by_ref().take(16).collect();
         if originals.is_empty() {
             break;
         }
         let selling_start = returned.len();
+        let projection_started = std::time::Instant::now();
         let mut pending = Vec::with_capacity(originals.len());
         for (connection, original) in originals {
             let (carrier, origin, destination) = matching_context(&original, &request, &rules)?;
@@ -504,6 +511,8 @@ async fn search(
         // Each statement stays inside the same transaction. Original JSON is
         // released after its batch executes; errors still roll back all rows.
         let batch = &pending;
+        projection_time += projection_started.elapsed();
+        let encode_started = std::time::Instant::now();
         let selling_batch = &returned[selling_start..];
         let mut query = sqlx::QueryBuilder::<sqlx::Postgres>::new(
             "INSERT INTO flight_offers(id,client_id,search_id,supplier_id,availability_epoch,original,selling,reference_map,rule_id,rule_version,expires_at) ",
@@ -525,7 +534,11 @@ async fn search(
             },
         );
         tracing::debug!(target: "search_memory", phase = "sql_batch_encoded");
+        sql_encode_time += encode_started.elapsed();
+        let execute_started = std::time::Instant::now();
         query.build().execute(&mut *tx).await?;
+        sql_execute_time += execute_started.elapsed();
+        sql_batches += 1;
     }
     tracing::debug!(target: "search_memory", phase = "selling_snapshots_ready");
     envelope = crate::search_summary::aggregate(
@@ -536,8 +549,14 @@ async fn search(
     )
     .map_err(|_| error("SUPPLIER_SUMMARY_UNSUPPORTED"))?;
     tracing::debug!(target: "search_memory", phase = "offers_persisted");
+    let commit_started = std::time::Instant::now();
     tx.commit().await?;
     tracing::info!(target: "search_performance", supplier_ms, preparation_ms,
+        projection_ms = projection_time.as_millis() as u64,
+        sql_encode_ms = sql_encode_time.as_millis() as u64,
+        sql_execute_ms = sql_execute_time.as_millis() as u64,
+        commit_ms = commit_started.elapsed().as_millis() as u64,
+        sql_batches,
         persistence_ms = persistence_started.elapsed().as_millis() as u64,
         total_ms = started.elapsed().as_millis() as u64,
         source_offers = source_count, returned_offers = returned.len(),
@@ -563,7 +582,13 @@ async fn search(
     {
         *pagination = json!(search_id.to_string());
     }
-    let mut response = (headers, Json(envelope)).into_response();
+    tracing::debug!(target: "search_memory", phase = "response_encoding_started");
+    let mut response = (
+        headers,
+        Json(crate::search_response::SearchResponse::new(envelope)),
+    )
+        .into_response();
+    tracing::debug!(target: "search_memory", phase = "response_encoding_finished");
     response.extensions_mut().insert(permit);
     Ok(response)
 }

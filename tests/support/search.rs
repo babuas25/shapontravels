@@ -354,7 +354,7 @@ pub async fn verify(original_app: &Router, admin: &str, machine: &str, pool: &Pg
         .unwrap();
     assert_eq!(before, after);
     mocks[0].response.lock().unwrap()["item1"]["totalFlights"] = json!(27);
-    // Cross two complete 64-row batches plus a short final batch.
+    // Cross multiple complete batches plus a short final batch.
     let mut bulk = complete.clone();
     bulk["item1"]["airSearchResponses"] = json!(
         (0..130)
@@ -393,7 +393,7 @@ pub async fn verify(original_app: &Router, admin: &str, machine: &str, pool: &Pg
         );
         assert_eq!(selling["totalPrice"].to_string(), "4533.05");
     }
-    // A database failure in batch two rolls back batch one and the search header.
+    // A database failure in a later batch rolls back earlier batches and the search header.
     sqlx::query("CREATE FUNCTION fail_bulk_test() RETURNS trigger LANGUAGE plpgsql AS $$ BEGIN IF NEW.original->>'bulkRow'='64' THEN RAISE EXCEPTION 'deliberate batch failure'; END IF; RETURN NEW; END $$").execute(pool).await.unwrap();
     sqlx::query("CREATE TRIGGER fail_bulk_test BEFORE INSERT ON flight_offers FOR EACH ROW EXECUTE FUNCTION fail_bulk_test()").execute(pool).await.unwrap();
     let before: (i64, i64) = sqlx::query_as(

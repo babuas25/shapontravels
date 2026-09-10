@@ -804,3 +804,30 @@ User explicitly requested same-airline alternative selection through the step be
 
 - [x] Authorized application commit `7c24ab0818f8315cba113e07d75143d2952178de` pushed to main and deployed successfully through CI on 2026-09-10 at 18:11 Asia/Dhaka. All checks/build/deploy jobs passed; eight independent public HTTPS checks passed afterward. Cleanup worker retained 15-minute retention / 30-second interval, with zero observed eligible backlog.
 - Evidence and measurement limits: [admission deployment](docs/evidence/SEARCH_ADMISSION_DEPLOY_2026-09-10.md).
+
+### Database persistence profiling and smaller batches — 2026-09-10
+
+- User authorized proceeding with the next optimization step. Local implementation/verification only; commit/push still require permission.
+- [x] Separated projection, SQL encoding/execution, commit timing and batch count in safe aggregate Search logs. Local comparison uses the same timing instrumentation for both variants.
+- [x] Reduced INSERT batches from 64 to 16 offers while retaining one atomic transaction and all original/selling/reference data. No migration, admission, expiry or pricing change.
+- [x] Twelve alternating local replays (three per variant at concurrency one/four) preserve all 2,177 offers and prior business fingerprint/decoded size per response: 30 successful responses, 65,310 persisted offers. At four concurrent requests, median sampled summed PostgreSQL RSS 573.86→346.30 MiB, SQL execution 1,048→848 ms, HTTP 1,537→1,338.5 ms. Replay-process peak RSS increases 1,080.14→1,155.30 MiB; no application-RAM or storage-reduction claim.
+- RSS sums include shared-page double counting and are not cgroup/unique physical memory. These local socket measurements do not establish VPS capacity or twelve-customer success. More SQL statements may cost more with network database latency.
+- [ ] Constrained VPS comparison of smaller batches/database cgroup memory and the final twelve-arrival admission policy remains pending. Shared snapshot/cache isolation and other Step 3/4/6/7/8 gaps are unchanged.
+- Evidence and verification: [persistence profiling](docs/evidence/SEARCH_PERSISTENCE_2026-09-10.md).
+- [x] Formatting, strict all-target Clippy, all 43 ordinary tests and disposable PostgreSQL integration (36.98 seconds) passed, including complete snapshots/reference ownership and late-batch/summary rollback. Profiling cluster and integration database removed; no supplier calls, production writes or release performed.
+
+### Search response memory — 2026-09-10
+
+- User requested continuing optimization and explicitly deferred push/deployment. The previous smaller-batch change remains local.
+- [x] Profiled four-request memory phases. The earlier 7% increase describes the combined replay process, including client parsing, and was not consistently reproduced; it is not proof of a standalone API RAM regression.
+- [x] Search response serialization now releases each offer tree after encoding it. Axum still buffers the whole response before returning it; all fields, exact numbers, offer order, database atomicity and admission permit lifetime remain intact.
+- [x] Twelve paired local replay runs preserve 2,177 offers and exact decoded size/prior business fingerprint in every response. Median replay RSS 353.50→335.92 MiB (one request) and 1,250.28→1,133.53 MiB (four). Four-request HTTP median 1,326→1,390.5 ms; no speedup or isolated API/VPS memory guarantee is claimed.
+- [x] Exact-byte tests against all three supplier fixtures and unknown/precise-number shapes, formatting, strict Clippy and all 45 ordinary tests pass. Full disposable PostgreSQL integration passed in 36.97 seconds; temporary database and profiling cluster removed.
+- [ ] Shared snapshot/cache investigation and constrained VPS capacity verification remain separate; no policy inference, supplier traffic, commit, push or deployment is introduced.
+- Evidence: [response memory verification](docs/evidence/SEARCH_RESPONSE_MEMORY_2026-09-10.md).
+
+### Persistence/response optimization release authorization — 2026-09-10
+
+- User explicitly requested completing Git push and remaining database/deployment work. This supersedes the prior push/deploy deferral for the verified 16-row SQL batches, aggregate timing logs and consuming Search response serializer.
+- Release uses the existing CI/VPS activation workflow, including backup, migration/checksum validation, grants and health checks. No new migration or production test data upload is needed; no supplier Search/Book/Issue is part of release verification.
+- Shared caching and expanded VPS capacity verification remain separate; deployment does not establish twelve-request success.
