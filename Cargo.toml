@@ -5,6 +5,7 @@ edition = "2024"
 rust-version = "1.88"
 
 [dependencies]
+http-body = "1"
 axum = "0.8.9"
 dotenvy = "0.15"
 serde = { version = "1", features = ["derive"] }

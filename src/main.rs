@@ -1,4 +1,6 @@
-use shapontravels_api::{AppState, MIGRATOR, config::Config, connect, router, schema_ready};
+use shapontravels_api::{
+    AppState, MIGRATOR, config::Config, connect, router_with_search_limits, schema_ready,
+};
 
 #[tokio::main]
 async fn main() {
@@ -95,14 +97,23 @@ async fn run() -> Result<(), String> {
         .await
         .map_err(|_| "could not bind HTTP listener")?;
     tracing::info!(environment = %config.environment, bind = %config.bind, "API started");
+    tracing::info!(
+        max_active = config.search_limits.max_active,
+        max_queued = config.search_limits.max_queued,
+        queue_wait_ms = config.search_limits.wait.as_millis() as u64,
+        "Search admission configured"
+    );
     let (cleanup_stop, cleanup_receiver) = tokio::sync::oneshot::channel();
     let cleanup = tokio::spawn(shapontravels_api::cleanup::run(
         pool.clone(),
         cleanup_receiver,
     ));
-    let result = axum::serve(listener, router(state))
-        .with_graceful_shutdown(shutdown())
-        .await;
+    let result = axum::serve(
+        listener,
+        router_with_search_limits(state, config.search_limits),
+    )
+    .with_graceful_shutdown(shutdown())
+    .await;
     let _ = cleanup_stop.send(());
     let _ = cleanup.await;
     result.map_err(|_| "HTTP server failed")?;

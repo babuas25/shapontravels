@@ -102,7 +102,7 @@ FareRules supplier business/transport failures return HTTP 502 `{"error":"UPSTRE
 
 Large supplier inventories are moved rather than copied between response envelopes. Retained offers persist in batches of at most 64 rows inside one transaction; a later insert failure rolls back all batches. Offer data, selection, pricing and response shape are unchanged. Non-sensitive `search_performance` logs contain source/returned counts and supplier/preparation/persistence/total phase durations; persistence includes pricing/summary/JSON binding as well as database execution.
 
-See [the measured comparison](evidence/SEARCH_PERFORMANCE_2026-09-10.md) for one/four-concurrent offline replays. These are local process measurements, not a production VPS capacity guarantee. Negotiated response compression is described below; pagination and admission limits remain separate work; temporary Search cleanup is described below.
+See [the measured comparison](evidence/SEARCH_PERFORMANCE_2026-09-10.md) for one/four-concurrent offline replays. These are local process measurements, not a production VPS capacity guarantee. Negotiated response compression is described below; pagination remains separate work; Search admission is described below; temporary Search cleanup is described below.
 
 
 ## Lossless response compression
@@ -137,3 +137,40 @@ Cleanup processes at most 512 rows per table in a transaction, uses row locks wi
 Deleted offer payloads are replaced atomically with a small owner-scoped ID marker, retained for 24 hours after deletion. FareRules/RePrice return 410 OFFER_EXPIRED to that owner while the marker is valid; other clients receive 404. After the marker expires, the reference returns 404. No fares, routes, passenger data or reference maps are stored in the marker. Empty expired Search headers are deleted in the same cleanup transaction; a header with any retained offer remains.
 
 Database DELETE makes space reusable through normal PostgreSQL vacuuming; it does not promise that the database file immediately shrinks. Cleanup affects stored temporary data, separately from the in-flight memory improvements. Counts and safe failures are logged without payloads. See [cleanup verification](evidence/SEARCH_CLEANUP_2026-09-10.md).
+
+
+## Bounded Search admission
+
+Search now acquires process-local capacity **after** machine authentication, scope checks and request validation, but **before** reading current supplier/pricing configuration or making supplier calls. Existing authentication/rate-limit database work occurs before this gate. No connection or transaction is held while waiting for Search capacity.
+
+| Environment variable | Default | Allowed range |
+| --- | ---: | ---: |
+| `SEARCH_MAX_ACTIVE` | 4 | 1–8 |
+| `SEARCH_MAX_QUEUED` | 8 | 0–32 |
+| `SEARCH_QUEUE_WAIT_MS` | 2000 | 1–2000 |
+
+A full admission pool or elapsed queue wait returns HTTP **503**, `{"error":"SEARCH_BUSY"}`, and `Retry-After: 1`, retaining the normal no-store/request-ID headers. Retry-After is a suggested delay, not a guarantee of capacity; clients should use bounded backoff with jitter. Existing credential/permission/invalid-request errors take precedence. Busy attempts consume the existing authentication rate-limit allowance, but perform no supplier Search or inventory insert. Existing rate-limit 429 and supplier-failure 503 semantics remain separate.
+
+An admitted Search retains all baseline valid offers, unchanged pricing/reference semantics and atomic persistence. It holds capacity during supplier processing, serialization and consumption of the compressed or identity response body. Completion, body error, disconnect/drop and cancelled waiting/work futures release capacity. The outer body wrapper sits outside compression; returning headers alone does not free the slot. Bytes already handed to HTTP/socket buffers are outside this gate's accounting.
+
+Other endpoints, including health, FareRules, RePrice and booking, do not acquire this gate. Router clones share one admission pool; separate processes/replicas have independent pools. Slow clients can hold active slots, so excess requests may receive SEARCH_BUSY; queue wait is not a total Search/transport deadline. Limits bound the number of expensive responses, not an absolute memory byte budget. These defaults are provisional guardrails, not a measured throughput promise.
+
+The offline replay accepts `LOAD_MAX_ACTIVE`, `LOAD_MAX_QUEUED` and `LOAD_QUEUE_WAIT_MS` with the same bounds, in addition to `LOAD_CONCURRENCY`. Defaults match the application; set and report an explicit queue budget for scheduling comparisons, and do not confuse that experiment with the configured overload policy.
+
+See [admission verification and local RAM/time tradeoff](evidence/SEARCH_ADMISSION_2026-09-10.md).
+
+
+### Bursts of 10-12 customers
+
+The updated default has four active slots and eight queued slots: up to twelve simultaneous Search requests can be admitted/waiting, assuming each customer sends one request and the pool was initially empty. Queue wait is bounded at two seconds, as explicitly requested by the user. Values above 2000 ms are rejected at startup. Later arrivals or requests that wait longer receive SEARCH_BUSY; this is not a promise that every supplier response completes in time. The bound counts requests, not unique customers.
+
+The existing VPS proxy timeout was read-only verified as 150 seconds. The earlier 240-second timeout proposal for a 90-second queue is withdrawn; this two-second policy requires no queue-driven proxy timeout increase. No live Nginx change has been made.
+
+See [twelve-arrival comparison](evidence/SEARCH_BURST_2026-09-10.md) for local four-versus-six active measurements. The earlier two-active default was superseded after the user specified simultaneous bursts of 10-12 customers. Historical all-success replays used longer queue budgets; they do not prove all twelve arrivals succeed with the final two-second limit. Controlled VPS validation of this twelve-arrival policy is now recorded below; uncapped production capacity remains unproven.
+
+For deliberate overload measurement only, the offline replay accepts `LOAD_ALLOW_BUSY=1`: it records verified SEARCH_BUSY responses instead of aborting, while other failures still fail the run. Normal replay remains all-success by default.
+
+Final two-second local burst replay returned eight successes and four SEARCH_BUSY responses per twelve-arrival wave in each of three runs. All successful offers were preserved. This is a measured local outcome, not a guarantee or prediction for live supplier traffic.
+
+
+The controlled VPS replay of the final policy returned four successes and eight SEARCH_BUSY responses per twelve-arrival wave in all three runs. Median busy full-body latency was 3.099 seconds, so the two-second admission timer must not be presented as a two-second end-to-end response guarantee. See [VPS burst evidence](evidence/SEARCH_VPS_BURST_2026-09-10.md) for CPU/RAM caps, timing limits and complete outcomes. Production has not been updated.

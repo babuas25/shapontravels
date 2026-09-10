@@ -745,7 +745,57 @@ User explicitly requested same-airline alternative selection through the step be
 
 - User authorized proceeding with cleanup observation and isolated concurrent replay verification. Future commit/push still requires explicit permission.
 - [x] User installed the fixed read-only observation helper from a root terminal. Production journal confirms the 15-minute/30-second cleanup worker startup; aggregate inspection shows no eligible backlog and currently empty Search inventory, so a production deletion event is not claimed.
-- [x] Controlled VPS replay completed at concurrency 1, 2 and 4, three samples each, with private disposable PostgreSQL and readiness sampling. All 2,177 baseline retained offers, decoded size and prior business fingerprint preserved. Median HTTP times: 6.192 / 12.363 / 24.265 seconds; replay peak RSS: 664.55 / 827.48 / 1,404.84 MiB. These capped offline measurements do not establish production capacity for the 7,207-offer case.
+- [x] Controlled VPS replay completed at concurrency 1, 2 and 4, three samples each, with private disposable PostgreSQL and readiness sampling. All 2,177 baseline retained offers, decoded size and prior business fingerprint preserved. Median HTTP times: 6.192 / 12.363 / 24.265 seconds; replay peak RSS: 664.55 / 827.48 / 1,404.84 MiB. These capped offline measurements do not establish general production capacity. The original 7,207 count totals 12 scenarios; it was not a single-response workload.
 - [x] Initial 256 MiB test PostgreSQL cap caused a four-request OOM failure; all final levels passed with a 512 MiB test DB cap. Production remained active. Temporary VPS files/cluster removed; read-only observer remains installed.
-- [ ] Evaluate bounded Search admission/queue and database persistence memory on the larger workload before choosing production limits. User subsequently authorized committing/pushing the observer scripts and verification documentation; further runtime changes/deployments remain outside that approval.
+- [ ] Evaluate bounded Search admission/queue and database persistence memory on the largest captured workload before choosing production limits. User subsequently authorized committing/pushing the observer scripts and verification documentation; further runtime changes/deployments remain outside that approval.
 - Evidence: [controlled VPS replay](docs/evidence/SEARCH_VPS_CAPACITY_2026-09-10.md).
+
+
+### Bounded Search admission — verified locally, awaiting commit/push approval
+
+- User authorized proceeding with the next optimization step. Complete local work and verification, then ask before committing/pushing runtime changes.
+- Capture clarification: the earlier 7,207 offers total 12 Search scenarios; largest retained response is 2,177 offers. Do not describe 7,207 as a demonstrated single-response fixture.
+- [x] Configurable admission after authentication/permission/request validation and before supplier/configuration snapshots. Updated defaults after the user specified 10-12 simultaneous customers: four active Search responses, eight waiting requests, user-approved two-second maximum queue wait. Per-process guardrails, not a production capacity guarantee.
+- [x] Capacity remains held through JSON serialization and gzip response-body consumption/drop. Busy requests return whole-request 503 SEARCH_BUSY with Retry-After: 1, without supplier calls or offer persistence; no offer truncation or cache/reference sharing.
+- [x] Formatting, all-target clippy, 42 unit/foundation/fixture tests and the real PostgreSQL integration pass. Nine local four-arrival replays preserve all 2,177 offers per request and the prior fingerprint/decoded size. Two active slots reduce median replay RSS from 1,051.55 to 596.30 MiB (43.3%), with complete-wave time increasing from 2.654 to 3.421 seconds; comparison uses a 30-second queue budget and is not a default-policy/VPS capacity claim.
+- [x] All disposable admission/replay databases removed. No supplier network calls, migrations, commit, push or deployment performed for this local change.
+- Evidence: [Search admission](docs/evidence/SEARCH_ADMISSION_2026-09-10.md).
+
+
+### Customer burst requirement - local follow-up
+
+- User expects 10-12 customers to Search simultaneously. The initial two-active/four-queued/two-second draft is superseded by four active slots, eight queued slots and a user-approved two-second maximum wait. This admits twelve requests into active/waiting capacity, not twelve expensive pipelines at once or a guarantee of success under every supplier delay.
+- Offline example now accepts 1-12 concurrent arrivals. Compare four and six active workers using the same captured 2,177-offer response; retain every baseline offer.
+- The earlier 240-second Nginx proposal is withdrawn after the user capped queue wait at two seconds; keep the existing reviewed 150-second timeout. No live config change or commit/push is authorized by this local implementation step.
+
+- [x] Final twelve-arrival local comparison: three samples each at four/six active slots. All 72 responses preserve every baseline offer. Median replay RSS 1,282.75/1,805.28 MiB; complete-wave times 5.796/6.155 seconds. Final comparison ran after builds/tests finished; preliminary overlapping measurements were excluded.
+- [x] Three historical replay samples with the intermediate defaults (4 active/8 queued/90000 ms wait) pass for twelve arrivals each. Forty-three unit/foundation/fixture tests, clippy, formatting and PostgreSQL integration pass. This is not a VPS capacity promise.
+- Evidence: [twelve-arrival policy](docs/evidence/SEARCH_BURST_2026-09-10.md).
+
+
+### Final queue deadline - explicit user correction
+
+- User rejected the 90-second proposal and requested at most one second. Default and hard upper bound are now 1000 ms; environment and programmatic configuration reject larger values. Active/queued counts remain four/eight.
+- A queued request starts immediately when capacity opens, otherwise returns SEARCH_BUSY when its one-second wait expires. This deadline does not limit supplier execution after admission. Historical longer-budget burst success is not a promise of twelve successful requests under this short wait policy.
+- No commit, push, deploy or live Nginx change is authorized by this correction.
+
+
+### Final user approval of the two-second queue setting
+
+- User superseded the one-second instruction with "2 SEC FINAL". Final default and hard maximum: 2000 ms; four active and eight queued slots remain. This approves the local setting only; commit/push/deploy still require permission.
+- Earlier one-second and 90-second proposals are superseded. Existing 150-second Nginx timeout stays unchanged.
+
+- [x] Final two-second default replay: three runs of twelve arrivals, each with eight successes and four SEARCH_BUSY responses. All successful responses preserve 2,177 offers/fingerprint/decoded size; 17,416 persisted offers per run. Forty-three tests, clippy, formatting and release build pass. Local measurements only; no production update or commit/push.
+
+
+### Controlled VPS validation of final admission policy
+
+- [x] User authorized isolated VPS validation before commit/push/deploy. The tested source tar and local runtime file hashes match. One smoke Search and three twelve-arrival waves completed; no supplier network calls or production data writes were used.
+- [x] Each twelve-arrival wave: four successes, eight SEARCH_BUSY responses, 8,708 persisted offers; all successful responses retain the baseline fingerprint/decoded size. Median burst replay RSS 1,519.65 MiB, successful HTTP 23.532 s, busy HTTP 3.099 s under explicit CPU/RAM caps. A two-second admission timer is not a two-second end-to-end response guarantee.
+- [x] All 551 sampled production health checks passed; no replay/PostgreSQL OOM/max events observed. Test cluster, captures and build files removed from VPS. Production PID unchanged; no commit/push/deploy or Nginx change performed.
+- [x] User explicitly authorized commit/push/deploy after reviewing the result. This bounded configuration does not establish that all twelve simultaneous customers can succeed; eight requests were rejected per measured wave. Further capacity work remains separate.
+- Evidence: [VPS twelve-arrival replay](docs/evidence/SEARCH_VPS_BURST_2026-09-10.md).
+
+### Admission release authorization
+
+- User explicitly requested "Commit/push/deploy KORO" after the VPS results and two-second timer limitations were explained. This supersedes the earlier pending release permission. Release scope is four active Search requests, eight queued slots and a 2000 ms admission wait; existing 150-second Nginx timeout remains.

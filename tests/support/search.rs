@@ -77,12 +77,13 @@ pub async fn verify(original_app: &Router, admin: &str, machine: &str, pool: &Pg
         );
         mocks.push(mock);
     }
-    let app = router(AppState {
+    let state = AppState {
         pool: pool.clone(),
         environment: "test".into(),
         db_timeout: Duration::from_secs(2),
         suppliers: Arc::new(configured),
-    });
+    };
+    let app = router(state.clone());
     let request = json!({"routes":[{"origin":"DAC","destination":"CXB","departureDate":(chrono::Utc::now()+chrono::Duration::days(21)).format("%Y-%m-%d").to_string()}],"adults":1,"childs":0,"infants":0,"cabinClass":1,"preferredCarriers":[],"prohibitedCarriers":[],"childrenAges":[]});
     assert_eq!(
         call(&app, "POST", "/api/Search", Some(admin), request.clone())
@@ -123,6 +124,7 @@ pub async fn verify(original_app: &Router, admin: &str, machine: &str, pool: &Pg
         .0,
         200
     );
+    verify_admission(state, machine, &request, &mocks, pool).await;
     let mut latest = Value::Null;
     for mask in 1u8..8 {
         for (i, name) in ["firsttrip", "takeoff", "triplover"].iter().enumerate() {
@@ -503,5 +505,124 @@ pub async fn verify(original_app: &Router, admin: &str, machine: &str, pool: &Pg
             .await
             .1["error"],
         "ALL_SUPPLIERS_FAILED"
+    );
+}
+
+async fn verify_admission(
+    state: AppState,
+    machine: &str,
+    request: &Value,
+    mocks: &[Arc<Mock>],
+    pool: &PgPool,
+) {
+    use axum::{
+        body::{Body, to_bytes},
+        http::Request,
+    };
+    use shapontravels_api::{router_with_search_limits, search_admission::SearchLimits};
+    use tower::ServiceExt;
+    let limited = router_with_search_limits(
+        state,
+        SearchLimits {
+            max_active: 1,
+            max_queued: 1,
+            wait: Duration::from_millis(25),
+        },
+    );
+    let wire_request = || {
+        Request::builder()
+            .method("POST")
+            .uri("/api/Search")
+            .header("authorization", format!("Bearer {machine}"))
+            .header("content-type", "application/json")
+            .header("accept-encoding", "gzip")
+            .body(Body::from(request.to_string()))
+            .unwrap()
+    };
+    let held = limited.clone().oneshot(wire_request()).await.unwrap();
+    assert_eq!(held.status(), 200);
+    assert_eq!(held.headers()["content-encoding"], "gzip");
+    let calls_before: usize = mocks.iter().map(|m| m.calls.load(Ordering::SeqCst)).sum();
+    let (rows_before,): (i64,) = sqlx::query_as("SELECT count(*) FROM flight_offers")
+        .fetch_one(pool)
+        .await
+        .unwrap();
+    let busy = limited.clone().oneshot(wire_request()).await.unwrap();
+    assert_eq!(busy.status(), 503);
+    assert_eq!(busy.headers()["retry-after"], "1");
+    assert_eq!(busy.headers()["cache-control"], "no-store");
+    assert!(busy.headers().contains_key("x-request-id"));
+    let busy: Value =
+        serde_json::from_slice(&to_bytes(busy.into_body(), 4096).await.unwrap()).unwrap();
+    assert_eq!(busy, json!({"error":"SEARCH_BUSY"}));
+    assert_eq!(
+        mocks
+            .iter()
+            .map(|m| m.calls.load(Ordering::SeqCst))
+            .sum::<usize>(),
+        calls_before
+    );
+    let (rows_after,): (i64,) = sqlx::query_as("SELECT count(*) FROM flight_offers")
+        .fetch_one(pool)
+        .await
+        .unwrap();
+    assert_eq!(
+        rows_before, rows_after,
+        "busy Search must not persist inventory"
+    );
+    assert_eq!(
+        call(&limited, "POST", "/api/Search", None, request.clone())
+            .await
+            .0,
+        401
+    );
+    let mut invalid = request.clone();
+    invalid["adults"] = json!(0);
+    assert_eq!(
+        call(&limited, "POST", "/api/Search", Some(machine), invalid)
+            .await
+            .0,
+        422
+    );
+    let health = limited
+        .clone()
+        .oneshot(
+            Request::builder()
+                .uri("/health/live")
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(health.status(), 200);
+    let compressed = to_bytes(held.into_body(), 4 * 1024 * 1024).await.unwrap();
+    let mut decoded = Vec::new();
+    std::io::Read::read_to_end(
+        &mut flate2::read::GzDecoder::new(compressed.as_ref()),
+        &mut decoded,
+    )
+    .unwrap();
+    let body: Value = serde_json::from_slice(&decoded).unwrap();
+    assert!(
+        !body["item1"]["airSearchResponses"]
+            .as_array()
+            .unwrap()
+            .is_empty()
+    );
+    let held = limited.clone().oneshot(wire_request()).await.unwrap();
+    assert_eq!(held.status(), 200, "body completion releases capacity");
+    drop(held);
+    assert_eq!(
+        call(
+            &limited,
+            "POST",
+            "/api/Search",
+            Some(machine),
+            request.clone()
+        )
+        .await
+        .0,
+        200,
+        "disconnect releases capacity"
     );
 }

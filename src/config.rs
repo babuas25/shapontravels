@@ -7,6 +7,7 @@ pub struct Config {
     pub environment: String,
     pub max_connections: u32,
     pub db_timeout: Duration,
+    pub search_limits: crate::search_admission::SearchLimits,
     pub suppliers: Vec<SupplierConfig>,
 }
 
@@ -47,6 +48,11 @@ impl Config {
             .map_err(|_| "APP_BIND must be an IP address and port")?;
         let max_connections = number(&get, "DB_MAX_CONNECTIONS", 10, 1, 100)?;
         let db_timeout = Duration::from_secs(number(&get, "DB_TIMEOUT_SECONDS", 5, 1, 60)? as u64);
+        let search_limits = crate::search_admission::SearchLimits {
+            max_active: number(&get, "SEARCH_MAX_ACTIVE", 4, 1, 8)? as usize,
+            max_queued: number(&get, "SEARCH_MAX_QUEUED", 8, 0, 32)? as usize,
+            wait: Duration::from_millis(number(&get, "SEARCH_QUEUE_WAIT_MS", 2000, 1, 2000)? as u64),
+        };
         let mut suppliers = Vec::new();
         for (id, prefix) in [
             ("firsttrip", "FIRSTTRIP"),
@@ -98,6 +104,7 @@ impl Config {
             environment,
             max_connections,
             db_timeout,
+            search_limits,
             suppliers,
         })
     }

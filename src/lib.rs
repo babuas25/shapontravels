@@ -8,6 +8,7 @@ pub mod pricing;
 pub mod projection;
 pub mod reprice;
 pub mod search;
+pub mod search_admission;
 mod selection;
 pub mod supplier;
 
@@ -102,6 +103,13 @@ pub async fn schema_ready(pool: &PgPool) -> bool {
 struct ApiDoc;
 
 pub fn router(state: AppState) -> Router {
+    router_with_search_limits(state, search_admission::SearchLimits::default())
+}
+
+pub fn router_with_search_limits(
+    state: AppState,
+    limits: search_admission::SearchLimits,
+) -> Router {
     let mut doc = ApiDoc::openapi();
     doc.merge(auth::AuthDoc::openapi());
     doc.merge(connections::ConnectionDoc::openapi());
@@ -136,6 +144,8 @@ pub fn router(state: AppState) -> Router {
                 .quality(CompressionLevel::Fastest)
                 .compress_when(DefaultPredicate::new().and(SizeAbove::new(1024))),
         )
+        .layer(middleware::from_fn(search_admission::retain_response))
+        .layer(axum::Extension(search_admission::Admission::new(limits)))
         .layer(middleware::from_fn(correlation))
         .with_state(state)
 }

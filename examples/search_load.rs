@@ -9,8 +9,9 @@ use axum::{
 use base64::Engine;
 use serde_json::{Value, json};
 use shapontravels_api::{
-    AppState, MIGRATOR, router,
+    AppState, MIGRATOR, router_with_search_limits,
     search::{ConfiguredSupplier, ReadSupplier},
+    search_admission::SearchLimits,
     supplier::{ReadOperation, SupplierError},
 };
 use std::{
@@ -47,7 +48,8 @@ async fn main() {
         .unwrap_or("1".into())
         .parse()
         .unwrap();
-    assert!((1..=8).contains(&concurrent));
+    assert!((1..=12).contains(&concurrent));
+    let allow_busy = std::env::var("LOAD_ALLOW_BUSY").as_deref() == Ok("1");
     let encoding = std::env::var("LOAD_ACCEPT_ENCODING").unwrap_or("identity".into());
     assert!(["identity", "gzip"].contains(&encoding.as_str()));
     let pool = sqlx::postgres::PgPoolOptions::new()
@@ -128,12 +130,26 @@ async fn main() {
             },
         );
     }
-    let app = router(AppState {
-        pool: pool.clone(),
-        environment: "load-test".into(),
-        db_timeout: Duration::from_secs(30),
-        suppliers: Arc::new(suppliers),
-    });
+    let mut limits = SearchLimits::default();
+    if let Ok(v) = std::env::var("LOAD_MAX_ACTIVE") {
+        limits.max_active = v.parse().unwrap();
+    }
+    if let Ok(v) = std::env::var("LOAD_MAX_QUEUED") {
+        limits.max_queued = v.parse().unwrap();
+    }
+    if let Ok(v) = std::env::var("LOAD_QUEUE_WAIT_MS") {
+        limits.wait = Duration::from_millis(v.parse().unwrap());
+    }
+    limits.validate().unwrap();
+    let app = router_with_search_limits(
+        AppState {
+            pool: pool.clone(),
+            environment: "load-test".into(),
+            db_timeout: Duration::from_secs(30),
+            suppliers: Arc::new(suppliers),
+        },
+        limits,
+    );
     let request = json!({"routes":[{"origin":"DAC","destination":"SIN","departureDate":"2026-10-15"},{"origin":"SIN","destination":"DAC","departureDate":"2026-10-20"}],"adults":2,"childs":2,"infants":1,"childrenAges":[3,11],"cabinClass":1,"preferredCarriers":[],"prohibitedCarriers":[]});
     let barrier = Arc::new(tokio::sync::Barrier::new(concurrent));
     let mut tasks = tokio::task::JoinSet::new();
@@ -153,6 +169,12 @@ async fn main() {
                 .header("accept-encoding", &encoding)
                 .body(Body::from(body)).unwrap()).await.unwrap();
             let status = response.status();
+            if allow_busy && status == 503 {
+                assert_eq!(response.headers()["retry-after"], "1");
+                let bytes = to_bytes(response.into_body(), 4096).await.unwrap();
+                assert_eq!(serde_json::from_slice::<Value>(&bytes).unwrap(), json!({"error":"SEARCH_BUSY"}));
+                return json!({"request":index,"http_status":503,"error":"SEARCH_BUSY","http_ms":start.elapsed().as_millis(),"offers":0});
+            }
             assert_eq!(response.headers().get("content-encoding").map(|h| h.to_str().unwrap()),
                 if encoding == "gzip" { Some("gzip") } else { None });
             let bytes = to_bytes(response.into_body(), 128 * 1024 * 1024).await.unwrap();
@@ -183,7 +205,7 @@ async fn main() {
             }
             strip(&mut value);
             let hash = shapontravels_api::auth::digest(&value.to_string());
-            json!({"request":index,"http_ms":elapsed,"response_bytes":bytes.len(),"wire_bytes":wire_bytes,"encoding":encoding,"decode_ms":decode_ms,"offers":value["item1"]["airSearchResponses"].as_array().unwrap().len(),"business_hash":format!("{hash:?}")})
+            json!({"request":index,"http_status":200,"http_ms":elapsed,"response_bytes":bytes.len(),"wire_bytes":wire_bytes,"encoding":encoding,"decode_ms":decode_ms,"offers":value["item1"]["airSearchResponses"].as_array().unwrap().len(),"business_hash":format!("{hash:?}")})
         });
     }
     let mut results = Vec::new();
@@ -200,7 +222,7 @@ async fn main() {
         .unwrap();
     println!(
         "LOAD_RESULT {}",
-        json!({"concurrency":concurrent,"input_bytes":input_bytes,"wall_ms":overall.elapsed().as_millis(),"persisted_offers":offers,"table_bytes":size,"requests":results})
+        json!({"concurrency":concurrent,"max_active":limits.max_active,"max_queued":limits.max_queued,"queue_wait_ms":limits.wait.as_millis(),"input_bytes":input_bytes,"wall_ms":overall.elapsed().as_millis(),"persisted_offers":offers,"table_bytes":size,"requests":results})
     );
     pool.close().await;
 }

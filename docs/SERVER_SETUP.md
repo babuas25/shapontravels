@@ -445,3 +445,8 @@ sudo -n /usr/local/sbin/shapontravels-observe
 - [Search API](SEARCH_API.md)
 - [Reprice API](REPRICE_API.md)
 - [Booking API](BOOKING_API.md)
+
+
+## Search queue and gateway timeouts
+
+The final user-requested Search queue maximum is two seconds. The earlier 240-second proxy proposal for a 90-second queue is withdrawn. Keep the existing reviewed 150-second upstream timeout; this queue change does not require increasing it. Queue wait is separate from supplier/processing time and is not a guaranteed total Search deadline. No live Nginx configuration was changed.

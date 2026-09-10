@@ -19,6 +19,12 @@ fn config_rejects_bad_values_without_leaking_secrets() {
     for (key, value) in [
         ("DATABASE_URL", "secret-sentinel"),
         ("DB_MAX_CONNECTIONS", "0"),
+        ("SEARCH_MAX_ACTIVE", "0"),
+        ("SEARCH_MAX_ACTIVE", "9"),
+        ("SEARCH_MAX_QUEUED", "33"),
+        ("SEARCH_QUEUE_WAIT_MS", "0"),
+        ("SEARCH_QUEUE_WAIT_MS", "2001"),
+        ("SEARCH_MAX_ACTIVE", "secret-sentinel"),
         ("APP_ENV", "other"),
         (
             "FIRSTTRIP_BASE_URL",
@@ -32,8 +38,18 @@ fn config_rejects_bad_values_without_leaking_secrets() {
             .expect("invalid config accepted");
         assert!(!error.contains("secret-sentinel"));
     }
+    assert_eq!(
+        config(&[("SEARCH_MAX_QUEUED", "0")])
+            .unwrap()
+            .search_limits
+            .max_queued,
+        0
+    );
     let config = config(&[]).unwrap();
     assert_eq!(config.bind.to_string(), "127.0.0.1:8080");
+    assert_eq!(config.search_limits.max_active, 4);
+    assert_eq!(config.search_limits.max_queued, 8);
+    assert_eq!(config.search_limits.wait, Duration::from_secs(2));
     assert!(
         config
             .suppliers

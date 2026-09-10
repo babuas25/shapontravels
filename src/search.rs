@@ -6,9 +6,10 @@ use crate::{
     supplier::{ReadOperation, SupplierAdapter, SupplierError},
 };
 use axum::{
-    Json, Router,
+    Extension, Json, Router,
     extract::State,
     http::{HeaderMap, HeaderValue, StatusCode},
+    response::{IntoResponse, Response},
     routing::post,
 };
 use serde::{Deserialize, Serialize};
@@ -246,15 +247,20 @@ pub(crate) fn bind_references(value: &mut Value, map: &mut serde_json::Map<Strin
     }
 }
 
-#[utoipa::path(post,path="/api/Search",tag="Flights",security(("machine_token"=[])),request_body(content=SearchRequest,example=json!({"routes":[{"origin":"DAC","destination":"CXB","departureDate":"2026-09-29"}],"adults":1,"childs":0,"infants":0,"cabinClass":1,"preferredCarriers":[],"prohibitedCarriers":[],"childrenAges":[]})),responses((status=200,body=Object,description="Supplier-compatible item1/item2 envelope. Equivalent evidenced offers select the lowest original supplier total before markup; ties prefer Takeoff, Firsttrip, Triplover. bookingClass/RBD matching permits missing cabinClass; explicit cabin conflicts stay separate. Unknown fare equivalence stays separate. X-Search-Partial reports failed active connections. X-Search-Summary-Scope: retained-selling-offers; net prices and counts summarize returned selling offers."),(status=422,description="Pricing, currency or scope configuration incomplete; SUPPLIER_SUMMARY_UNSUPPORTED for unsupported summary metadata"),(status=503,description="No active suppliers or all active connections failed")))]
+#[utoipa::path(post,path="/api/Search",tag="Flights",security(("machine_token"=[])),request_body(content=SearchRequest,example=json!({"routes":[{"origin":"DAC","destination":"CXB","departureDate":"2026-09-29"}],"adults":1,"childs":0,"infants":0,"cabinClass":1,"preferredCarriers":[],"prohibitedCarriers":[],"childrenAges":[]})),responses((status=200,body=Object,description="Supplier-compatible item1/item2 envelope. Equivalent evidenced offers select the lowest original supplier total before markup; ties prefer Takeoff, Firsttrip, Triplover. bookingClass/RBD matching permits missing cabinClass; explicit cabin conflicts stay separate. Unknown fare equivalence stays separate. X-Search-Partial reports failed active connections. X-Search-Summary-Scope: retained-selling-offers; net prices and counts summarize returned selling offers."),(status=422,description="Pricing, currency or scope configuration incomplete; SUPPLIER_SUMMARY_UNSUPPORTED for unsupported summary metadata"),(status=503,description="SEARCH_BUSY with Retry-After: 1 when Search capacity/queue wait is exhausted; otherwise no active suppliers or all active connections failed")))]
 async fn search(
     machine: Machine,
+    Extension(admission): Extension<crate::search_admission::Admission>,
     State(state): State<AppState>,
     Json(request): Json<SearchRequest>,
-) -> Result<(HeaderMap, Json<Value>), ApiError> {
+) -> Result<Response, ApiError> {
     let started = std::time::Instant::now();
     machine.require("search:read")?;
     request.validate()?;
+    let permit = match admission.acquire().await {
+        Ok(permit) => permit,
+        Err(busy) => return Ok(busy.into_response()),
+    };
     let active = crate::connections::search_snapshot(&state.pool).await?;
     let stored:Vec<StoredRule>=sqlx::query_as("SELECT id,version,audience,agent_id,airline,origin,destination,kind,amount::text AS amount,currency FROM markup_rules WHERE active AND (audience=$1 OR (audience='specific_agent' AND agent_id=$2)) ORDER BY id").bind(&machine.audience).bind(if machine.audience=="b2b"{machine.agent_id}else{None}).fetch_all(&state.pool).await?;
     if stored.is_empty() {
@@ -557,7 +563,9 @@ async fn search(
     {
         *pagination = json!(search_id.to_string());
     }
-    Ok((headers, Json(envelope)))
+    let mut response = (headers, Json(envelope)).into_response();
+    response.extensions_mut().insert(permit);
+    Ok(response)
 }
 
 #[derive(Deserialize, ToSchema)]
