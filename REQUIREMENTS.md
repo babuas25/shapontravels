@@ -2,6 +2,8 @@
 
 Status: Implementation in progress — Steps 1–2 verified complete; Step 5 implemented within documented coverage; Steps 3–4 and 6 partially implemented; Step 7 pending; Step 8 partially verified. Latest prebooking/release verification update: 2026-09-10. Historical milestone notes below are superseded where later updates say so.
 
+Important current priority (2026-09-10): আরও optimization প্রয়োজন, কোনো valid offer/field বাদ দিয়ে নয়। See [Tripfeels source comparison](docs/evidence/TRIPFEELS_OPTIMIZATION_COMPARISON_2026-09-10.md).
+
 ## 1. উদ্দেশ্য ও scope
 
 Rust backend সরাসরি Firsttrip, Takeoff ও Triplover-এর তিনটি connection ব্যবহার করবে। Supplier response একটি internal canonical model-এ normalize করে আমাদের frontend এবং external API clients-কে supplier-compatible request/response shape-এ API দেবে। আমাদের নিজস্ব PostgreSQL database থাকবে।
@@ -676,3 +678,14 @@ User explicitly requested same-airline alternative selection through the step be
 - Evidence and environment limits: [Search performance](docs/evidence/SEARCH_PERFORMANCE_2026-09-10.md).
 
 - [x] Memory/copy and batch-persistence optimization deployed as `24ba2632bd77a6d70b98033c82c314668d6b1b10` through GitHub Actions `34449963975`; all checks/build/deploy passed, public HTTPS health/docs/auth checks verified. Production concurrent capacity remains unmeasured.
+
+
+### Critical priority: further optimization without losing offers — user directive, 2026-09-10
+
+- Further optimization is a high-priority requirement before increasing production load. Prior memory/batch work is not evidence that optimization or VPS capacity validation is complete.
+- Optimization must not truncate/top-N/filter away valid returned offers, fare classes, airline/route options, or bypass supplier-compatible field/precision preservation. Existing explicitly approved equivalent-fare lowest-supplier selection remains the business baseline; do not broaden deduplication merely to save memory.
+- Compare `/Users/ashifbabu/Projects/tripfeels-backend` implementation against this project before choosing further techniques. Reuse suitable techniques, not the other project's pricing, retention, reference, security or response policies by assumption.
+- Distinguish wire bytes, live/peak process memory, repeated-search work, database growth and concurrent capacity. Compression must round-trip losslessly; caching/sharing must preserve client ownership, current pricing context, supplier enablement epochs and original reference expiry. RePrice/acceptance/booking state must remain isolated.
+- Requested scope for this review: inspect, compare and report feasible reductions without removing offers; no new runtime optimization or deployment is implied by the comparison itself.
+
+- Review completed: [Tripfeels comparison and prioritized recommendations](docs/evidence/TRIPFEELS_OPTIMIZATION_COMPARISON_2026-09-10.md). Exact 2,177-offer payload gzip proof reduced 24,446,992 bytes to 1,148,213 bytes at level 6, with byte-identical decompression; no runtime change/deployment.
