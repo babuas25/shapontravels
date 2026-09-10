@@ -37,3 +37,10 @@ Private measurements, paired release binaries and comparison JSON: `.local/evide
 ## Reproduce
 
 Build `cargo build --locked --release --example search_load`. Use an EMPTY local PostgreSQL database whose name ends in `_load_test`; the example refuses non-local hosts and nonempty databases. Set `LOAD_DATABASE_URL`, `LOAD_CAPTURE_DIR` to a directory containing exactly one saved `roundtrip-all-{supplier}-search-*-raw.json` per supplier, and `LOAD_CONCURRENCY` to 1–8. Run the binary under your platform's RSS/CPU measurement tool. The capture dates must still satisfy Search date validation. Never point it at a working installation database.
+
+
+## Deployment
+
+Application commit `24ba2632bd77a6d70b98033c82c314668d6b1b10` deployed through [GitHub Actions run 34449963975](https://github.com/babuas25/shapontravels/actions/runs/34449963975). All checks/build/deploy jobs passed. The activation log confirms the exact commit and live/ready success at 2026-09-10 07:31 UTC. No new migration was added.
+
+Public HTTPS liveness/readiness/docs/OpenAPI returned 200; readiness reported production/ready, the Search summary contract remained present and unauthenticated Search returned 401. These checks prove release activation and basic API boundaries, not loaded production latency/RSS. No supplier Search or mutation was invoked for release verification. Measurements remain the local replay results above. The 17 disposable databases created for this task were removed after verification; capture/measurement files remain locally available.

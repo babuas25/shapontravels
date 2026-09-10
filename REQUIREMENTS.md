@@ -674,3 +674,5 @@ User explicitly requested same-airline alternative selection through the step be
 - [x] Added safe phase/count logs and a reusable local-capture-only load example. No supplier traffic or live booking/issue was required.
 - [ ] The 23.3 MiB sample response and snapshot storage size remain unchanged. Compression, expiry cleanup policy, admission controls and controlled production-equivalent load validation are not completed or implied by these local measurements.
 - Evidence and environment limits: [Search performance](docs/evidence/SEARCH_PERFORMANCE_2026-09-10.md).
+
+- [x] Memory/copy and batch-persistence optimization deployed as `24ba2632bd77a6d70b98033c82c314668d6b1b10` through GitHub Actions `34449963975`; all checks/build/deploy passed, public HTTPS health/docs/auth checks verified. Production concurrent capacity remains unmeasured.
