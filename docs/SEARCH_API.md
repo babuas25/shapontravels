@@ -48,7 +48,7 @@ Specific carrier/route matching currently accepts only one route with one direct
 
 Search replaces supplier transaction/item/segment references with platform UUIDs. Original references, supplier connection, owner, rule version and availability epoch are stored privately. Platform references expire after ten minutes; this is a local retention/use limit, not a guarantee of supplier TTL. Supplier references can still expire earlier.
 
-To call POST `/api/FareRules`, take the selected returned offer's `uniqueTransID`, `itemCodeRef`, and every `segmentCodeRef` in route/segment order:
+To call POST `/api/FareRules`, take the selected returned offer's `uniqueTransID`, `itemCodeRef`, and the ordered `segmentCodeRef` values from exactly one complete selected direction per route:
 
 ```json
 {
@@ -59,7 +59,7 @@ To call POST `/api/FareRules`, take the selected returned offer's `uniqueTransID
 }
 ```
 
-The server checks ownership, expiry and exact segment reference match, then uses the stored original references on the original supplier. Foreign offers return 404; expired references 410; tampered reference sets 422. An admin token cannot call these commercial routes. FareRules references returned by suppliers are rebound to the client's platform context. FareRules does not book, accept a price or issue a ticket.
+The server checks ownership, expiry and an exact complete-direction match, then uses the stored original references on the original supplier. Foreign offers return 404; expired references 410; tampered reference sets 422. An admin token cannot call these commercial routes. FareRules references returned by suppliers are rebound to the client's platform context. FareRules does not book, accept a price or issue a ticket.
 
 Platform auth/configuration/validation errors currently retain the established platform error format `{"error":"CODE"}`; success pipeline responses use supplier item1/item2 envelopes. Full flight error/OpenAPI schema compatibility remains part of final contract work.
 
@@ -71,3 +71,13 @@ Platform auth/configuration/validation errors currently retain the established p
 - The working database's clients/rules/supplier activation settings are not changed by integration tests. Explicit production smoke uses a separate empty local database with temporary test identities/default rule.
 
 Tests cover all seven active supplier subsets, no-active/no-rule outcomes, partial/all failure, exact markup, reference rebinding and persistence, FareRules same-supplier routing, ownership/tampering/expiry, and machine/admin isolation. A production read-only public-flow smoke returned 78 offers with `X-Search-Partial: false`, verified the fixed-500 projection and successfully retrieved FareRules. No supplier mutations were sent.
+
+
+## Choosing another fare on the same airline
+
+A rejected RePrice applies to the selected offer, not every offer from its airline. Keep the Search result and filter other entries by the same `platingCarrier` (e.g. `6E`), excluding the failed `itemCodeRef`. Distinct RBD, fare and flight options remain selectable. This is a plating-carrier match, not a guarantee that all segments are operated by that airline. Customer selection determines the next offer; the backend does not silently change the item or supplier.
+
+Use the other offer's own item/selected segment references for FareRules and RePrice. If the Search or supplier session expired, run a new Search and replace all references together. See [prebooking flow](PREBOOKING_FLOW.md).
+
+
+FareRules supplier business/transport failures return HTTP 502 `{"error":"UPSTREAM_FARE_RULES_ERROR"}` without exposing raw supplier messages. The request deadline still returns 504 `SUPPLIER_TIMEOUT`. Show “Fare rules are currently unavailable” and allow customer-initiated RePrice for the selected offer; this error does not mark the fare unavailable or invalidate its price. Do not invent cancellation/refund rules. RePrice success still requires explicit local acceptance, and this flow stops before Book/Issue.

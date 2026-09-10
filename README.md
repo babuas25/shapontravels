@@ -13,13 +13,13 @@ cargo run -- serve
 
 The default listener is `127.0.0.1:8080`. Swagger is at `http://127.0.0.1:8080/docs/` and its downloadable contract at `/openapi.json`. `/health/live` checks the process; `/health/ready` checks PostgreSQL and all migration checksums, with a bounded timeout. Neither endpoint validates supplier credentials. The application refuses to serve with missing or mismatched migrations.
 
-Migrations run only through the explicit `migrate` command. Production should use a dedicated migration role and a separate least-privilege application role; deployment policy remains pending. PostgreSQL audit triggers prevent normal update/delete/truncate, but database owners/superusers remain a trusted boundary.
+Migrations run only through the explicit `migrate` command. The VPS deployment workflow uses a dedicated migration role and a separate least-privilege application role, with backup before migration. PostgreSQL audit triggers prevent normal update/delete/truncate, but database owners/superusers remain a trusted boundary.
 
-Supplier connections start disabled in PostgreSQL. Configuration validates HTTPS URLs and execution flags without contacting suppliers. Environment capability flags do not prove account entitlement. Protected supplier controls are implemented. Public flight APIs remain pending supplier evidence and pricing/transaction decisions.
+Supplier connections start disabled in PostgreSQL. Configuration validates HTTPS URLs and execution flags without contacting suppliers. Environment capability flags do not prove account entitlement. Protected supplier controls and public Search/FareRules/RePrice are implemented within the coverage documented below.
 
 ## Current implementation
 
-Foundation and authentication are verified. See [authentication contract](docs/AUTHENTICATION.md) for machine tokens, one-time bootstrap and admin/client management. Supplier transport and established pricing arithmetic are implemented internally; see [supplier evidence boundary](docs/evidence/SUPPLIER_READINESS.md) for unfinished integration and required evidence. `REQUIREMENTS.md` tracks completion per step.
+Foundation and authentication are verified. See [authentication contract](docs/AUTHENTICATION.md) for machine tokens, one-time bootstrap and admin/client management. Public Search selects equivalent offers by original supplier total, then applies markup. [Prebooking flow](docs/PREBOOKING_FLOW.md) covers selected-direction FareRules/RePrice, explicit local acceptance and customer-selected alternatives. Hold booking/status/reconciliation are partially implemented; Cancel, ticketing and reports remain unfinished. `REQUIREMENTS.md` tracks completion per step; later evidence supersedes historical baseline notes.
 
 On this workspace a PostgreSQL 18.3 development runtime has been built under the ignored `.local/` directory. Its cluster listens only on a private Unix socket. The helper sets the Rust PATH and dedicated local database URL without changing `.env`:
 
@@ -30,7 +30,7 @@ On this workspace a PostgreSQL 18.3 development runtime has been built under the
 ./scripts/dev.sh bootstrap-admin
 ```
 
-No real Super Admin or API client has been provisioned in the development database. Test identities exist only in disposable test databases.
+Integration tests provision their identities only in disposable test databases. Bootstrap the working installation separately as needed.
 
 ## Checks
 

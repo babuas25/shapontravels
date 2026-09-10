@@ -477,25 +477,6 @@ pub struct FareRulesRequest {
     #[serde(rename = "brandedFareRefs", default)]
     pub branded_fare_refs: String,
 }
-pub(crate) fn segment_refs(offer: &Value) -> Vec<String> {
-    let mut result = Vec::new();
-    if let Some(routes) = offer["directions"].as_array() {
-        for route in routes {
-            if let Some(directions) = route.as_array() {
-                for direction in directions {
-                    if let Some(segments) = direction["segments"].as_array() {
-                        for segment in segments {
-                            if let Some(reference) = segment["segmentCodeRef"].as_str() {
-                                result.push(reference.to_string());
-                            }
-                        }
-                    }
-                }
-            }
-        }
-    }
-    result
-}
 #[derive(sqlx::FromRow)]
 struct SavedOffer {
     search_id: Uuid,
@@ -505,7 +486,7 @@ struct SavedOffer {
     reference_map: Value,
     valid: bool,
 }
-#[utoipa::path(post,path="/api/FareRules",tag="Flights",security(("machine_token"=[])),request_body=FareRulesRequest,responses((status=200,body=Object),(status=404,description="Unknown or foreign offer"),(status=410,description="Platform reference expired"),(status=422,description="References do not match the saved offer")))]
+#[utoipa::path(post,path="/api/FareRules",tag="Flights",security(("machine_token"=[])),request_body=FareRulesRequest,responses((status=200,body=Object),(status=404,description="Unknown or foreign offer"),(status=410,description="Platform reference expired"),(status=422,description="References do not match the saved offer"),(status=502,description="UPSTREAM_FARE_RULES_ERROR: rules unavailable; customer may continue to RePrice"),(status=504,description="Supplier timeout")))]
 async fn fare_rules(
     machine: Machine,
     State(state): State<AppState>,
@@ -519,26 +500,30 @@ async fn fare_rules(
     if !row.valid {
         return Err(ApiError(StatusCode::GONE, "OFFER_EXPIRED"));
     }
-    if request.unique_trans_id != row.search_id.to_string()
-        || request.segment_code_refs != segment_refs(&row.selling)
-        || !request.branded_fare_refs.is_empty()
+    if request.unique_trans_id != row.search_id.to_string() || !request.branded_fare_refs.is_empty()
     {
         return Err(error("OFFER_REFERENCE_MISMATCH"));
     }
+    let selection =
+        crate::reprice_selection::select(&row.original, &row.selling, &request.segment_code_refs)
+            .ok_or(error("OFFER_REFERENCE_MISMATCH"))?;
     let transport = state
         .suppliers
         .get(&row.supplier_id)
         .ok_or(error("SUPPLIER_CONFIGURATION_ERROR"))?;
-    let payload = json!({"uniqueTransID":row.original["uniqueTransID"],"itemCodeRef":row.original["itemCodeRef"],"segmentCodeRefs":segment_refs(&row.original),"brandedFareRefs":""});
+    let payload = json!({"uniqueTransID":row.original["uniqueTransID"],"itemCodeRef":row.original["itemCodeRef"],"segmentCodeRefs":selection["supplierSegmentCodeRefs"],"brandedFareRefs":""});
     let mut response = tokio::time::timeout(
         Duration::from_secs(30),
         transport.transport.read(ReadOperation::FareRules, &payload),
     )
     .await
     .map_err(|_| ApiError(StatusCode::GATEWAY_TIMEOUT, "SUPPLIER_TIMEOUT"))?
-    .map_err(|_| ApiError(StatusCode::BAD_GATEWAY, "SUPPLIER_READ_FAILED"))?;
+    .map_err(|_| ApiError(StatusCode::BAD_GATEWAY, "UPSTREAM_FARE_RULES_ERROR"))?;
     if response.pointer("/item2/isSuccess") != Some(&Value::Bool(true)) {
-        return Err(ApiError(StatusCode::BAD_GATEWAY, "SUPPLIER_READ_FAILED"));
+        return Err(ApiError(
+            StatusCode::BAD_GATEWAY,
+            "UPSTREAM_FARE_RULES_ERROR",
+        ));
     }
     let mut references = row
         .reference_map

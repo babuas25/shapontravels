@@ -321,4 +321,117 @@ pub async fn verify(pool: &PgPool, token: &str, raw: &Value, offer: &Value) {
         .await
         .unwrap();
     assert_eq!(count, 2, "failed responses must not become usable prices");
+    // Selection is resolved using the saved public option, never caller supplier refs.
+    let mut alternative_original = raw.clone();
+    let mut alternative_public = offer.clone();
+    let mut selected_response = json!({"item1": fare, "item2":{"isSuccess":true}});
+    let original_direction = raw["directions"][0][0].clone();
+    let public_direction = offer["directions"][0][0].clone();
+    let mut new_original = original_direction.clone();
+    let mut new_public = public_direction.clone();
+    for (i, segment) in new_original["segments"]
+        .as_array_mut()
+        .unwrap()
+        .iter_mut()
+        .enumerate()
+    {
+        segment["segmentCodeRef"] = json!(format!("selected-source-{i}"));
+        segment["flightNumber"] = json!(format!("selected-flight-{i}"));
+    }
+    for (i, segment) in new_public["segments"]
+        .as_array_mut()
+        .unwrap()
+        .iter_mut()
+        .enumerate()
+    {
+        segment["segmentCodeRef"] = json!(Uuid::new_v4().to_string());
+        segment["flightNumber"] = json!(format!("selected-flight-{i}"));
+    }
+    alternative_original["directions"][0] = json!([original_direction, new_original]);
+    alternative_public["directions"][0] = json!([public_direction, new_public]);
+    sqlx::query("UPDATE flight_offers SET original=$2,selling=$3 WHERE id=$1")
+        .bind(id)
+        .bind(&alternative_original)
+        .bind(&alternative_public)
+        .execute(pool)
+        .await
+        .unwrap();
+    let mut chosen = request.clone();
+    let mut chosen_public = offer.clone();
+    chosen_public["directions"][0] = json!([new_public]);
+    chosen["segmentCodeRefs"] = json!(refs(&chosen_public));
+    let mut all = request.clone();
+    all["segmentCodeRefs"] = json!(refs(&alternative_public));
+    let before = mock.calls.load(Ordering::SeqCst);
+    assert_eq!(
+        call(&app, "POST", "/api/Reprice", Some(token), all).await.1["error"],
+        "OFFER_REFERENCE_MISMATCH"
+    );
+    assert_eq!(mock.calls.load(Ordering::SeqCst), before);
+    *mock.response.lock().unwrap() = selected_response.clone();
+    assert_eq!(
+        call(&app, "POST", "/api/Reprice", Some(token), chosen.clone())
+            .await
+            .1["error"],
+        "SUPPLIER_ITINERARY_MISMATCH"
+    );
+    selected_response["item1"]["directions"][0] = json!([new_original]);
+    *mock.response.lock().unwrap() = selected_response.clone();
+    let (status, body) = call(&app, "POST", "/api/Reprice", Some(token), chosen.clone()).await;
+    assert_eq!(status, 200, "{body}");
+    assert_eq!(
+        mock.payload.lock().unwrap()["segmentCodeRefs"],
+        json!(refs(&selected_response["item1"]))
+    );
+    let (selection,):(Value,) = sqlx::query_as("SELECT selected_directions FROM flight_reprices WHERE offer_id=$1 ORDER BY version DESC LIMIT 1")
+        .bind(id).fetch_one(pool).await.unwrap();
+    assert_eq!(selection["directionIndices"][0], 1);
+    assert_eq!(
+        selection["publicSegmentCodeRefs"],
+        chosen["segmentCodeRefs"]
+    );
+    assert_eq!(
+        selection["supplierSegmentCodeRefs"],
+        mock.payload.lock().unwrap()["segmentCodeRefs"]
+    );
+    // Response segment refs are optional; retain nulls without inventing refs.
+    for group in selected_response["item1"]["directions"]
+        .as_array_mut()
+        .unwrap()
+    {
+        for direction in group.as_array_mut().unwrap() {
+            for segment in direction["segments"].as_array_mut().unwrap() {
+                segment["segmentCodeRef"] = Value::Null;
+            }
+        }
+    }
+    *mock.response.lock().unwrap() = selected_response.clone();
+    let (status, body) = call(&app, "POST", "/api/Reprice", Some(token), chosen.clone()).await;
+    assert_eq!(status, 200, "{body}");
+    assert!(refs(&body["item1"]).iter().all(Value::is_null));
+    let (saved, selection): (Value, Value) = sqlx::query_as("SELECT original,selected_directions FROM flight_reprices WHERE offer_id=$1 ORDER BY version DESC LIMIT 1")
+        .bind(id).fetch_one(pool).await.unwrap();
+    assert_eq!(saved, selected_response);
+    assert_eq!(
+        selection["supplierSegmentCodeRefs"],
+        mock.payload.lock().unwrap()["segmentCodeRefs"]
+    );
+    for key in ["itemCodeRef", "priceCodeRef"] {
+        let mut missing = selected_response.clone();
+        missing["item1"][key] = Value::Null;
+        *mock.response.lock().unwrap() = missing;
+        assert_eq!(
+            call(&app, "POST", "/api/Reprice", Some(token), chosen.clone())
+                .await
+                .1["error"],
+            "SUPPLIER_REFERENCE_MISSING"
+        );
+    }
+    sqlx::query("UPDATE flight_offers SET original=$2,selling=$3 WHERE id=$1")
+        .bind(id)
+        .bind(raw)
+        .bind(offer)
+        .execute(pool)
+        .await
+        .unwrap();
 }

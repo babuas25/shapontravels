@@ -1,6 +1,6 @@
 # Flight Aggregation & Booking API — Requirements
 
-Status: Implementation in progress — Steps 1–2 verified complete; Step 5 implemented within documented coverage; Steps 3–4 and 6 partially implemented; Step 7 pending; Step 8 partially verified. Latest supplier-total selection update: 2026-09-09. Historical milestone notes below are superseded where later updates say so.
+Status: Implementation in progress — Steps 1–2 verified complete; Step 5 implemented within documented coverage; Steps 3–4 and 6 partially implemented; Step 7 pending; Step 8 partially verified. Latest prebooking/release verification update: 2026-09-10. Historical milestone notes below are superseded where later updates say so.
 
 ## 1. উদ্দেশ্য ও scope
 
@@ -589,3 +589,58 @@ Review completed, not full Search acceptance. Working client/supplier/markup set
 - [x] Representative selected Firsttrip/Takeoff/Triplover public FareRules → RePrice → local acceptance flows passed. No Book/Cancel/Issue was called.
 - [ ] Full servicing acceptance remains open: sampled Triplover VQ FareRules returned supplier business failure; a separate Takeoff BG RePrice sample returned public 502 without a captured root cause. Final passing representative samples do not erase those observations.
 - Evidence and scope: `docs/evidence/SUPPLIER_SELECTION_VALIDATION_2026-09-09.md`. These are isolated local-router tests against real suppliers, not authenticated tests against the deployed API.
+
+
+### RePrice selected directions — 2026-09-09
+
+- [x] RePrice accepts the ordered segment refs of exactly one complete Search direction per route and resolves them to the saved supplier refs. Partial, foreign, reordered, extra and ambiguous selections are rejected before supplier calls.
+- [x] Returned flights must match the chosen ordered segment endpoints, airline/flight number and departure; one returned direction per route is required.
+- [x] Migration 0010 stores selection indices, public/supplier segment refs and chosen original directions on each new successful pricing revision. Historical revisions remain null; original Search snapshots are unchanged.
+- [x] Unit and disposable PostgreSQL tests cover selection, original-ref forwarding, persistence, wrong-flight rejection and continued null-ref rejection. Existing pricing/ownership/expiry/acceptance checks remain in place.
+- [ ] Supplier null RePrice segment references and aggregate tax mismatches still need contract resolution. No tax rewrite or Search-reference fallback is introduced.
+- Contract: [RePrice API](docs/REPRICE_API.md). This local implementation has not been deployed.
+- Live validation: 13 Search calls and 12 public RePrice samples across the full matrix and focused MH check. Selected MH forwarded 6 of 14 available refs and got supplier success; public 422 remains for six null refreshed refs. Full matrix: 6/10 RePrice passed; detailed evidence in [selected-direction verification](docs/evidence/SELECTED_DIRECTION_REPRICE_2026-09-09.md). No live booking or deployment.
+
+### Supplier-reported fixes rechecked — 2026-09-09
+
+- User requested fresh production read-only verification after suppliers reported all issues resolved. Current local public router used isolated databases and unchanged validation; no deployment or booking/ticketing calls.
+- [x] All 12 Search matrix scenarios now return 200 without partial supplier failures; focused Takeoff MH Search also passes. Independent Decimal audit found no pricing discrepancies in 6,735 raw offers and verified markup on 6,723 retained selling offers. Earlier aggregate-tax failures were not reproduced in this run; historical failure reports remain evidence of earlier behavior.
+- [x] All 22 successful RePrices passed independent markup checks. All 38 sampled requests forwarded the selected original supplier references correctly. Firsttrip CA oneway passed both fresh samples.
+- [ ] RePrice remains incomplete: 22/38 samples passed; 11 returned 422 because successful supplier responses contained null segment refs (Firsttrip, Takeoff and Triplover), and 5 returned supplier business errors. Focused Takeoff MH still returned six null refreshed refs.
+- [ ] Remaining supplier errors: Takeoff BS no-valid-fare, Triplover BG requested-class unavailable, and Triplover TK multicity duplicate-key `DAC->IST`. These results do not verify FareRules, acceptance, Book/Cancel/PNR or ticketing, or close other pending requirements.
+- Evidence and next action: [supplier fix recheck](docs/evidence/SUPPLIER_FIX_RECHECK_2026-09-09.md). Resolve refreshed-reference semantics and remaining supplier errors before claiming full flow readiness; no tax rewriting or Search-reference fallback was introduced.
+
+
+### Supplier-confirmed RePrice reference contract — 2026-09-10
+
+- User relayed the supplier contract: Search response supplies item code and segment refs; RePrice request uses those Search references; RePrice response supplies item code and price code; Book request uses the RePrice item/price codes. RePrice response segment references are not required.
+- This supersedes earlier notes treating null RePrice segment references as a supplier failure or an unresolved mandatory-reference contract. The prior 422 was caused by our integration assumption.
+- [x] Removed mandatory response segment-reference validation. Null response segment fields remain unchanged; selected Search refs still select and validate the requested itinerary and are persisted separately. Required transaction/item/price references, pricing, ownership, expiry and itinerary checks remain.
+- [x] Existing Book payload already uses refreshed transaction/item/price references and does not send segment refs; no booking execution is authorized by this clarification.
+- User authorized fresh Search → RePrice verification only and explicitly prohibited booking. Live results are recorded separately after verification.
+- [x] Fresh production read-only recheck: all 12 matrix Searches plus one focused Search passed without partial failures; 35/38 RePrices passed, including all roundtrip/multicity samples. Twelve successful RePrices retained null segment refs. Triplover 6E and TK both passed twice; focused Takeoff BS/MH passed.
+- [ ] Three one-way supplier fare errors remain (Takeoff BS, Triplover BG, Firsttrip BG). No missing-segment-reference errors occurred; previous Triplover TK duplicate-key error was not reproduced. No booking or deployment occurred.
+- Validation: ordinary tests, disposable PostgreSQL tests, formatting and strict Clippy passed; independent audit checked 7,281 raw Search offers, 7,269 selling offers and 35 successful RePrices. Full scope and evidence: [contract recheck](docs/evidence/REPRICE_CONTRACT_RECHECK_2026-09-10.md).
+
+
+### Customer-selected same-airline alternatives through prebooking — 2026-09-10
+
+User explicitly requested same-airline alternative selection through the step before booking; no live booking or direct issue is authorized. This is a backend/API workflow; a separate frontend remains out of scope.
+
+- [x] Customer may choose another retained offer on the same plating airline after one fare is rejected. Use that offer's own item and selected segment references; no silent airline/supplier change, no automatic purchase. Existing Search/RePrice endpoints support this selection without a new alternative endpoint.
+- [x] Evidenced unavailable-fare messages map to 409 `FARE_UNAVAILABLE`; evidenced supplier-session expiry maps to 410 `SUPPLIER_SESSION_EXPIRED`. Unknown business errors remain generic 502. A fare rejection does not invalidate all offers of that airline.
+- [x] Migration 0011 persists per-offer `reprice_required`: classified fare/session rejection blocks old accepted quotes from reacceptance and new booking. A fresh successful RePrice clears the flag and creates a new version. Other same-airline offers remain independent.
+- [x] FareRules now accepts the same exactly-one-direction-per-route selection as RePrice and forwards only selected original references. Partial/mixed/ambiguous selections remain rejected.
+- [x] Mock/database coverage verifies 6E Q → rejection → customer selects 6E V → FareRules/RePrice → local acceptance, null response segment references, no automatic alternate/supplier call, old-price rejection, successful recovery, session expiry, and zero bookings. `bookable=false` acceptance is tested as local-only; existing direct-issue Book guards and rejected-quote Book guard are mock-tested.
+- [x] Fresh live 6E multicity test: Search 200 (528 offers), N and M fare RePrices both 200, customer-selection simulation accepts only M locally (200). Two revisions, one accepted, zero bookings. Independent markup audit passed for 528 Search offers and both RePrices.
+- [ ] Live FareRules for both 6E fares returned supplier `Fare display key not found for Indigo` (public 502). This remains a supplier-contract/availability limitation; no claim of full FareRules acceptance is made.
+- Validation: ordinary suite, disposable PostgreSQL suite, formatting and strict Clippy. No Book/Cancel/NewTicket/direct issue, deployed database migration, or deployment occurred. Other Step 3/4/6/7/8 gaps remain open.
+- Contract: [prebooking flow](docs/PREBOOKING_FLOW.md). Evidence: [same-airline prebooking validation](docs/evidence/SAME_AIRLINE_PREBOOKING_2026-09-10.md).
+- FareRules follow-up: direct supplier-adapter verification reproduced the IndiGo key error in four fresh FareRules calls (oneway/multicity, before/after successful RePrice). BG oneway FareRules passed as a control. Documented fields and selected original references matched; no missing documented input was found. Provider-specific handling or an undocumented requirement remains to be clarified, not a conclusively attributed bug. [Investigation](docs/evidence/FARE_RULES_CONTRACT_INVESTIGATION_2026-09-10.md).
+
+
+### FareRules upstream-error handling — user approved 2026-09-10
+
+- [x] FareRules business/transport failure now returns 502 `UPSTREAM_FARE_RULES_ERROR`; raw supplier details remain private. Deadline timeout remains 504.
+- [x] FareRules failure does not mark the offer unavailable or invalidate its quote. Customer may continue to RePrice; unavailable rules must be shown as unavailable, not fabricated. Successful RePrice still needs explicit local price acceptance.
+- [x] Regression coverage verifies supplier-business and transport error mapping, unchanged offer pricing eligibility and continued RePrice/acceptance. No live booking/issue or deployment.

@@ -257,6 +257,7 @@ pub async fn verify(original_app: &Router, admin: &str, machine: &str, pool: &Pg
     assert_ne!(raw["itemCodeRef"], offer["itemCodeRef"]);
     assert_ne!(refs(&raw), refs(offer));
     super::reprice::verify(pool, machine, &raw, offer).await;
+    super::prebooking::verify(pool, machine, &raw, offer).await;
     let follow = json!({"uniqueTransID":offer["uniqueTransID"],"itemCodeRef":offer["itemCodeRef"],"segmentCodeRefs":refs(offer),"brandedFareRefs":""});
     let (status, rules) = call(
         &app,
@@ -271,6 +272,20 @@ pub async fn verify(original_app: &Router, admin: &str, machine: &str, pool: &Pg
     let sent = mocks[1].payloads.lock().unwrap().last().unwrap().clone();
     assert_eq!(sent["itemCodeRef"], raw["itemCodeRef"]);
     assert_eq!(sent["segmentCodeRefs"], json!(refs(&raw)));
+    mocks[1].fail.store(true, Ordering::SeqCst);
+    let (status, body) = call(
+        &app,
+        "POST",
+        "/api/FareRules",
+        Some(machine),
+        follow.clone(),
+    )
+    .await;
+    assert_eq!(
+        (status, body),
+        (502, json!({"error":"UPSTREAM_FARE_RULES_ERROR"}))
+    );
+    mocks[1].fail.store(false, Ordering::SeqCst);
     let mut tampered = follow.clone();
     tampered["segmentCodeRefs"] = json!(["foreign"]);
     assert_eq!(

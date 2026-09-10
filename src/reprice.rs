@@ -3,10 +3,7 @@ use crate::{
     AppState,
     auth::{ApiError, Machine},
     pricing::Audience,
-    search::{
-        SearchRequest, StoredRule, bind_references, matches_passengers, matching_context,
-        segment_refs,
-    },
+    search::{SearchRequest, StoredRule, bind_references, matches_passengers, matching_context},
     supplier::ReadOperation,
 };
 use axum::{
@@ -28,6 +25,7 @@ pub struct RepriceRequest {
     #[serde(rename = "uniqueTransID")]
     unique_trans_id: String,
     item_code_ref: String,
+    /// All segment refs from exactly one complete Search direction per route, in route order.
     segment_code_refs: Vec<String>,
     #[serde(default)]
     branded_fare_refs: String,
@@ -54,7 +52,7 @@ struct Offer {
     currency: String,
     valid: bool,
 }
-#[utoipa::path(post,path="/api/Reprice",tag="Flights",security(("machine_token"=[])),request_body=RepriceRequest,responses((status=200,body=Object,description="Versioned selling response. X-Pricing-Version identifies the revision; explicitly accept its priceCodeRef before future booking."),(status=404,description="Unknown or foreign offer"),(status=409,description="New Search required"),(status=410,description="Expired offer"),(status=422,description="Invalid references or unsupported pricing"),(status=502,description="Supplier failure"),(status=504,description="Supplier timeout")))]
+#[utoipa::path(post,path="/api/Reprice",tag="Flights",security(("machine_token"=[])),request_body=RepriceRequest,responses((status=200,body=Object,description="Versioned selling response. X-Pricing-Version identifies the revision; explicitly accept its priceCodeRef before future booking."),(status=404,description="Unknown or foreign offer"),(status=409,description="FARE_UNAVAILABLE: choose another offer; NEW_SEARCH_REQUIRED: search again"),(status=410,description="Expired offer or supplier session: search again"),(status=422,description="Invalid references or unsupported pricing"),(status=502,description="Supplier failure"),(status=504,description="Supplier timeout")))]
 async fn reprice(
     machine: Machine,
     State(state): State<AppState>,
@@ -70,12 +68,13 @@ async fn reprice(
     if !row.valid {
         return Err(ApiError(StatusCode::GONE, "OFFER_EXPIRED"));
     }
-    if request.unique_trans_id != row.search_id.to_string()
-        || request.segment_code_refs != segment_refs(&row.selling)
-        || !request.branded_fare_refs.is_empty()
+    if request.unique_trans_id != row.search_id.to_string() || !request.branded_fare_refs.is_empty()
     {
         return Err(error("OFFER_REFERENCE_MISMATCH"));
     }
+    let selection =
+        crate::reprice_selection::select(&row.original, &row.selling, &request.segment_code_refs)
+            .ok_or(error("OFFER_REFERENCE_MISMATCH"))?;
     if !request.tax_redemptions.is_empty() {
         return Err(error("TAX_REDEMPTION_UNSUPPORTED"));
     }
@@ -99,7 +98,7 @@ async fn reprice(
     if configured.currency.as_deref() != Some(row.currency.as_str()) {
         return Err(error("SUPPLIER_CURRENCY_MISMATCH"));
     }
-    let payload = json!({"uniqueTransID":row.original["uniqueTransID"],"itemCodeRef":row.original["itemCodeRef"],"segmentCodeRefs":segment_refs(&row.original),"brandedFareRefs":"","taxRedemptions":[],"commissionOnTaxes":commissions});
+    let payload = json!({"uniqueTransID":row.original["uniqueTransID"],"itemCodeRef":row.original["itemCodeRef"],"segmentCodeRefs":selection["supplierSegmentCodeRefs"],"brandedFareRefs":"","taxRedemptions":[],"commissionOnTaxes":commissions});
     let original = tokio::time::timeout(
         std::time::Duration::from_secs(timeout as u64),
         configured.transport.read(ReadOperation::Reprice, &payload),
@@ -114,6 +113,14 @@ async fn reprice(
         }
     })?;
     if original.pointer("/item2/isSuccess") != Some(&json!(true)) {
+        if let Some((status, code)) = supplier_business_error(&original) {
+            sqlx::query("UPDATE flight_offers SET reprice_required=TRUE WHERE id=$1")
+                .bind(id)
+                .execute(&mut *tx)
+                .await?;
+            tx.commit().await?;
+            return Err(ApiError(status, code));
+        }
         return Err(ApiError(StatusCode::BAD_GATEWAY, "SUPPLIER_REPRICE_FAILED"));
     }
     let fare = &original["item1"];
@@ -125,6 +132,7 @@ async fn reprice(
         return Err(error("SUPPLIER_PASSENGER_MISMATCH"));
     }
     if !valid_routes(fare, &search_request)
+        || !crate::reprice_selection::matches_flights(fare, &selection)
         || fare["platingCarrier"] != row.original["platingCarrier"]
     {
         return Err(error("SUPPLIER_ITINERARY_MISMATCH"));
@@ -146,9 +154,8 @@ async fn reprice(
             return Err(error("SUPPLIER_REFERENCE_MISSING"));
         }
     }
-    if segment_refs(fare).is_empty() {
-        return Err(error("SUPPLIER_REFERENCE_MISSING"));
-    }
+    // Supplier contract: segment refs select Search directions in the request;
+    // Book uses the refreshed item/price refs, not response segment refs.
     let stored:Vec<StoredRule>=sqlx::query_as("SELECT id,version,audience,agent_id,airline,origin,destination,kind,amount::text AS amount,currency FROM markup_rules WHERE active AND currency=$3 AND (audience=$1 OR (audience='specific_agent' AND agent_id=$2)) ORDER BY id").bind(&machine.audience).bind(if machine.audience=="b2b"{machine.agent_id}else{None}).bind(&row.currency).fetch_all(&mut *tx).await?;
     let rules = stored
         .iter()
@@ -222,8 +229,12 @@ async fn reprice(
             .bind(id)
             .fetch_one(&mut *tx)
             .await?;
-    sqlx::query("INSERT INTO flight_reprices(id,offer_id,client_id,version,original,selling,reference_map,rule_id,rule_version,audience,agent_id,currency,expires_at) SELECT $1,id,client_id,$2,$3,$4,$5,$6,$7,$8,$9,$10,expires_at FROM flight_offers WHERE id=$11")
- .bind(revision).bind(version).bind(original).bind(&selling).bind(json!(references)).bind(record.id).bind(record.version).bind(&machine.audience).bind(machine.agent_id).bind(&row.currency).bind(id).execute(&mut *tx).await?;
+    sqlx::query("INSERT INTO flight_reprices(id,offer_id,client_id,version,original,selling,reference_map,rule_id,rule_version,audience,agent_id,currency,selected_directions,expires_at) SELECT $1,id,client_id,$2,$3,$4,$5,$6,$7,$8,$9,$10,$12,expires_at FROM flight_offers WHERE id=$11")
+ .bind(revision).bind(version).bind(original).bind(&selling).bind(json!(references)).bind(record.id).bind(record.version).bind(&machine.audience).bind(machine.agent_id).bind(&row.currency).bind(id).bind(selection).execute(&mut *tx).await?;
+    sqlx::query("UPDATE flight_offers SET reprice_required=FALSE WHERE id=$1")
+        .bind(id)
+        .execute(&mut *tx)
+        .await?;
     tx.commit().await?;
     let mut headers = HeaderMap::new();
     headers.insert(
@@ -236,7 +247,7 @@ async fn reprice(
     );
     Ok((headers, Json(selling)))
 }
-#[utoipa::path(post,path="/api/Reprice/accept",tag="Flights",security(("machine_token"=[])),request_body=AcceptanceRequest,responses((status=200,body=Object),(status=404,description="Unknown or foreign price"),(status=409,description="Superseded price or new Search required"),(status=410,description="Expired price")))]
+#[utoipa::path(post,path="/api/Reprice/accept",tag="Flights",security(("machine_token"=[])),request_body=AcceptanceRequest,responses((status=200,body=Object),(status=404,description="Unknown or foreign price"),(status=409,description="Superseded price, rejected revalidation (REPRICE_REQUIRED), or new Search required"),(status=410,description="Expired price")))]
 async fn accept(
     machine: Machine,
     State(state): State<AppState>,
@@ -251,12 +262,15 @@ async fn accept(
             .fetch_optional(&mut *tx)
             .await?;
     let (offer,) = offer.ok_or(ApiError(StatusCode::NOT_FOUND, "NOT_FOUND"))?;
-    let (supplier, epoch): (String, i64) = sqlx::query_as(
-        "SELECT supplier_id,availability_epoch FROM flight_offers WHERE id=$1 FOR UPDATE",
+    let (supplier, epoch, reprice_required): (String, i64, bool) = sqlx::query_as(
+        "SELECT supplier_id,availability_epoch,reprice_required FROM flight_offers WHERE id=$1 FOR UPDATE",
     )
     .bind(offer)
     .fetch_one(&mut *tx)
     .await?;
+    if reprice_required {
+        return Err(ApiError(StatusCode::CONFLICT, "REPRICE_REQUIRED"));
+    }
     let (enabled, current): (bool, i64) = sqlx::query_as(
         "SELECT search_enabled,availability_epoch FROM supplier_connections WHERE id=$1 FOR SHARE",
     )
@@ -289,6 +303,22 @@ async fn accept(
     Ok(Json(
         json!({"priceCodeRef":request.price_code_ref,"pricingVersion":version,"accepted":true}),
     ))
+}
+// Only evidenced supplier business messages are classified. Other failures stay
+// generic; raw supplier diagnostics/references are never exposed to API clients.
+fn supplier_business_error(response: &Value) -> Option<(StatusCode, &'static str)> {
+    let message = response.pointer("/item2/message")?.as_str()?.trim();
+    match message {
+        "000747 NO VALID FARE FOR INPUT CRITERIA"
+        | "NO COMBINABLE FARES FOR CLASS USED"
+        | "FLIGHT SEGMENTS UNAVAILABLE IN THE REQUESTED CLASS" => {
+            Some((StatusCode::CONFLICT, "FARE_UNAVAILABLE"))
+        }
+        "The current session is invalid or has expired. Please restart your session.-Requested session not found in store" => {
+            Some((StatusCode::GONE, "SUPPLIER_SESSION_EXPIRED"))
+        }
+        _ => None,
+    }
 }
 fn decimal(value: &Value) -> Result<bigdecimal::BigDecimal, ApiError> {
     if !value.is_number() {
@@ -331,4 +361,36 @@ pub fn routes() -> Router<AppState> {
     Router::new()
         .route("/api/Reprice", post(reprice))
         .route("/api/Reprice/accept", post(accept))
+}
+
+#[cfg(test)]
+mod business_error_tests {
+    use super::*;
+    #[test]
+    fn only_evidenced_fare_and_session_errors_are_actionable() {
+        for message in [
+            "000747 NO VALID FARE FOR INPUT CRITERIA ",
+            "NO COMBINABLE FARES FOR CLASS USED",
+            "FLIGHT SEGMENTS UNAVAILABLE IN THE REQUESTED CLASS",
+        ] {
+            assert_eq!(
+                supplier_business_error(&json!({"item2":{"message":message}})),
+                Some((StatusCode::CONFLICT, "FARE_UNAVAILABLE"))
+            );
+        }
+        assert_eq!(
+            supplier_business_error(
+                &json!({"item2":{"message":"The current session is invalid or has expired. Please restart your session.-Requested session not found in store"}})
+            ),
+            Some((StatusCode::GONE, "SUPPLIER_SESSION_EXPIRED"))
+        );
+        for message in [
+            "An item with the same key has already been added. Key: DAC->IST",
+            "internal error",
+            "NO VALID FARE maybe",
+            "",
+        ] {
+            assert!(supplier_business_error(&json!({"item2":{"message":message}})).is_none());
+        }
+    }
 }

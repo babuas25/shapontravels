@@ -89,6 +89,7 @@ struct Quote {
     request: Value,
     valid: bool,
     accepted: bool,
+    reprice_required: bool,
     latest: bool,
     audience: String,
     agent_id: Option<Uuid>,
@@ -259,7 +260,7 @@ async fn book(
   if previous.request_hash!=hash{return Err(ApiError(StatusCode::CONFLICT,"IDEMPOTENCY_KEY_REUSED"));}
   return Ok(reply(previous));
  }
-    let q:Quote=sqlx::query_as("SELECT r.id AS price_id,r.offer_id,o.search_id,o.supplier_id,o.availability_epoch,r.original,r.selling,r.reference_map,o.original AS search_original,s.request,(r.expires_at>clock_timestamp() AND o.expires_at>clock_timestamp()) AS valid,(r.accepted_at IS NOT NULL) AS accepted,r.version=(SELECT max(version) FROM flight_reprices WHERE offer_id=r.offer_id) AS latest,r.audience,r.agent_id FROM flight_reprices r JOIN flight_offers o ON o.id=r.offer_id JOIN flight_searches s ON s.id=o.search_id WHERE r.id=$1 AND r.client_id=$2 FOR UPDATE OF o")
+    let q:Quote=sqlx::query_as("SELECT r.id AS price_id,r.offer_id,o.search_id,o.supplier_id,o.availability_epoch,o.reprice_required,r.original,r.selling,r.reference_map,o.original AS search_original,s.request,(r.expires_at>clock_timestamp() AND o.expires_at>clock_timestamp()) AS valid,(r.accepted_at IS NOT NULL) AS accepted,r.version=(SELECT max(version) FROM flight_reprices WHERE offer_id=r.offer_id) AS latest,r.audience,r.agent_id FROM flight_reprices r JOIN flight_offers o ON o.id=r.offer_id JOIN flight_searches s ON s.id=o.search_id WHERE r.id=$1 AND r.client_id=$2 FOR UPDATE OF o")
  .bind(request.price_code_ref).bind(machine.client_id).fetch_optional(&mut *tx).await?.ok_or(ApiError(StatusCode::NOT_FOUND,"NOT_FOUND"))?;
     if request.unique_trans_id != q.search_id.to_string()
         || request.item_code_ref != q.offer_id.to_string()
@@ -268,6 +269,9 @@ async fn book(
     }
     if !q.valid {
         return Err(ApiError(StatusCode::GONE, "PRICE_EXPIRED"));
+    }
+    if q.reprice_required {
+        return Err(ApiError(StatusCode::CONFLICT, "REPRICE_REQUIRED"));
     }
     if !q.accepted || !q.latest {
         return Err(ApiError(

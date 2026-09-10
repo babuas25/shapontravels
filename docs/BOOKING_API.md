@@ -85,3 +85,6 @@ PNR read evidence is stored separately. `X-Booking-State` reflects the local sta
 Migration 0008 adds client/offer/price ownership constraints and dispatch records; migration 0009 allows multiple intents per offer while retaining client/key uniqueness. The records include original/public outcomes, reconciliation evidence and PNR/deadline fields. Sensitive passenger requests and raw supplier outcomes are stored in the application's private database; they are not logged. Production storage encryption/access/retention remain deployment considerations for real passenger data.
 
 No migration was applied to the user's running database and no server was restarted. Mock/database tests use disposable local databases and synthetic passengers. No live Book was executed as part of the payment-policy change. Instant purchase/direct issue remains unsupported and needs its own design and explicit authorization.
+
+
+A quote whose offer has subsequently received a classified fare/session rejection cannot be used for a new booking: HTTP 409 `REPRICE_REQUIRED`. Migration 0011 adds this guard. A fresh successful RePrice and acceptance are required; existing idempotent booking-result replays remain unchanged. This guard was mock-tested only; the 2026-09-10 prebooking work did not execute any live Book or ticketing operation.

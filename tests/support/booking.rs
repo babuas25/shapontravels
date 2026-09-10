@@ -153,6 +153,15 @@ pub async fn verify(pool: &PgPool, token: &str) {
         "SUPPLIER_BOOKING_DISABLED"
     );
     mock.enabled.store(true, Ordering::SeqCst);
+    sqlx::query("UPDATE flight_offers SET reprice_required=true WHERE id=(SELECT offer_id FROM flight_reprices WHERE id=$1)").bind(price).execute(pool).await.unwrap();
+    assert_eq!(
+        call(&app, token, "rejected-revalidation", request.clone())
+            .await
+            .1["error"],
+        "REPRICE_REQUIRED"
+    );
+    assert_eq!(mock.calls.load(Ordering::SeqCst), 0);
+    sqlx::query("UPDATE flight_offers SET reprice_required=false WHERE id=(SELECT offer_id FROM flight_reprices WHERE id=$1)").bind(price).execute(pool).await.unwrap();
     let mut bad = request.clone();
     bad["directIssueIntent"] = json!(true);
     assert_eq!(
