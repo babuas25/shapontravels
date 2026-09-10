@@ -42,3 +42,11 @@ These small local Mac replay samples include fixture storage, client decoding an
 ## Remaining optimization
 
 This removes two kinds of repeated full-offer copying, primarily reducing preparation CPU. Full source/selling inventories, serialized comparison keys and database snapshots still exist. Peak-memory reduction needs further profiling of those lifetimes; expiry cleanup policy, client/pricing/supplier-epoch-safe sharing and production-equivalent capacity checks remain open. No additional offer filtering or truncation is introduced or proposed by this change.
+
+## Deployment evidence
+
+Application commit `e507ef9046ff01d0edcd73153fc02806107982c2` deployed successfully through [GitHub Actions 34461353085](https://github.com/babuas25/shapontravels/actions/runs/34461353085). All check/build/deploy jobs passed. Activation logs confirm that exact SHA and successful live/ready checks at 2026-09-10 09:41 UTC; the systemd service is active.
+
+After activation, eight public HTTPS checks passed at `https://sendbox.shapontravels.com`: live/ready 200, unauthorized Search/admin supplier routes 401, identity/gzip/weighted-gzip/gzip-q-zero negotiation, matching decoded OpenAPI bytes, no-store and request IDs. OpenAPI remains 21,913 decoded bytes (5,771 gzip bytes), SHA-256 `d838db796a5aee1298e50a4d9b32a0674ee56cfe4eb4154ad6f31ea145029277`. These checks did not call suppliers; Search correctness/performance evidence above is local replay and integration evidence.
+
+This milestone's disposable test databases were removed; final and initial-review logs remain locally available.

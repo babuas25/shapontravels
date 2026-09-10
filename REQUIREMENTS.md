@@ -708,3 +708,5 @@ User explicitly requested same-airline alternative selection through the step be
 - [x] Final three-run local medians: preparation 93→20 ms (one request) / 158→21 ms (four concurrent); process CPU about 10%/14% lower. Full-body latency is mixed and peak RSS about 3% higher, so this is not claimed as a RAM reduction or VPS capacity improvement.
 - [ ] Peak-memory profiling/reduction, expiry cleanup policy, safely isolated sharing/caching and production-equivalent capacity verification remain incomplete.
 - Evidence: [borrowed validation and comparison](docs/evidence/SEARCH_BORROWED_VALIDATION_2026-09-10.md).
+
+- [x] Borrowed validation/comparison deployed as `e507ef9046ff01d0edcd73153fc02806107982c2`, GitHub Actions `34461353085`; all CI/build/deploy jobs passed. Post-activation public HTTPS health/auth/gzip checks passed. No new migration or live supplier call was required.
