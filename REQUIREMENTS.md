@@ -644,3 +644,11 @@ User explicitly requested same-airline alternative selection through the step be
 - [x] FareRules business/transport failure now returns 502 `UPSTREAM_FARE_RULES_ERROR`; raw supplier details remain private. Deadline timeout remains 504.
 - [x] FareRules failure does not mark the offer unavailable or invalidate its quote. Customer may continue to RePrice; unavailable rules must be shown as unavailable, not fabricated. Successful RePrice still needs explicit local price acceptance.
 - [x] Regression coverage verifies supplier-business and transport error mapping, unchanged offer pricing eligibility and continued RePrice/acceptance. No live booking/issue or deployment.
+
+### Prebooking release deployed — 2026-09-10
+
+- [x] Selected-direction FareRules/RePrice, nullable response segment references, rejected-quote protection and FareRules error handling deployed as application commit `1233c5622e7f6f58c7027f9f41667e8ebc33b2cd` through GitHub Actions run `34446909044`.
+- [x] Local checks and remote CI passed; deployment applied migrations 0010/0011 through the existing backup/migration helper. Public HTTPS health/docs/OpenAPI, new contract descriptions and unauthenticated access rejection verified.
+- Earlier notes saying these changes were local-only describe their implementation milestones and are superseded by this release result. No supplier booking/issue or authenticated supplier-flow test was performed for deployment verification.
+- [ ] Step 4 aggregate Search summaries/filters and other documented Step 3/4/6/7/8 gaps remain open. Next implementation focus: summaries derived from retained selling offers.
+- Evidence: [prebooking release verification](docs/evidence/PREBOOKING_RELEASE_2026-09-10.md).

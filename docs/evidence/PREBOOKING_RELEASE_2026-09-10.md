@@ -17,4 +17,16 @@ Apply migrations 0010 (selected directions) and 0011 (reprice-required flag) bef
 
 ## Verification boundary
 
-Local checks do not establish deployment success. Record the exact CI run and post-deployment HTTPS checks after the pipeline finishes. Supplier evidence is in the separate contract and same-airline reports. This release does not claim live booking/ticketing validation, full canonical matching, complex scoped markup, branded/multiple-component fares or aggregate Search summaries.
+Supplier evidence is in the separate contract and same-airline reports. This release does not claim live booking/ticketing validation, full canonical matching, complex scoped markup, branded/multiple-component fares or aggregate Search summaries.
+
+## Deployment outcome
+
+- Deployed application commit: `1233c5622e7f6f58c7027f9f41667e8ebc33b2cd`.
+- [GitHub Actions run 34446909044](https://github.com/babuas25/shapontravels/actions/runs/34446909044): checks, Ubuntu release build and VPS deployment all succeeded.
+- Deployment log confirms database migrations applied, runtime grants refreshed and the exact commit activated with liveness/readiness passing at 2026-09-10 06:54 UTC. The established helper requires successful backup before stopping the service and applying migrations.
+- HTTPS `https://sendbox.shapontravels.com`: `/health/live`, `/health/ready`, `/docs/` and `/openapi.json` returned 200. Readiness reported production/ready, which checks the build's migration checksums.
+- Served OpenAPI now documents selected directions, `FARE_UNAVAILABLE`, `REPRICE_REQUIRED` and `UPSTREAM_FARE_RULES_ERROR`; operation IDs remain unique. The pre-deployment snapshot lacked the new selection/error descriptions.
+- Unauthenticated Search, FareRules, RePrice, acceptance and admin supplier requests returned 401. No authenticated supplier flow or booking/ticketing call was executed in this release smoke test.
+- Local before/after OpenAPI snapshots and machine-readable checks: `.local/evidence/release-20260910/` (ignored by Git).
+
+Next implementation milestone: aggregate Search summary/filter metadata from retained selling offers, with response-shape preservation and cross-supplier regression coverage. General canonical/complex-fare and booking/ticketing gaps remain separate.
