@@ -196,6 +196,7 @@ pub(crate) fn winners(offers: &[(&str, &Value)], priority: &[&str]) -> Vec<usize
         .iter()
         .map(|(_, offer)| equivalence_key(offer))
         .collect();
+    tracing::debug!(target: "search_memory", phase = "comparison_keys_ready");
     // A missing cabin label must not bridge two explicitly conflicting cabins.
     // Inspect all candidates before discarding any winner/loser, making this
     // conservative conflict handling independent of response order.

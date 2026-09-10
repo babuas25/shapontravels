@@ -360,6 +360,8 @@ pub async fn verify(original_app: &Router, admin: &str, machine: &str, pool: &Pg
                 let mut offer = complete["item1"]["airSearchResponses"][0].clone();
                 offer["itemCodeRef"] = json!(format!("bulk-offer-{n}"));
                 offer["bulkRow"] = json!(n); // Distinct unknown fare metadata must stay distinct.
+                offer["unknownExactNumber"] =
+                    serde_json::from_str("9007199254740993.00500").unwrap();
                 offer
             })
             .collect::<Vec<_>>()
@@ -376,6 +378,11 @@ pub async fn verify(original_app: &Router, admin: &str, machine: &str, pool: &Pg
     assert_eq!(rows.len(), 130);
     for (n, (id, original, selling, map, source)) in rows.iter().enumerate() {
         assert_eq!(original["bulkRow"], json!(n));
+        assert_eq!(original, &bulk["item1"]["airSearchResponses"][n]);
+        assert_eq!(
+            offers[n]["unknownExactNumber"].to_string(),
+            "9007199254740993.00500"
+        );
         assert_eq!(selling, &offers[n]);
         assert_eq!(source, "takeoff");
         assert_eq!(
@@ -414,6 +421,54 @@ pub async fn verify(original_app: &Router, admin: &str, machine: &str, pool: &Pg
         .execute(pool)
         .await
         .unwrap();
+    // Summary validation now follows batch inserts, but remains before commit.
+    // A nontransactional sequence proves all 130 rows were attempted before the
+    // deliberate summary failure; neither offers nor search headers may survive.
+    sqlx::query("CREATE SEQUENCE summary_insert_probe")
+        .execute(pool)
+        .await
+        .unwrap();
+    sqlx::query("CREATE FUNCTION count_summary_inserts() RETURNS trigger LANGUAGE plpgsql AS $$ BEGIN PERFORM nextval('summary_insert_probe'); RETURN NEW; END $$").execute(pool).await.unwrap();
+    sqlx::query("CREATE TRIGGER count_summary_inserts BEFORE INSERT ON flight_offers FOR EACH ROW EXECUTE FUNCTION count_summary_inserts()").execute(pool).await.unwrap();
+    let before: (i64, i64) = sqlx::query_as(
+        "SELECT (SELECT count(*) FROM flight_searches),(SELECT count(*) FROM flight_offers)",
+    )
+    .fetch_one(pool)
+    .await
+    .unwrap();
+    for mock in &mocks {
+        mock.response.lock().unwrap()["item1"]["totalFlights"] = json!("invalid");
+    }
+    let (status, failure) = call(&app, "POST", "/api/Search", Some(machine), request.clone()).await;
+    assert_eq!(status, 422);
+    assert_eq!(failure["error"], "SUPPLIER_SUMMARY_UNSUPPORTED");
+    let (attempted,): (i64,) = sqlx::query_as("SELECT last_value FROM summary_insert_probe")
+        .fetch_one(pool)
+        .await
+        .unwrap();
+    assert_eq!(attempted, 130);
+    let after: (i64, i64) = sqlx::query_as(
+        "SELECT (SELECT count(*) FROM flight_searches),(SELECT count(*) FROM flight_offers)",
+    )
+    .fetch_one(pool)
+    .await
+    .unwrap();
+    assert_eq!(before, after);
+    sqlx::query("DROP TRIGGER count_summary_inserts ON flight_offers")
+        .execute(pool)
+        .await
+        .unwrap();
+    sqlx::query("DROP FUNCTION count_summary_inserts()")
+        .execute(pool)
+        .await
+        .unwrap();
+    sqlx::query("DROP SEQUENCE summary_insert_probe")
+        .execute(pool)
+        .await
+        .unwrap();
+    for mock in &mocks {
+        mock.response.lock().unwrap()["item1"]["totalFlights"] = json!(130);
+    }
     // A successful empty set must not build an empty INSERT statement.
     for mock in &mocks {
         mock.response.lock().unwrap()["item1"]["airSearchResponses"] = json!([]);

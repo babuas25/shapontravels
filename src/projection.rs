@@ -16,42 +16,64 @@ fn number(value: &Value, key: &str) -> Result<BigDecimal, ProjectionError> {
         .ok_or(ProjectionError::MissingOrInvalidPrice)?;
     BigDecimal::from_str(&value.to_string()).map_err(|_| ProjectionError::MissingOrInvalidPrice)
 }
-fn set_existing(
+fn projected_number(
     original: &Value,
-    destination: Option<&mut Value>,
     key: &str,
     amount: &BigDecimal,
-) -> Result<(), ProjectionError> {
-    if let Some(field) = original.get(key) {
-        if !field.is_number() {
-            return Err(ProjectionError::MissingOrInvalidPrice);
-        }
-        let projected = serde_json::from_str(&amount.to_string())
-            .map_err(|_| ProjectionError::MissingOrInvalidPrice)?;
-        if let Some(destination) = destination {
-            destination[key] = projected;
-        }
+) -> Result<Option<Value>, ProjectionError> {
+    match original.get(key) {
+        None => Ok(None),
+        Some(field) if field.is_number() => serde_json::from_str(&amount.to_string())
+            .map(Some)
+            .map_err(|_| ProjectionError::MissingOrInvalidPrice),
+        Some(_) => Err(ProjectionError::MissingOrInvalidPrice),
     }
-    Ok(())
 }
-/// Original snapshot is borrowed and never overwritten. Passenger totals use the
-/// approved two-decimal half-up rule before count aggregation.
+struct Changes {
+    passengers: Vec<(String, Option<Value>, Option<Value>)>,
+    total: Option<Value>,
+    component_total: Option<Value>,
+    discount: Option<Value>,
+}
+impl Changes {
+    fn apply(self, mut output: Value) -> Value {
+        for (kind, total, discount) in self.passengers {
+            if let Some(value) = total {
+                output["passengerFares"][&kind]["totalPrice"] = value;
+            }
+            if let Some(value) = discount {
+                output["passengerFares"][&kind]["discountPrice"] = value;
+            }
+        }
+        if let Some(value) = self.total {
+            output["totalPrice"] = value;
+        }
+        if let Some(value) = self.component_total {
+            output["bookingComponents"][0]["totalPrice"] = value;
+        }
+        if let Some(value) = self.discount {
+            output["bookingComponents"][0]["discountPrice"] = value;
+        }
+        output
+    }
+}
+/// Borrowed callers retain an immutable original snapshot. Pricing changes are
+/// calculated and validated before the separate selling tree is allocated.
 pub fn single_component(original: &Value, markup: &Markup) -> Result<Value, ProjectionError> {
-    let coverage = coverage(original)?;
-    let mut output = original.clone();
-    project(original, coverage, markup, Some(&mut output))?;
-    Ok(output)
+    let changes = project(original, coverage(original)?, markup)?;
+    Ok(changes.apply(original.clone()))
 }
-
-/// Run the same zero-markup coverage checks without copying the offer inventory.
-/// Optional price fields are still validated even though no result is materialized.
+/// Search has already encoded the original snapshot for persistence. Reuse its
+/// owned tree for selling fields; unknown fields and numeric lexemes are untouched.
+pub(crate) fn single_component_owned(
+    original: Value,
+    markup: &Markup,
+) -> Result<Value, ProjectionError> {
+    let changes = project(&original, coverage(&original)?, markup)?;
+    Ok(changes.apply(original))
+}
 pub(crate) fn validate_single_component(original: &Value) -> Result<(), ProjectionError> {
-    project(
-        original,
-        coverage(original)?,
-        &Markup::Fixed(0.into()),
-        None,
-    )
+    project(original, coverage(original)?, &Markup::Fixed(0.into())).map(|_| ())
 }
 
 struct Coverage<'a> {
@@ -88,13 +110,13 @@ fn project(
     original: &Value,
     coverage: Coverage<'_>,
     markup: &Markup,
-    mut output: Option<&mut Value>,
-) -> Result<(), ProjectionError> {
+) -> Result<Changes, ProjectionError> {
     let Coverage {
         component,
         counts,
         fares,
     } = coverage;
+    let mut passengers = Vec::new();
     let mut supplier_total = BigDecimal::from(0);
     let mut selling_total = BigDecimal::from(0);
     let mut base = BigDecimal::from(0);
@@ -126,22 +148,11 @@ fn project(
         base += &fare_data.base * &count;
         taxes += &fare_data.taxes * &count;
         ait += &fare_data.ait * &count;
-        set_existing(
-            fare,
-            output
-                .as_deref_mut()
-                .map(|o| &mut o["passengerFares"][kind]),
-            "totalPrice",
-            &selling.total,
-        )?;
-        set_existing(
-            fare,
-            output
-                .as_deref_mut()
-                .map(|o| &mut o["passengerFares"][kind]),
-            "discountPrice",
-            &selling.discount,
-        )?;
+        passengers.push((
+            kind.clone(),
+            projected_number(fare, "totalPrice", &selling.total)?,
+            projected_number(fare, "discountPrice", &selling.discount)?,
+        ));
     }
     if number(original, "totalPrice")? != supplier_total
         || number(component, "totalPrice")? != supplier_total
@@ -161,27 +172,12 @@ fn project(
         }
     }
     let discount = base + taxes - (&selling_total - ait);
-    set_existing(
-        original,
-        output.as_deref_mut(),
-        "totalPrice",
-        &selling_total,
-    )?;
-    set_existing(
-        component,
-        output
-            .as_deref_mut()
-            .map(|o| &mut o["bookingComponents"][0]),
-        "totalPrice",
-        &selling_total,
-    )?;
-    set_existing(
-        component,
-        output.map(|o| &mut o["bookingComponents"][0]),
-        "discountPrice",
-        &discount,
-    )?;
-    Ok(())
+    Ok(Changes {
+        passengers,
+        total: projected_number(original, "totalPrice", &selling_total)?,
+        component_total: projected_number(component, "totalPrice", &selling_total)?,
+        discount: projected_number(component, "discountPrice", &discount)?,
+    })
 }
 
 #[derive(Debug, PartialEq)]
@@ -249,6 +245,16 @@ mod tests {
                             single_component(offer, &markup).map_err(|e| format!("{e:?}")),
                             legacy::single_component(offer, &markup).map_err(|e| format!("{e:?}")),
                             "{before}"
+                        );
+                    }
+                    for markup in [
+                        Markup::Fixed(500.into()),
+                        Markup::Percentage("3.125".parse().unwrap()),
+                    ] {
+                        assert_eq!(
+                            single_component_owned(offer.clone(), &markup)
+                                .map_err(|e| format!("{e:?}")),
+                            legacy::single_component(offer, &markup).map_err(|e| format!("{e:?}"))
                         );
                     }
                     assert_eq!(before, offer.to_string());

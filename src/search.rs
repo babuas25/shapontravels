@@ -343,6 +343,7 @@ async fn search(
             "ALL_SUPPLIERS_FAILED",
         ));
     }
+    tracing::debug!(target: "search_memory", phase = "suppliers_parsed");
     let supplier_ms = started.elapsed().as_millis() as u64;
     let processing_started = std::time::Instant::now();
     batches.sort_by(|a, b| a.0.id.cmp(&b.0.id));
@@ -414,61 +415,90 @@ async fn search(
         .collect();
     let selected =
         crate::selection::winners(&source_offers, &["takeoff", "firsttrip", "triplover"]);
+    tracing::debug!(target: "search_memory", phase = "selection_complete");
+    let source_count = candidates.len();
+    drop(source_offers);
+    drop(candidates);
+    // Transfer selected originals out of supplier envelopes without copying them.
+    // Preserve the same flattened supplier/offer order used by winners().
+    let mut selected = selected.into_iter().peekable();
+    let mut index = 0;
+    let mut owned_offers = Vec::new();
+    let mut source_metadata = Vec::with_capacity(batches.len());
+    for (connection, offers, metadata) in batches {
+        let connection = Arc::new(connection);
+        for original in offers {
+            if selected.peek() == Some(&index) {
+                owned_offers.push((Arc::clone(&connection), original));
+                selected.next();
+            }
+            index += 1;
+        }
+        source_metadata.push(metadata);
+    }
     let preparation_ms = processing_started.elapsed().as_millis() as u64;
     let persistence_started = std::time::Instant::now();
     let mut tx = state.pool.begin().await?;
     // Platform reference lifetime, not a claimed supplier TTL. Every next read may still expire upstream.
     sqlx::query("INSERT INTO flight_searches(id,client_id,request,currency,expires_at) VALUES($1,$2,$3,$4,now()+INTERVAL '10 minutes')").bind(search_id).bind(machine.client_id).bind(payload).bind(&currency).execute(&mut *tx).await?;
-    // Keep only small row metadata; original and selling JSON are borrowed when binding.
-    let mut pending = Vec::with_capacity(selected.len());
-    for index in selected {
-        let (connection, original) = candidates[index];
-        let (carrier, origin, destination) = matching_context(original, &request, &rules)?;
-        let winner = crate::pricing::resolve(&rules, &audience, &carrier, (&origin, &destination))
-            .map_err(|_| error("PRICING_CONFIGURATION_ERROR"))?;
-        let record = filtered
-            .iter()
-            .find(|r| r.id.to_string() == winner.id)
-            .ok_or(error("PRICING_CONFIGURATION_ERROR"))?;
-        let mut selling = projection::single_component(original, &winner.markup)
-            .map_err(|_| error("SUPPLIER_PRICING_COVERAGE_UNSUPPORTED"))?;
-        let supplier_transaction = original["uniqueTransID"]
-            .as_str()
-            .ok_or(error("SUPPLIER_REFERENCE_MISSING"))?;
-        let supplier_item = original["itemCodeRef"]
-            .as_str()
-            .ok_or(error("SUPPLIER_REFERENCE_MISSING"))?;
-        if supplier_transaction.is_empty()
-            || supplier_item.is_empty()
-            || supplier_transaction == supplier_item
-        {
-            return Err(error("SUPPLIER_REFERENCE_MISSING"));
+    let mut remaining = owned_offers.into_iter();
+    loop {
+        // Original snapshot JSON is retained only until this batch is written.
+        let originals: Vec<_> = remaining.by_ref().take(64).collect();
+        if originals.is_empty() {
+            break;
         }
-        let id = Uuid::new_v4();
-        let mut references = serde_json::Map::new();
-        references.insert(supplier_transaction.into(), json!(search_id.to_string()));
-        references.insert(supplier_item.into(), json!(id.to_string()));
-        bind_references(&mut selling, &mut references);
-        pending.push((
-            id,
-            connection,
-            original,
-            Value::Object(references),
-            record.id,
-            record.version,
-        ));
-        retained_suppliers.insert(connection.id.as_str());
-        returned.push(selling);
-    }
-    envelope = crate::search_summary::aggregate(
-        &envelope,
-        &batches.iter().map(|b| &b.2).collect::<Vec<_>>(),
-        &returned,
-        retained_suppliers.len(),
-    )
-    .map_err(|_| error("SUPPLIER_SUMMARY_UNSUPPORTED"))?;
-    // Bound each SQL statement: 64 rows, 640 parameters, without per-offer round trips.
-    for (batch, selling_batch) in pending.chunks(64).zip(returned.chunks(64)) {
+        let selling_start = returned.len();
+        let mut pending = Vec::with_capacity(originals.len());
+        for (connection, original) in originals {
+            let (carrier, origin, destination) = matching_context(&original, &request, &rules)?;
+            let winner =
+                crate::pricing::resolve(&rules, &audience, &carrier, (&origin, &destination))
+                    .map_err(|_| error("PRICING_CONFIGURATION_ERROR"))?;
+            let record = filtered
+                .iter()
+                .find(|r| r.id.to_string() == winner.id)
+                .ok_or(error("PRICING_CONFIGURATION_ERROR"))?;
+            // Preserve exact original JSON in a compact batch-local snapshot
+            // before reusing the parsed tree for the public selling response.
+            let snapshot = sqlx::types::Json(
+                serde_json::value::to_raw_value(&original)
+                    .map_err(|_| error("SUPPLIER_PRICING_COVERAGE_UNSUPPORTED"))?,
+            );
+            let supplier_transaction = original["uniqueTransID"]
+                .as_str()
+                .ok_or(error("SUPPLIER_REFERENCE_MISSING"))?;
+            let supplier_item = original["itemCodeRef"]
+                .as_str()
+                .ok_or(error("SUPPLIER_REFERENCE_MISSING"))?;
+            if supplier_transaction.is_empty()
+                || supplier_item.is_empty()
+                || supplier_transaction == supplier_item
+            {
+                return Err(error("SUPPLIER_REFERENCE_MISSING"));
+            }
+            let id = Uuid::new_v4();
+            let mut references = serde_json::Map::new();
+            references.insert(supplier_transaction.into(), json!(search_id.to_string()));
+            references.insert(supplier_item.into(), json!(id.to_string()));
+            let mut selling = projection::single_component_owned(original, &winner.markup)
+                .map_err(|_| error("SUPPLIER_PRICING_COVERAGE_UNSUPPORTED"))?;
+            bind_references(&mut selling, &mut references);
+            pending.push((
+                id,
+                connection.clone(),
+                snapshot,
+                Value::Object(references),
+                record.id,
+                record.version,
+            ));
+            retained_suppliers.insert(connection.id.clone());
+            returned.push(selling);
+        }
+        // Each statement stays inside the same transaction. Original JSON is
+        // released after its batch executes; errors still roll back all rows.
+        let batch = &pending;
+        let selling_batch = &returned[selling_start..];
         let mut query = sqlx::QueryBuilder::<sqlx::Postgres>::new(
             "INSERT INTO flight_offers(id,client_id,search_id,supplier_id,availability_epoch,original,selling,reference_map,rule_id,rule_version,expires_at) ",
         );
@@ -480,7 +510,7 @@ async fn search(
                     .push_bind(search_id)
                     .push_bind(&entry.1.id)
                     .push_bind(entry.1.availability_epoch)
-                    .push_bind(entry.2)
+                    .push_bind(&entry.2)
                     .push_bind(selling)
                     .push_bind(&entry.3)
                     .push_bind(entry.4)
@@ -488,13 +518,23 @@ async fn search(
                     .push("now()+INTERVAL '10 minutes'");
             },
         );
+        tracing::debug!(target: "search_memory", phase = "sql_batch_encoded");
         query.build().execute(&mut *tx).await?;
     }
+    tracing::debug!(target: "search_memory", phase = "selling_snapshots_ready");
+    envelope = crate::search_summary::aggregate(
+        &envelope,
+        &source_metadata.iter().collect::<Vec<_>>(),
+        &returned,
+        retained_suppliers.len(),
+    )
+    .map_err(|_| error("SUPPLIER_SUMMARY_UNSUPPORTED"))?;
+    tracing::debug!(target: "search_memory", phase = "offers_persisted");
     tx.commit().await?;
     tracing::info!(target: "search_performance", supplier_ms, preparation_ms,
         persistence_ms = persistence_started.elapsed().as_millis() as u64,
         total_ms = started.elapsed().as_millis() as u64,
-        source_offers = candidates.len(), returned_offers = returned.len(),
+        source_offers = source_count, returned_offers = returned.len(),
         "Search processing completed");
     let mut headers = HeaderMap::new();
     headers.insert(
@@ -550,8 +590,11 @@ async fn fare_rules(
     machine.require("search:read")?;
     let id =
         Uuid::parse_str(&request.item_code_ref).map_err(|_| error("INVALID_OFFER_REFERENCE"))?;
-    let row:SavedOffer=sqlx::query_as("SELECT search_id,supplier_id,original,selling,reference_map,(expires_at>now()) AS valid FROM flight_offers WHERE id=$1 AND client_id=$2")
-        .bind(id).bind(machine.client_id).fetch_optional(&state.pool).await?.ok_or(ApiError(StatusCode::NOT_FOUND,"NOT_FOUND"))?;
+    let row:Option<SavedOffer>=sqlx::query_as("SELECT search_id,supplier_id,original,selling,reference_map,(expires_at>now()) AS valid FROM flight_offers WHERE id=$1 AND client_id=$2")
+        .bind(id).bind(machine.client_id).fetch_optional(&state.pool).await?;
+    let Some(row) = row else {
+        return Err(crate::cleanup::missing_offer_error(&state.pool, id, machine.client_id).await?);
+    };
     if !row.valid {
         return Err(ApiError(StatusCode::GONE, "OFFER_EXPIRED"));
     }

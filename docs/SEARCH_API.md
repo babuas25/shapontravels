@@ -119,3 +119,21 @@ Compression reduces transferred bytes; it does not reduce decoded JSON size, dat
 Source-offer coverage validation now reads the original offer without constructing a discarded selling snapshot. It uses the same calculation and optional-field checks as projection; every source offer is still validated before selection. Comparison keys serialize a borrowed view with exactly the prior field exclusions and bytes, preserving unknown fields at their original scope. Supplier winner and cabin-conflict rules remain unchanged.
 
 [Final replay evidence](evidence/SEARCH_BORROWED_VALIDATION_2026-09-10.md) shows lower preparation CPU, with mixed full-body latency and no measured peak-RAM reduction. Selling snapshots, serialized comparison keys and persisted inventory remain allocated; broader memory optimization is still required.
+
+
+### Bounded snapshot lifetimes
+
+Search encodes original JSON in batches of at most 64 offers, then reuses each owned parsed offer for selling prices/references. Each batch persists before its original JSON buffers are released. All batches and final summary validation share one transaction; summary or SQL errors roll back the entire Search. This reduces concurrent original/selling tree allocation without dropping offers or changing pricing, reference validity or persisted data.
+
+The offline example accepts `LOAD_PROFILE_MEMORY=1` for process RSS samples at debug phase markers; normal production logging does not collect memory. [Local memory verification](evidence/SEARCH_MEMORY_LIFETIMES_2026-09-10.md) records measured reductions and limits. Retention cleanup is described below.
+
+
+## Temporary Search cleanup
+
+The serving process checks every 30 seconds for offers that are at least 15 minutes old, have expired, and belong to an expired Search. Only offers with **no RePrice and no booking** are deleted. All linked offers, RePrice versions, booking states and their required Search headers remain intact; those business records need a separate retention policy. Current Search usability is still 10 minutes.
+
+Cleanup processes at most 512 rows per table in a transaction, uses row locks with SKIP LOCKED, and coordinates instances with an advisory transaction lock. Each tick runs at most 32 batches and checks a five-second budget between batches; statements have a two-second timeout and lock waits a 200 ms timeout. Eligible records are normally removed on a following tick; load, locks or backlog can delay physical deletion. The job does not run in migration/bootstrap modes or when a test merely constructs the router.
+
+Deleted offer payloads are replaced atomically with a small owner-scoped ID marker, retained for 24 hours after deletion. FareRules/RePrice return 410 OFFER_EXPIRED to that owner while the marker is valid; other clients receive 404. After the marker expires, the reference returns 404. No fares, routes, passenger data or reference maps are stored in the marker. Empty expired Search headers are deleted in the same cleanup transaction; a header with any retained offer remains.
+
+Database DELETE makes space reusable through normal PostgreSQL vacuuming; it does not promise that the database file immediately shrinks. Cleanup affects stored temporary data, separately from the in-flight memory improvements. Counts and safe failures are logged without payloads. See [cleanup verification](evidence/SEARCH_CLEANUP_2026-09-10.md).

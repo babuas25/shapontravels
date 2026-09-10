@@ -710,3 +710,29 @@ User explicitly requested same-airline alternative selection through the step be
 - Evidence: [borrowed validation and comparison](docs/evidence/SEARCH_BORROWED_VALIDATION_2026-09-10.md).
 
 - [x] Borrowed validation/comparison deployed as `e507ef9046ff01d0edcd73153fc02806107982c2`, GitHub Actions `34461353085`; all CI/build/deploy jobs passed. Post-activation public HTTPS health/auth/gzip checks passed. No new migration or live supplier call was required.
+
+
+### User workflow and temporary Search retention — 2026-09-10
+
+- Explicit user directive: complete and verify local work, then obtain the user's permission **before committing or pushing**. Do not automatically deploy unapproved changes. This supersedes the previous automatic commit/push workflow.
+- User questioned retaining temporary Search data beyond 15 minutes. Existing Search/reference validity remains 10 minutes. A 15-minute cleanup policy for unused temporary inventory is a proposed next step, not implemented by the current memory change.
+- `flight_reprices` and `flight_bookings` reference selected `flight_offers`, which reference `flight_searches`. Cleanup must preserve dependent selected-offer/booking data, concurrent reads/booking safety and the intended expired-reference response. Do not delete all old Search rows or cascade business records merely by age.
+
+
+### Peak-memory reduction — verified locally, 2026-09-10
+
+- [x] Phase profiling identified overlapping original/selling trees as the main sampled memory increase. Search now encodes original snapshots in 64-offer batches and reuses owned offer trees for selling data, while retaining every baseline offer.
+- [x] Final local three-run medians: peak replay RSS 554.64→361.66 MiB at one request and 1,824.77→1,061.05 MiB at four concurrent requests (about 35%/42% lower). No VPS capacity claim.
+- [x] Exact projection comparisons, complete original/selling snapshot checks, decimal lexeme preservation and rollback after 130 attempted inserts with late summary failure pass, alongside existing tests.
+- [x] User subsequently authorized adding cleanup and then committing/pushing this combined release. Cleanup policy and verification are recorded below.
+- Evidence: [Search memory lifetimes](docs/evidence/SEARCH_MEMORY_LIFETIMES_2026-09-10.md).
+
+
+### Temporary Search cleanup and current release authorization — 2026-09-10
+
+- User instruction: “Cleanup … যোগ করার পরে push দিয়ো.” This authorizes committing/pushing the verified memory optimization plus cleanup, overriding the earlier approval hold for this release only.
+- [x] Serve-mode cleanup every 30 seconds removes expired, unreferenced offers aged at least 15 minutes and empty expired Search headers. RePrice/booking-linked offers and business records are retained; validity remains 10 minutes.
+- [x] Bounded 512-row transactions, SKIP LOCKED, instance coordination, timeouts and per-tick budgets protect foreground work. Backlog/locks may delay deletion past eligibility.
+- [x] Owner-scoped IDs (no payload) retain 410 behavior for 24 hours after deletion; foreign/unknown references and expired markers return 404.
+- [x] Added tests for batch limits, rollback, locks, protected records, fresh/grace/valid-parent cases, client isolation, marker expiry and actual scheduler/shutdown.
+- Evidence: [cleanup policy and verification](docs/evidence/SEARCH_CLEANUP_2026-09-10.md).

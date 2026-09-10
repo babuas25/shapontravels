@@ -95,10 +95,17 @@ async fn run() -> Result<(), String> {
         .await
         .map_err(|_| "could not bind HTTP listener")?;
     tracing::info!(environment = %config.environment, bind = %config.bind, "API started");
-    axum::serve(listener, router(state))
+    let (cleanup_stop, cleanup_receiver) = tokio::sync::oneshot::channel();
+    let cleanup = tokio::spawn(shapontravels_api::cleanup::run(
+        pool.clone(),
+        cleanup_receiver,
+    ));
+    let result = axum::serve(listener, router(state))
         .with_graceful_shutdown(shutdown())
-        .await
-        .map_err(|_| "HTTP server failed")?;
+        .await;
+    let _ = cleanup_stop.send(());
+    let _ = cleanup.await;
+    result.map_err(|_| "HTTP server failed")?;
     pool.close().await;
     Ok(())
 }

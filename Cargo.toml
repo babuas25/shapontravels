@@ -8,7 +8,7 @@ rust-version = "1.88"
 axum = "0.8.9"
 dotenvy = "0.15"
 serde = { version = "1", features = ["derive"] }
-serde_json = { version = "1", features = ["arbitrary_precision"] }
+serde_json = { version = "1", features = ["arbitrary_precision", "raw_value"] }
 sqlx = { version = "0.8.6", default-features = false, features = ["runtime-tokio-rustls", "postgres", "migrate", "macros", "uuid", "chrono"] }
 tokio = { version = "1", features = ["macros", "rt-multi-thread", "net", "signal", "time"] }
 tracing = "0.1"
@@ -31,3 +31,4 @@ tower-http = { version = "0.6", features = ["compression-gzip"] }
 tower = { version = "0.5", features = ["util"] }
 http-body-util = "0.1"
 flate2 = "1"
+memory-stats = "1"

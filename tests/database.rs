@@ -42,6 +42,7 @@ async fn migrations_and_constraints() {
         assert!(sqlx::query(statement).execute(&pool).await.is_err());
     }
     support::authentication(&pool).await;
+    support::cleanup::verify(&pool).await;
     // A schema from a different build is not considered ready.
     sqlx::query("UPDATE _sqlx_migrations SET checksum = '\\x00'")
         .execute(&pool)

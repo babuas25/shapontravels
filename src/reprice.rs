@@ -63,8 +63,11 @@ async fn reprice(
         Uuid::parse_str(&request.item_code_ref).map_err(|_| error("INVALID_OFFER_REFERENCE"))?;
     // Serialize versions of one offer; acceptance takes the same lock.
     let mut tx = state.pool.begin().await?;
-    let row:Offer=sqlx::query_as("SELECT o.search_id,o.supplier_id,o.availability_epoch,o.original,o.selling,o.reference_map,s.request,s.currency,(o.expires_at>clock_timestamp() AND s.expires_at>clock_timestamp()) AS valid FROM flight_offers o JOIN flight_searches s ON s.id=o.search_id WHERE o.id=$1 AND o.client_id=$2 FOR UPDATE OF o")
- .bind(id).bind(machine.client_id).fetch_optional(&mut *tx).await?.ok_or(ApiError(StatusCode::NOT_FOUND,"NOT_FOUND"))?;
+    let row:Option<Offer>=sqlx::query_as("SELECT o.search_id,o.supplier_id,o.availability_epoch,o.original,o.selling,o.reference_map,s.request,s.currency,(o.expires_at>clock_timestamp() AND s.expires_at>clock_timestamp()) AS valid FROM flight_offers o JOIN flight_searches s ON s.id=o.search_id WHERE o.id=$1 AND o.client_id=$2 FOR UPDATE OF o")
+ .bind(id).bind(machine.client_id).fetch_optional(&mut *tx).await?;
+    let Some(row) = row else {
+        return Err(crate::cleanup::missing_offer_error(&mut *tx, id, machine.client_id).await?);
+    };
     if !row.valid {
         return Err(ApiError(StatusCode::GONE, "OFFER_EXPIRED"));
     }

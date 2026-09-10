@@ -1,5 +1,7 @@
 //! Offline replay through the real HTTP router and an EMPTY disposable PostgreSQL DB.
 //! Supplier network/mutation is impossible: this adapter only parses local captures.
+#[path = "support/memory.rs"]
+mod memory;
 use axum::{
     body::{Body, to_bytes},
     http::Request,
@@ -36,11 +38,7 @@ impl ReadSupplier for Replay {
 }
 #[tokio::main(flavor = "multi_thread", worker_threads = 4)]
 async fn main() {
-    tracing_subscriber::fmt()
-        .json()
-        .with_target(true)
-        .with_max_level(tracing::Level::INFO)
-        .init();
+    memory::init();
     let url = std::env::var("LOAD_DATABASE_URL").expect("LOAD_DATABASE_URL");
     let parsed = url::Url::parse(&url).unwrap();
     assert_eq!(parsed.host_str(), Some("localhost"));
@@ -160,6 +158,7 @@ async fn main() {
             let bytes = to_bytes(response.into_body(), 128 * 1024 * 1024).await.unwrap();
             let elapsed = start.elapsed().as_millis();
             assert_eq!(status, 200, "replay Search failed");
+            tracing::debug!(target: "search_memory", phase = "wire_body_collected");
             let wire_bytes = bytes.len();
             let decode_start = Instant::now();
             let bytes = if encoding == "gzip" {
@@ -170,6 +169,7 @@ async fn main() {
             let decode_ms = decode_start.elapsed().as_millis();
             // Hash only stable business content: random platform refs/timing are excluded.
             let mut value: Value = serde_json::from_slice(&bytes).unwrap();
+            tracing::debug!(target: "search_memory", phase = "client_json_parsed");
             fn strip(v: &mut Value) {
                 match v {
                     Value::Object(m) => {
