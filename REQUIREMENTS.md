@@ -663,3 +663,5 @@ User explicitly requested same-airline alternative selection through the step be
 - [ ] Broader canonical equivalence, complex scoped markup, branded/multiple-component fares and remaining booking/ticketing acceptance are still open. This update does not complete Step 4 overall.
 - [x] Fresh production read-only Search: all 12 one-way/roundtrip/multicity × all/individual supplier scenarios passed without partial failures. Independent Decimal audit verified summaries and markup across 7,207 retained offers. No booking/issue calls.
 - Contract: [Search summaries](docs/SEARCH_API.md). Evidence: [summary verification](docs/evidence/SEARCH_SUMMARY_2026-09-10.md).
+
+- [x] Summary aggregation deployed as application commit `ee3de025cf5b5069b211051337059b3218c2875d`, GitHub Actions run `34448160884`; all CI/build/deploy jobs passed. Public HTTPS health, served summary contract and unauthorized access rejection verified. No new migration or booking/issue execution.

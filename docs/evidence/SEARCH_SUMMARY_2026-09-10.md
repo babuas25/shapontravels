@@ -34,3 +34,11 @@ All 12 Search scenarios returned 200, `X-Search-Partial: false` and `X-Search-Su
 Private responses, saved snapshots and reproducible audit: `.local/evidence/search-summary-20260910/`. The harness's new `SEARCH_MATRIX_SEARCH_ONLY=yes` mode skips RePrice/FareRules/acceptance; no supplier Book/Cancel/Issue/PNR call occurred. Main database and supplier controls were not changed by this test. This local-router validation is distinct from post-deployment HTTPS validation, which is recorded after release.
 
 Broader canonical equivalence, complex scoped markup, branded/multiple-component fares and remaining booking/ticketing requirements remain open.
+
+## Release verification
+
+Application commit `ee3de025cf5b5069b211051337059b3218c2875d` deployed through [GitHub Actions run 34448160884](https://github.com/babuas25/shapontravels/actions/runs/34448160884). Checks, Ubuntu release build and VPS deployment all passed. The deployment log confirms this exact commit with live/ready checks passing at 2026-09-10 07:10 UTC. Existing migrations were verified; this change adds none.
+
+Post-deployment HTTPS checks at `https://sendbox.shapontravels.com` returned 200 for health/live, health/ready, docs and OpenAPI. The served Search operation now includes `retained-selling-offers` and `SUPPLIER_SUMMARY_UNSUPPORTED`; the earlier snapshot did not. Unauthenticated Search and admin supplier requests returned 401. These checks verify deployment/contract/authentication boundaries; no authenticated supplier Search was sent through the deployed API during release verification. The 12 real supplier scenarios above used the current local public router.
+
+Before/after contracts and smoke results: `.local/evidence/search-summary-release-20260910/`. No Book/Cancel/Issue was executed.
