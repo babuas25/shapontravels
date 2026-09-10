@@ -23,7 +23,7 @@ Important current priority (2026-09-10): আরও optimization প্রয়ো�
 - [ ] Cancel flow (user-deferred), unresolved booking cases এবং full lifecycle/supplier acceptance।
 - [ ] Real populated branded/multiple-component evidence পেলে সেই coverage-এর কাজ (user-deferred)।
 - [ ] Broader normalization/equivalence coverage, production private-data protection/retention এবং remaining contract/release acceptance।
-- [ ] Latest Hold/Admin/markup/reference changes-এর production release; এই কাজগুলো local/UAT-এ যাচাই করা হয়েছে।
+- [x] Latest Hold/Admin/markup/reference changes production-এ released (2026-09-11, `bdd3ec7`); migrations 0013–0014 ও deployed readiness verified। Supplier Hold/Issue validation UAT-only থাকে।
 
 ### Latest execution environment instruction — 2026-09-10
 
@@ -1008,3 +1008,10 @@ User explicitly requested same-airline alternative selection through the step be
 
 - User explicitly authorized committing/pushing all pending work and updating the database. Include migrations 0013–0014 in the existing main-branch CI/CD backup → migrate → deploy workflow.
 - Production Hold/Issue remains prohibited; this release authorization does not authorize supplier mutations or copying private UAT booking data into production. Deployment result will be recorded after verification.
+
+### Pending changes release completed — 2026-09-11
+
+- [x] All pending source, tests, docs, Admin assets and migrations 0013–0014 committed/pushed to main in `bdd3ec7606f27bac0c5dc47aca3a035b602569b5`.
+- [x] GitHub Actions [run 34512844417](https://github.com/babuas25/shapontravels/actions/runs/34512844417): Rust/PostgreSQL checks, Linux release build and VPS deployment all succeeded. Existing activation workflow requires backup success before migrations and checks schema readiness after restart.
+- [x] Independent SSH read-only checks: production `/health/live` ok, `/health/ready` ready, new `/api/bookings/by-reference/{reference}` present in served OpenAPI, `/admin/reconciliation` HTTP 200. Readiness verifies embedded migration checksums, including 0013–0014.
+- No supplier mutation performed; no local UAT data, credentials or database dumps committed/copied to production. The prior local-only release notes are historical and superseded for this deployed code. Documentation-only follow-up uses `[skip ci]`; deployed application remains `bdd3ec7`.
