@@ -246,7 +246,7 @@ pub(crate) fn bind_references(value: &mut Value, map: &mut serde_json::Map<Strin
     }
 }
 
-#[utoipa::path(post,path="/api/Search",tag="Flights",security(("machine_token"=[])),request_body(content=SearchRequest,example=json!({"routes":[{"origin":"DAC","destination":"CXB","departureDate":"2026-09-29"}],"adults":1,"childs":0,"infants":0,"cabinClass":1,"preferredCarriers":[],"prohibitedCarriers":[],"childrenAges":[]})),responses((status=200,body=Object,description="Supplier-compatible item1/item2 envelope. Equivalent evidenced offers select the lowest original supplier total before markup; ties prefer Takeoff, Firsttrip, Triplover. bookingClass/RBD matching permits missing cabinClass; explicit cabin conflicts stay separate. Unknown fare equivalence stays separate. X-Search-Partial reports failed active connections."),(status=422,description="Pricing, currency or scope configuration incomplete"),(status=503,description="No active suppliers or all active connections failed")))]
+#[utoipa::path(post,path="/api/Search",tag="Flights",security(("machine_token"=[])),request_body(content=SearchRequest,example=json!({"routes":[{"origin":"DAC","destination":"CXB","departureDate":"2026-09-29"}],"adults":1,"childs":0,"infants":0,"cabinClass":1,"preferredCarriers":[],"prohibitedCarriers":[],"childrenAges":[]})),responses((status=200,body=Object,description="Supplier-compatible item1/item2 envelope. Equivalent evidenced offers select the lowest original supplier total before markup; ties prefer Takeoff, Firsttrip, Triplover. bookingClass/RBD matching permits missing cabinClass; explicit cabin conflicts stay separate. Unknown fare equivalence stays separate. X-Search-Partial reports failed active connections. X-Search-Summary-Scope: retained-selling-offers; net prices and counts summarize returned selling offers."),(status=422,description="Pricing, currency or scope configuration incomplete; SUPPLIER_SUMMARY_UNSUPPORTED for unsupported summary metadata"),(status=503,description="No active suppliers or all active connections failed")))]
 async fn search(
     machine: Machine,
     State(state): State<AppState>,
@@ -340,6 +340,7 @@ async fn search(
     batches.sort_by(|a, b| a.0.id.cmp(&b.0.id));
     let search_id = Uuid::new_v4();
     let mut returned = Vec::new();
+    let mut retained_suppliers = std::collections::BTreeSet::new();
     let mut envelope = batches[0].2.clone();
     let mut statuses = Vec::new();
     let mut candidates = Vec::new();
@@ -438,8 +439,16 @@ async fn search(
         bind_references(&mut selling, &mut references);
         sqlx::query("INSERT INTO flight_offers(id,client_id,search_id,supplier_id,availability_epoch,original,selling,reference_map,rule_id,rule_version,expires_at) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,now()+INTERVAL '10 minutes')")
                 .bind(id).bind(machine.client_id).bind(search_id).bind(&connection.id).bind(connection.availability_epoch).bind(original).bind(&selling).bind(Value::Object(references)).bind(record.id).bind(record.version).execute(&mut *tx).await?;
+        retained_suppliers.insert(connection.id.as_str());
         returned.push(selling);
     }
+    envelope = crate::search_summary::aggregate(
+        &envelope,
+        &batches.iter().map(|b| &b.2).collect::<Vec<_>>(),
+        &returned,
+        retained_suppliers.len(),
+    )
+    .map_err(|_| error("SUPPLIER_SUMMARY_UNSUPPORTED"))?;
     tx.commit().await?;
     let mut headers = HeaderMap::new();
     headers.insert(
@@ -452,10 +461,10 @@ async fn search(
     );
     envelope["item1"]["airSearchResponses"] = json!(returned);
     envelope["item2"] = json!(statuses);
-    // Legacy summary/filter fields are from one supplier, not aggregate selling prices.
+    // Metadata describes the final returned selling offers, after supplier selection.
     headers.insert(
         "x-search-summary-scope",
-        HeaderValue::from_static("first-successful-supplier"),
+        HeaderValue::from_static("retained-selling-offers"),
     );
     if let Some(pagination) = envelope["item1"].get_mut("searchPaginationKey")
         && pagination.as_str().is_some_and(|s| !s.is_empty())

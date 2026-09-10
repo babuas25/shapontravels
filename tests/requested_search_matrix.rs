@@ -127,6 +127,7 @@ async fn requested_search_matrix() {
     std::fs::create_dir(dir).unwrap();
     use std::os::unix::fs::PermissionsExt;
     std::fs::set_permissions(dir, std::fs::Permissions::from_mode(0o700)).unwrap();
+    let search_only = std::env::var("SEARCH_MATRIX_SEARCH_ONLY").as_deref() == Ok("yes");
     let focus_mh = std::env::var("SEARCH_MATRIX_FOCUS_MH").as_deref() == Ok("yes");
     let alternatives = std::env::var("SEARCH_MATRIX_ALTERNATIVES").as_deref() == Ok("yes");
     let prebooking = std::env::var("SEARCH_MATRIX_PREBOOKING").as_deref() == Ok("yes");
@@ -178,7 +179,7 @@ async fn requested_search_matrix() {
                 for row in &saved {
                     by_source.entry(&row.0).or_default().push(row);
                 }
-                for (source, mut candidates) in by_source {
+                for (source, mut candidates) in by_source.into_iter().filter(|_| !search_only) {
                     if prebooking {
                         candidates.retain(|r| r.1["platingCarrier"] == "6E");
                         assert!(candidates.len() >= 2, "requires two live 6E alternatives");

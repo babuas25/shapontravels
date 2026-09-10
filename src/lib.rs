@@ -155,3 +155,5 @@ pub async fn connect(config: &config::Config) -> Result<PgPool, sqlx::Error> {
 }
 
 mod reprice_selection;
+
+mod search_summary;

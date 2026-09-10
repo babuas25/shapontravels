@@ -64,7 +64,7 @@ See [Swagger walkthrough and API contract](docs/MARKUP_API.md). Create a draft, 
 
 ## Initial public Search
 
-`POST /api/Search` and `POST /api/FareRules` now use machine tokens. [Setup, examples and initial-release limits](docs/SEARCH_API.md). Activate your own markup rule and selected supplier Search controls before testing. Search now selects the lowest original supplier total for conservatively equivalent fares before markup; equal totals prefer Takeoff, Firsttrip, Triplover. Broader equivalence and complex-fare coverage remain partial. Hold Book/status/reconciliation exist; Cancel and ticketing remain unfinished.
+`POST /api/Search` and `POST /api/FareRules` now use machine tokens. [Setup, examples and initial-release limits](docs/SEARCH_API.md). Activate your own markup rule and selected supplier Search controls before testing. Search now selects the lowest original supplier total for conservatively equivalent fares before markup; equal totals prefer Takeoff, Firsttrip, Triplover. Summary counts, airline/stops filters and net selling-price ranges now derive from retained offers. Broader equivalence and complex-fare coverage remain partial. Hold Book/status/reconciliation exist; Cancel and ticketing remain unfinished.
 
 ## Deployment
 

@@ -144,7 +144,18 @@ pub async fn verify(original_app: &Router, admin: &str, machine: &str, pool: &Pg
                 .len(),
             3
         );
-        assert!(response["item1"].get("airlineFilters").is_some());
+        assert_eq!(response["item1"]["totalFlights"], 3);
+        assert_eq!(response["item1"]["supplierCount"], 1);
+        assert_eq!(response["item1"]["stops"], json!([0]));
+        let filters = response["item1"]["airlineFilters"].as_array().unwrap();
+        assert_eq!(filters.len(), 1, "only the retained BS airline remains");
+        assert_eq!(filters[0]["airlineCode"], "BS");
+        assert_eq!(filters[0]["totalFlights"], 3);
+        assert_eq!(filters[0]["minNetPrice"].to_string(), "4533.05");
+        assert_eq!(
+            response["item1"]["minMaxPrice"]["minNetPrice"].to_string(),
+            "4533.05"
+        );
         for offer in response["item1"]["airSearchResponses"].as_array().unwrap() {
             assert_eq!(
                 offer["directions"][0][0]["segments"][0]["bookingClass"],
@@ -326,6 +337,21 @@ pub async fn verify(original_app: &Router, admin: &str, machine: &str, pool: &Pg
             .0,
         410
     );
+    // Unsupported summary types roll back the search and all offer inserts.
+    let (before,): (i64,) = sqlx::query_as("SELECT count(*) FROM flight_searches")
+        .fetch_one(pool)
+        .await
+        .unwrap();
+    mocks[0].response.lock().unwrap()["item1"]["totalFlights"] = json!("invalid");
+    let (status, failure) = call(&app, "POST", "/api/Search", Some(machine), request.clone()).await;
+    assert_eq!(status, 422);
+    assert_eq!(failure["error"], "SUPPLIER_SUMMARY_UNSUPPORTED");
+    let (after,): (i64,) = sqlx::query_as("SELECT count(*) FROM flight_searches")
+        .fetch_one(pool)
+        .await
+        .unwrap();
+    assert_eq!(before, after);
+    mocks[0].response.lock().unwrap()["item1"]["totalFlights"] = json!(27);
     mocks[0].fail.store(true, Ordering::SeqCst);
     let (status, partial) = call(&app, "POST", "/api/Search", Some(machine), request.clone()).await;
     assert_eq!(status, 200);
@@ -335,6 +361,12 @@ pub async fn verify(original_app: &Router, admin: &str, machine: &str, pool: &Pg
             .unwrap()
             .len(),
         3
+    );
+    assert_eq!(partial["item1"]["totalFlights"], 3);
+    assert_eq!(partial["item1"]["supplierCount"], 1);
+    assert_eq!(
+        partial["item1"]["airlineFilters"].as_array().unwrap().len(),
+        1
     );
     for mock in &mocks {
         mock.fail.store(true, Ordering::SeqCst);

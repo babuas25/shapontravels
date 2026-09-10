@@ -652,3 +652,14 @@ User explicitly requested same-airline alternative selection through the step be
 - Earlier notes saying these changes were local-only describe their implementation milestones and are superseded by this release result. No supplier booking/issue or authenticated supplier-flow test was performed for deployment verification.
 - [ ] Step 4 aggregate Search summaries/filters and other documented Step 3/4/6/7/8 gaps remain open. Next implementation focus: summaries derived from retained selling offers.
 - Evidence: [prebooking release verification](docs/evidence/PREBOOKING_RELEASE_2026-09-10.md).
+
+
+### Aggregate Search summaries — 2026-09-10
+
+- [x] Existing summary fields derive from retained selling offers after supplier selection/markup: offer count, represented supplier count, net selling range, associated AIT, independently aggregated gross range, per-plating-airline counts/minima and distinct direction stops.
+- [x] `X-Search-Summary-Scope: retained-selling-offers` replaces the historical first-successful-supplier limitation for these known fields. Unknown fields and missing/null shape are preserved; airline templates retain their source fields. Offer markup/reference behavior is unchanged.
+- [x] Empty responses clear numeric summaries/arrays. Unsupported populated metadata returns `SUPPLIER_SUMMARY_UNSUPPORTED` and rolls back Search/offer persistence. Numeric totalPages describes the single complete response; null remains null and no pagination endpoint is added.
+- [x] Unit/fixture checks cover cross-supplier airlines, exact decimals beyond floating-point precision, passenger-count AIT/gross, return/multicity stops, empty/null/missing data and atomic errors. Database integration checks cover all seven supplier subsets, post-deduplication counts, partial failure and rollback.
+- [ ] Broader canonical equivalence, complex scoped markup, branded/multiple-component fares and remaining booking/ticketing acceptance are still open. This update does not complete Step 4 overall.
+- [x] Fresh production read-only Search: all 12 one-way/roundtrip/multicity × all/individual supplier scenarios passed without partial failures. Independent Decimal audit verified summaries and markup across 7,207 retained offers. No booking/issue calls.
+- Contract: [Search summaries](docs/SEARCH_API.md). Evidence: [summary verification](docs/evidence/SEARCH_SUMMARY_2026-09-10.md).

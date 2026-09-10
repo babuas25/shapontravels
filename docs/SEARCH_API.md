@@ -26,13 +26,28 @@ Search accepts documented cabin classes 1â€“5. The initial request bounds are 1â
 
 Results are at `item1.airSearchResponses[]`. Each offer's `totalPrice` is the count-aggregated selling total after the applicable active rule and approved per-passenger two-decimal half-up rounding. Passenger/component discount values derive from the rounded selling totals. Original pricing snapshots and rule IDs/versions remain private in PostgreSQL.
 
-Existing item1 summary/filter fields are retained from the first successful supplier for shape compatibility. **They are not aggregated selling-price summaries.** In particular do not display `minMaxPrice`, `totalFlights`, pagination/filter metadata as this platform's aggregate selling totals; derive UI prices/counts from returned offers. `X-Search-Summary-Scope: first-successful-supplier` explicitly marks this initial limitation. A full aggregate summary contract remains pending. Unknown offer fields are preserved; markup itself changes only permitted pricing values. Supplier diagnostic messages and upstream account IDs in status entries are sanitized separately from markup.
+Search summary/filter metadata is aggregated **after supplier selection and markup**, from the final `item1.airSearchResponses` only. `X-Search-Summary-Scope: retained-selling-offers` identifies this contract. Aggregation is separate from markup; the offer projection still changes only its permitted pricing fields.
+
+| Existing field | Aggregate meaning |
+| --- | --- |
+| `totalFlights` | Number of returned fare offers, including distinct fare classes; not unique physical flights or direction combinations. |
+| `supplierCount` | Number of supplier connections represented by retained offers; excludes failed, disabled and entirely discarded sources. |
+| `minMaxPrice.minNetPrice` / `maxNetPrice` | Minimum/maximum final group selling `totalPrice`; AIT is already included. |
+| `minNetPriceAit` / `maxNetPriceAit` | Count-aggregated AIT of the corresponding net-price extremum offer. Do not add it again. Tied minima use the first retained offer; tied maxima use the last. |
+| `minMaxPrice.minPrice` / `maxPrice` | Independent extrema of gross Base+Tax+AIT, aggregated by passenger count; gross is not the payable selling price and receives no markup. |
+| `airlineFilters[]` | One row per retained `platingCarrier`, sorted by carrier code. Counts and minimum net/gross fields use only that airline's retained fares. |
+| `stops` | Sorted distinct supplier-reported direction stop counts across every route and selectable direction. Counts are not summed across a roundtrip/multicity itinerary. |
+| `totalPages` | If numeric, 1 for a nonempty complete response or 0 for empty. Existing null stays null. No public pagination endpoint is provided. |
+
+For a successful empty Search, numeric summary/count fields become zero and existing airline/stops arrays become empty. Missing keys and null values remain absent/null: unavailable metadata is not fabricated. Airline rows use the first matching source row in stable supplier-ID order to preserve its field names and unknown values; rows for absent airlines are removed. Unknown envelope/summary/row fields, currency and request-time metadata remain unchanged and are not claimed to be aggregated. The existing nonempty pagination token is rebound to the platform search ID; it does not provide a next-page capability.
+
+Known populated summary fields with invalid types, invalid required offer summary inputs or a retained airline without any source filter-row template fail with HTTP 422 `SUPPLIER_SUMMARY_UNSUPPORTED`. This rolls back the Search/offer inserts, rather than returning stale summary values. Supplier diagnostic messages and upstream account IDs in status entries are sanitized separately.
 
 Headers:
 
 - `X-Search-Currency`: trusted configured currency, currently BDT for all three accounts, explicitly confirmed by the user. Search's item1 currency is null in the observed samples; offer-level currency is absent. No nonnull currency field is invented.
 - `X-Search-Partial`: true if an active connection failed/timed out; intentionally disabled connections are not counted. All active connection calls start concurrently from a database snapshot.
-- `X-Search-Summary-Scope`: limitation described above.
+- `X-Search-Summary-Scope`: `retained-selling-offers`, as defined above.
 
 Only returned offers with matching passenger counts, reconciled single-component pricing and no unverified ancillary/service charge are projected. Nonempty branded-fare mapping is deferred. Missing markup configuration fails with `PRICING_CONFIGURATION_ERROR`; unsupported mapping/coverage fails rather than exposing a partially marked-up offer.
 
@@ -67,7 +82,7 @@ Platform auth/configuration/validation errors currently retain the established p
 
 - Public RePrice and local price acceptance are documented in [REPRICE_API.md](REPRICE_API.md). Hold Book/status/reconciliation are documented in [BOOKING_API.md](BOOKING_API.md); hold booking uses the approved no-payment policy; Cancel, NewTicket and ticket issue remain unavailable.
 - Search response bodies have a 64 MiB cap; other supplier reads retain an 8 MiB cap. Connection timeouts come from admin configuration; the supplier adapter and whole request remain bounded.
-- Search summary aggregation, complete canonical equivalence, dynamic complex-route matching, branded fares and multiple components remain unfinished. Search and offer expiry indexes are added; retention cleanup scheduling remains deployment work.
+- Complete canonical equivalence, dynamic complex-route matching, branded fares and multiple components remain unfinished. Search and offer expiry indexes are added; retention cleanup scheduling remains deployment work.
 - The working database's clients/rules/supplier activation settings are not changed by integration tests. Explicit production smoke uses a separate empty local database with temporary test identities/default rule.
 
 Tests cover all seven active supplier subsets, no-active/no-rule outcomes, partial/all failure, exact markup, reference rebinding and persistence, FareRules same-supplier routing, ownership/tampering/expiry, and machine/admin isolation. A production read-only public-flow smoke returned 78 offers with `X-Search-Partial: false`, verified the fixed-500 projection and successfully retrieved FareRules. No supplier mutations were sent.
