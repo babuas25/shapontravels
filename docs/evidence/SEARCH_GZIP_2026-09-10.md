@@ -33,3 +33,11 @@ Local raw logs, time output and aggregate results are under `.local/evidence/sea
 ## Remaining work
 
 Remove validation-only/equivalence-key copies with exact behavior tests, decide expiry cleanup policy, then consider ownership/pricing/supplier-epoch-safe shared snapshots. This release does not implement those changes or finish the overall optimization requirement.
+
+## Deployed verification
+
+Application commit `fca1e85cf8aaa638122704c79dc26cfad758e78b` deployed through [GitHub Actions 34459503903](https://github.com/babuas25/shapontravels/actions/runs/34459503903). Rust/PostgreSQL/deployment-script checks, Ubuntu release build and deployment all succeeded. Activation logs confirm this exact SHA and successful live/ready checks at 2026-09-10 09:19 UTC.
+
+Public HTTPS verification at `https://sendbox.shapontravels.com` confirmed OpenAPI identity body 21,913 bytes and gzip body 5,771 bytes, with byte-identical decompression (SHA-256 `d838db796a5aee1298e50a4d9b32a0674ee56cfe4eb4154ad6f31ea145029277`). Weighted gzip negotiation works; gzip;q=0 returns identity. Vary, no-store and request IDs survive the proxy. Live/ready return 200, and unauthorized Search/admin supplier requests return 401; these small responses stay uncompressed. These public checks did not invoke suppliers. Search size measurements above remain offline replay evidence.
+
+The 13 disposable databases created for this milestone were removed after verification. Evidence files remain locally available.

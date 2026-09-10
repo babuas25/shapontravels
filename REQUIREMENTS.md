@@ -697,3 +697,5 @@ User explicitly requested same-airline alternative selection through the step be
 - [x] Exact response-byte equality, encoding negotiation, small health/auth errors and existing gzip-decoded Search integration assertions pass. Local one/four-concurrent replay retained and persisted all 2,177 baseline offers per request; response transfer fell from 24,446,992 bytes to about 2,656,000 bytes (89.1%).
 - [ ] Remaining clone elimination, expiry cleanup policy, appropriately isolated shared snapshots/caching and VPS capacity validation remain open. Gzip does not shrink decoded inventory or database snapshots.
 - Evidence: [gzip verification](docs/evidence/SEARCH_GZIP_2026-09-10.md). This milestone does not complete the broader optimization requirement.
+
+- [x] Gzip deployed as `fca1e85cf8aaa638122704c79dc26cfad758e78b`, GitHub Actions `34459503903`; all CI/build/deploy jobs passed. Public HTTPS gzip/identity decoded bytes match exactly, encoding negotiation and health/auth checks pass. No new migration or supplier calls were needed for this milestone.
