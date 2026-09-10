@@ -102,4 +102,13 @@ FareRules supplier business/transport failures return HTTP 502 `{"error":"UPSTRE
 
 Large supplier inventories are moved rather than copied between response envelopes. Retained offers persist in batches of at most 64 rows inside one transaction; a later insert failure rolls back all batches. Offer data, selection, pricing and response shape are unchanged. Non-sensitive `search_performance` logs contain source/returned counts and supplier/preparation/persistence/total phase durations; persistence includes pricing/summary/JSON binding as well as database execution.
 
-See [the measured comparison](evidence/SEARCH_PERFORMANCE_2026-09-10.md) for one/four-concurrent offline replays. These are local process measurements, not a production VPS capacity guarantee. Response compression, pagination, admission limits and expired-row cleanup are separate work.
+See [the measured comparison](evidence/SEARCH_PERFORMANCE_2026-09-10.md) for one/four-concurrent offline replays. These are local process measurements, not a production VPS capacity guarantee. Negotiated response compression is described below; pagination, admission limits and expired-row cleanup remain separate work.
+
+
+## Lossless response compression
+
+Clients may send `Accept-Encoding: gzip`. Eligible responses of at least 1,024 bytes use `Content-Encoding: gzip` and `Vary: accept-encoding`; compressed responses do not retain the original Content-Length. The application uses tower-http gzip with `CompressionLevel::Fastest` to limit CPU cost. Default content-type exclusions remain enabled.
+
+Clients omitting Accept-Encoding, requesting identity, or rejecting gzip with `gzip;q=0` receive the original representation. Gzip decoding recovers the original JSON bytes: every retained offer, unknown field, null/missing distinction, exact numeric lexeme and reference remains intact. Existing Search summary/partial headers, authentication, no-store and request IDs remain in effect. Small health/error responses stay uncompressed.
+
+Compression reduces transferred bytes; it does not reduce decoded JSON size, database snapshots or the work of preparing offers. Current request/phase logs finish before response-body transmission/compression is fully polled; use full-body HTTP timings for that cost. The local replay example accepts `LOAD_ACCEPT_ENCODING=identity|gzip` and reports wire bytes, decoded bytes and decode time separately. See [gzip measurements](evidence/SEARCH_GZIP_2026-09-10.md).

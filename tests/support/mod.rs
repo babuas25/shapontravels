@@ -12,7 +12,7 @@ use shapontravels_api::{
     router,
 };
 use sqlx::PgPool;
-use std::time::Duration;
+use std::{io::Read, time::Duration};
 use tower::ServiceExt;
 use uuid::Uuid;
 
@@ -27,6 +27,10 @@ async fn call(
         .method(method)
         .uri(path)
         .header("content-type", "application/json");
+    // Run the Search workflow assertions against the negotiated wire response.
+    if path == "/api/Search" {
+        request = request.header("accept-encoding", "gzip");
+    }
     if let Some(token) = token {
         request = request.header("authorization", format!("Bearer {token}"));
     }
@@ -37,7 +41,24 @@ async fn call(
         .unwrap();
     assert_eq!(response.headers()["cache-control"], "no-store");
     let status = response.status().as_u16();
+    let compressed = response
+        .headers()
+        .get("content-encoding")
+        .map(|v| v == "gzip")
+        .unwrap_or(false);
     let bytes = response.into_body().collect().await.unwrap().to_bytes();
+    let bytes = if compressed {
+        let mut decoded = Vec::new();
+        flate2::read::GzDecoder::new(bytes.as_ref())
+            .read_to_end(&mut decoded)
+            .unwrap();
+        decoded
+    } else {
+        bytes.to_vec()
+    };
+    if path == "/api/Search" && status == 200 && bytes.len() >= 1024 {
+        assert!(compressed, "large successful Search must negotiate gzip");
+    }
     (
         status,
         serde_json::from_slice(&bytes).unwrap_or(Value::Null),

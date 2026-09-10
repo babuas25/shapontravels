@@ -13,6 +13,7 @@ use shapontravels_api::{
 };
 use std::{
     collections::HashMap,
+    io::Read,
     sync::Arc,
     time::{Duration, Instant},
 };
@@ -49,6 +50,8 @@ async fn main() {
         .parse()
         .unwrap();
     assert!((1..=8).contains(&concurrent));
+    let encoding = std::env::var("LOAD_ACCEPT_ENCODING").unwrap_or("identity".into());
+    assert!(["identity", "gzip"].contains(&encoding.as_str()));
     let pool = sqlx::postgres::PgPoolOptions::new()
         .max_connections(12)
         .connect(&url)
@@ -138,18 +141,50 @@ async fn main() {
     let mut tasks = tokio::task::JoinSet::new();
     let overall = Instant::now();
     for index in 0..concurrent {
+        let encoding = encoding.clone();
         let app = app.clone();
         let token = token.clone();
         let body = request.to_string();
         let barrier = barrier.clone();
-        tasks.spawn(async move{barrier.wait().await;let start=Instant::now();let response=app.oneshot(Request::builder().method("POST").uri("/api/Search").header("authorization",format!("Bearer {token}")).header("content-type","application/json").body(Body::from(body)).unwrap()).await.unwrap();
-   let status=response.status();let bytes=to_bytes(response.into_body(),128*1024*1024).await.unwrap();let elapsed=start.elapsed().as_millis();assert_eq!(status,200,"{}",String::from_utf8_lossy(&bytes[..bytes.len().min(500)]));
-   // Hash only stable business content: random platform refs/timing are excluded.
-   let mut value:Value=serde_json::from_slice(&bytes).unwrap();
-   fn strip(v:&mut Value){match v{Value::Object(m)=>{m.retain(|k,_|!k.to_ascii_lowercase().contains("ref") && !["uniqueTransID","avlSrc","searchPaginationKey","searchRequestTime"].contains(&k.as_str()));for x in m.values_mut(){strip(x)}},Value::Array(a)=>for x in a{strip(x)},_=>{}}}
-   strip(&mut value);let hash=shapontravels_api::auth::digest(&value.to_string());
-   json!({"request":index,"http_ms":elapsed,"response_bytes":bytes.len(),"offers":value["item1"]["airSearchResponses"].as_array().unwrap().len(),"business_hash":format!("{hash:?}")})
-  });
+        tasks.spawn(async move {
+            barrier.wait().await;
+            let start = Instant::now();
+            let response = app.oneshot(Request::builder().method("POST").uri("/api/Search")
+                .header("authorization", format!("Bearer {token}"))
+                .header("content-type", "application/json")
+                .header("accept-encoding", &encoding)
+                .body(Body::from(body)).unwrap()).await.unwrap();
+            let status = response.status();
+            assert_eq!(response.headers().get("content-encoding").map(|h| h.to_str().unwrap()),
+                if encoding == "gzip" { Some("gzip") } else { None });
+            let bytes = to_bytes(response.into_body(), 128 * 1024 * 1024).await.unwrap();
+            let elapsed = start.elapsed().as_millis();
+            assert_eq!(status, 200, "replay Search failed");
+            let wire_bytes = bytes.len();
+            let decode_start = Instant::now();
+            let bytes = if encoding == "gzip" {
+                let mut decoded = Vec::new();
+                flate2::read::GzDecoder::new(bytes.as_ref()).read_to_end(&mut decoded).unwrap();
+                decoded
+            } else { bytes.to_vec() };
+            let decode_ms = decode_start.elapsed().as_millis();
+            // Hash only stable business content: random platform refs/timing are excluded.
+            let mut value: Value = serde_json::from_slice(&bytes).unwrap();
+            fn strip(v: &mut Value) {
+                match v {
+                    Value::Object(m) => {
+                        m.retain(|k, _| !k.to_ascii_lowercase().contains("ref")
+                            && !["uniqueTransID", "avlSrc", "searchPaginationKey", "searchRequestTime"].contains(&k.as_str()));
+                        for x in m.values_mut() { strip(x) }
+                    }
+                    Value::Array(a) => for x in a { strip(x) },
+                    _ => {}
+                }
+            }
+            strip(&mut value);
+            let hash = shapontravels_api::auth::digest(&value.to_string());
+            json!({"request":index,"http_ms":elapsed,"response_bytes":bytes.len(),"wire_bytes":wire_bytes,"encoding":encoding,"decode_ms":decode_ms,"offers":value["item1"]["airSearchResponses"].as_array().unwrap().len(),"business_hash":format!("{hash:?}")})
+        });
     }
     let mut results = Vec::new();
     while let Some(r) = tasks.join_next().await {

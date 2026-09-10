@@ -21,6 +21,10 @@ use axum::{
 use serde::Serialize;
 use sqlx::{PgPool, postgres::PgPoolOptions};
 use std::time::{Duration, Instant};
+use tower_http::compression::{
+    CompressionLayer, CompressionLevel,
+    predicate::{DefaultPredicate, Predicate, SizeAbove},
+};
 use utoipa::{OpenApi, ToSchema};
 use utoipa_swagger_ui::SwaggerUi;
 
@@ -126,6 +130,11 @@ pub fn router(state: AppState) -> Router {
         .route("/health/live", get(live))
         .route("/health/ready", get(ready))
         .merge(SwaggerUi::new("/docs").url("/openapi.json", doc))
+        .layer(
+            CompressionLayer::new()
+                .quality(CompressionLevel::Fastest)
+                .compress_when(DefaultPredicate::new().and(SizeAbove::new(1024))),
+        )
         .layer(middleware::from_fn(correlation))
         .with_state(state)
 }

@@ -689,3 +689,11 @@ User explicitly requested same-airline alternative selection through the step be
 - Requested scope for this review: inspect, compare and report feasible reductions without removing offers; no new runtime optimization or deployment is implied by the comparison itself.
 
 - Review completed: [Tripfeels comparison and prioritized recommendations](docs/evidence/TRIPFEELS_OPTIMIZATION_COMPARISON_2026-09-10.md). Exact 2,177-offer payload gzip proof reduced 24,446,992 bytes to 1,148,213 bytes at level 6, with byte-identical decompression; no runtime change/deployment.
+
+
+### Offer-preserving gzip implementation — 2026-09-10
+
+- [x] User authorized proceeding carefully after the comparison. Added negotiated gzip for eligible responses of at least 1 KiB, using the fastest level. No offer truncation, selection, pricing, persistence or expiry changes.
+- [x] Exact response-byte equality, encoding negotiation, small health/auth errors and existing gzip-decoded Search integration assertions pass. Local one/four-concurrent replay retained and persisted all 2,177 baseline offers per request; response transfer fell from 24,446,992 bytes to about 2,656,000 bytes (89.1%).
+- [ ] Remaining clone elimination, expiry cleanup policy, appropriately isolated shared snapshots/caching and VPS capacity validation remain open. Gzip does not shrink decoded inventory or database snapshots.
+- Evidence: [gzip verification](docs/evidence/SEARCH_GZIP_2026-09-10.md). This milestone does not complete the broader optimization requirement.

@@ -135,3 +135,100 @@ async fn openapi_and_swagger_are_served_locally() {
     let html = response.into_body().collect().await.unwrap().to_bytes();
     assert!(String::from_utf8_lossy(&html).contains("swagger-ui"));
 }
+
+#[tokio::test]
+async fn gzip_negotiates_and_preserves_exact_response_bytes() {
+    use std::io::Read;
+    let app = router(unavailable_state());
+    let mut original = None;
+    for (encoding, compressed) in [
+        (None, false),
+        (Some("identity"), false),
+        (Some("br"), false),
+        (Some("gzip;q=0"), false),
+        (Some("gzip;q=0, identity;q=1"), false),
+        (Some("gzip"), true),
+        (Some("br, gzip;q=0.8"), true),
+    ] {
+        let mut request = Request::builder().uri("/openapi.json");
+        if let Some(encoding) = encoding {
+            request = request.header("accept-encoding", encoding);
+        }
+        let response = app
+            .clone()
+            .oneshot(request.body(Body::empty()).unwrap())
+            .await
+            .unwrap();
+        assert_eq!(response.status(), StatusCode::OK);
+        assert_eq!(response.headers()["cache-control"], "no-store");
+        assert!(response.headers().contains_key("x-request-id"));
+        assert_eq!(response.headers()["content-type"], "application/json");
+        assert!(response.headers().get_all("vary").iter().any(|v| {
+            v.to_str()
+                .unwrap()
+                .split(',')
+                .any(|v| v.trim().eq_ignore_ascii_case("accept-encoding"))
+        }));
+        assert_eq!(
+            response.headers().contains_key("content-encoding"),
+            compressed
+        );
+        if compressed {
+            assert_eq!(response.headers()["content-encoding"], "gzip");
+            assert!(!response.headers().contains_key("content-length"));
+        }
+        let wire = response.into_body().collect().await.unwrap().to_bytes();
+        let decoded = if compressed {
+            let mut out = Vec::new();
+            flate2::read::GzDecoder::new(wire.as_ref())
+                .read_to_end(&mut out)
+                .unwrap();
+            assert!(wire.len() < out.len());
+            out
+        } else {
+            wire.to_vec()
+        };
+        if let Some(original) = &original {
+            assert_eq!(&decoded, original);
+        } else {
+            original = Some(decoded);
+        }
+    }
+}
+
+#[tokio::test]
+async fn gzip_leaves_small_health_and_auth_errors_unchanged() {
+    let app = router(unavailable_state());
+    for (method, path, expected) in [
+        ("GET", "/health/live", StatusCode::OK),
+        ("GET", "/health/ready", StatusCode::SERVICE_UNAVAILABLE),
+        ("POST", "/api/Search", StatusCode::UNAUTHORIZED),
+    ] {
+        let mut original = None;
+        for encoding in ["identity", "gzip"] {
+            let response = app
+                .clone()
+                .oneshot(
+                    Request::builder()
+                        .method(method)
+                        .uri(path)
+                        .header("accept-encoding", encoding)
+                        .header("content-type", "application/json")
+                        .body(Body::from("{}"))
+                        .unwrap(),
+                )
+                .await
+                .unwrap();
+            assert_eq!(response.status(), expected);
+            assert!(!response.headers().contains_key("content-encoding"));
+            assert_eq!(response.headers()["cache-control"], "no-store");
+            let bytes = response.into_body().collect().await.unwrap().to_bytes();
+            assert!(bytes.len() < 1024);
+            if let Some(original) = &original {
+                assert_eq!(&bytes, original);
+            } else {
+                original = Some(bytes);
+            }
+        }
+    }
+}
