@@ -418,6 +418,22 @@ Nginx error logs-এ request metadata থাকতে পারে; log শে�
 - [ ] Disk, service health, backup failures পর্যবেক্ষণ এবং log retention নির্ধারিত।
 - [ ] SSH key login দ্বিতীয় session-এ পরীক্ষা করা হয়েছে; তারপর প্রয়োজনমতো password/root login policy শক্ত করা হয়েছে।
 
+## Cleanup-এর সীমিত read-only observation
+
+`deploy` account-এর সাধারণ deployment permission system journal বা PostgreSQL administration access দেয় না। শুধু cleanup যাচাইয়ের জন্য reviewed `scripts/ops/observe.sh` ও `scripts/ops/install-observer.sh` একই directory-তে রেখে authenticated root terminal থেকে installer চালানো যায়:
+
+```bash
+bash /path/to/reviewed/ops/install-observer.sh
+```
+
+Installer root-owned `/usr/local/sbin/shapontravels-observe` এবং শুধু argument ছাড়া ওই command চালানোর sudo rule যোগ করে। এরপর deploy account ব্যবহার করবে:
+
+```bash
+sudo -n /usr/local/sbin/shapontravels-observe
+```
+
+এতে fixed service status, গত ৩০ মিনিটের cleanup log এবং read-only, statement-timeout-সহ aggregate database counts পাওয়া যায়। কোনো raw payload, credential, arbitrary SQL বা deletion command নেই। এটি বর্তমান `shapontravels` database ও PostgreSQL port 5432-এর জন্য; CI deployment এই privileged helper install/update করে না। Code বদলালে root installer আবার চালাতে হবে।
+
 ## Reference
 
 - [PostgreSQL Ubuntu repository](https://www.postgresql.org/download/linux/ubuntu/)

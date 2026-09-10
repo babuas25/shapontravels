@@ -43,3 +43,9 @@ After activation, all eight public HTTPS checks passed: live/ready 200, unauthor
 Operational visibility limit: the deploy account cannot read the system journal (`No journal files were opened due to insufficient permissions`). Therefore production cleanup deletion counts/worker journal messages were not independently inspected. The actual scheduler and deletion policy passed the local and CI database integration tests; serve-mode activation is verified by the deployed code and active service. No production cleanup counts are claimed here.
 
 Disposable local cleanup test databases were removed after verification. Local public verification results remain under `.local/evidence/search-cleanup-20260910/`.
+
+## Follow-up production observation
+
+At 2026-09-10 10:21 UTC the user installed the reviewed, fixed read-only observation helper from an authenticated root terminal. `deploy` can now run only `/usr/local/sbin/shapontravels-observe` without arguments; general journal/admin permission was not added.
+
+The production journal confirms the worker started at 10:08:59 UTC with `retention_minutes=15` and `interval_seconds=30`. Service state is active. Aggregate inspection found zero eligible unused offers, zero expiry markers, zero Search/offer rows in table statistics and zero RePrice/booking/protected-offer counts. Consequently there is no backlog, but no production deletion event has been demonstrated: this database currently has no Search inventory. Scheduler deletion behavior remains verified by the existing integration test. The observation uses a read-only transaction and creates no production fixture or supplier request.

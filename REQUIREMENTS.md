@@ -739,3 +739,13 @@ User explicitly requested same-airline alternative selection through the step be
 
 
 - [x] Combined memory optimization and temporary Search cleanup deployed as `b739a579fce5792b1ef4c80d57dbe434ccbbbad4`, GitHub Actions `34464006037`; CI/build/deploy and migration 0012 activation succeeded. Public HTTPS health/auth/gzip checks passed. Production cleanup counts were not inspected because the deploy account lacks system-journal access; actual scheduling and cleanup policy passed local/CI integration tests.
+
+
+### VPS observation and controlled capacity verification — 2026-09-10
+
+- User authorized proceeding with cleanup observation and isolated concurrent replay verification. Future commit/push still requires explicit permission.
+- [x] User installed the fixed read-only observation helper from a root terminal. Production journal confirms the 15-minute/30-second cleanup worker startup; aggregate inspection shows no eligible backlog and currently empty Search inventory, so a production deletion event is not claimed.
+- [x] Controlled VPS replay completed at concurrency 1, 2 and 4, three samples each, with private disposable PostgreSQL and readiness sampling. All 2,177 baseline retained offers, decoded size and prior business fingerprint preserved. Median HTTP times: 6.192 / 12.363 / 24.265 seconds; replay peak RSS: 664.55 / 827.48 / 1,404.84 MiB. These capped offline measurements do not establish production capacity for the 7,207-offer case.
+- [x] Initial 256 MiB test PostgreSQL cap caused a four-request OOM failure; all final levels passed with a 512 MiB test DB cap. Production remained active. Temporary VPS files/cluster removed; read-only observer remains installed.
+- [ ] Evaluate bounded Search admission/queue and database persistence memory on the larger workload before choosing production limits. User subsequently authorized committing/pushing the observer scripts and verification documentation; further runtime changes/deployments remain outside that approval.
+- Evidence: [controlled VPS replay](docs/evidence/SEARCH_VPS_CAPACITY_2026-09-10.md).
