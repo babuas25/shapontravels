@@ -1060,3 +1060,16 @@ User explicitly requested same-airline alternative selection through the step be
 - Established backup → migration 0017 → grants → restart workflow succeeded. Independent HTTPS liveness/readiness checks returned 200/ok and 200/ready. Served OpenAPI includes all three report routes; unauthenticated report lookup returns 401.
 - Local working database was privately backed up and migrated; migration 17 is recorded successful. No supplier mutation, production authenticated report read or private UAT data transfer occurred.
 - Earlier local-only report notes are historical and superseded by this release. Documentation-only completion uses `[skip ci]`; deployed binary remains `cd3f2b5`.
+
+### Uncertain Issue reconciliation continuation — 2026-09-11
+
+- User requested the next stated step: Issue reconciliation after timeout/lost response. Added owner-scoped client reconciliation and human Admin unresolved queue/recheck APIs. No new supplier Issue/Book/Cancel is permitted by these operations.
+- Require existing issue reservation, verified accepted Hold, original servicing/currency and references; pending waits five minutes, unknown can be read immediately. Ticketed PNR plus complete matching Issued report proves passenger/ticket/itinerary/original fare evidence. Not-found, Booked, incomplete or conflicting responses remain unresolved; reservation is never released for retry.
+- Captured successful Issue/PNR ticket numbers must agree with report proof. Original pending/unknown evidence remains immutable; append-only verification and audit provide effective issued retrieval/replay. Concurrent client/Admin/saved-response verification serializes on the issue row.
+- Added immutable reconciliation evidence in migration 0018. Admin returns safe summaries through APIs; no dedicated UI/background scheduler/manual bypass in this increment.
+- Independently reconstructed the two existing UAT tickets from previously captured report evidence, without reading an Issue receipt as validator input, supplier calls or database writes. Changed fare/flight rejected. Actual supplier lost-response incident not manufactured; mock integration covers the timeout path.
+- This increment is local and not pushed/deployed. Migration 0018 applied only to disposable test databases; no working/UAT/production migration or supplier mutation. Final evidence: [ticket reconciliation](docs/evidence/TICKET_RECONCILIATION_2026-09-11.md).
+
+### Ticket reconciliation release authorization — 2026-09-11
+
+- User explicitly requested deployment of migration 0018 and the completed reconciliation increment. Use the established backup → migrate → deploy workflow. Production supplier mutation restrictions remain unchanged.

@@ -1,5 +1,6 @@
 //! Hold booking with durable at-most-one dispatch reservation.
 pub mod report;
+pub mod ticket_reconciliation;
 pub mod ticketing;
 use crate::{
     AppState,
@@ -856,6 +857,7 @@ pub fn routes() -> Router<AppState> {
     Router::new()
         .merge(ticketing::routes())
         .merge(report::routes())
+        .merge(ticket_reconciliation::routes())
         .route("/api/Book", post(book))
         .route("/api/pnr", post(pnr))
         .route("/api/bookings/{id}", get(status))

@@ -342,6 +342,10 @@ async fn verify_saved(
         .and_then(|v| issued_response(v, &payload, &request["passengerInfoes"], &q, id, issue_id))
         .ok_or(conflict("TICKET_EVIDENCE_INSUFFICIENT"))?;
     let mut tx = state.pool.begin().await?;
+    sqlx::query("SELECT id FROM flight_ticket_issues WHERE id=$1 FOR UPDATE")
+        .bind(issue_id)
+        .execute(&mut *tx)
+        .await?;
     let changed=sqlx::query("INSERT INTO flight_ticket_verifications(issue_id,client_id,public_response) VALUES($1,$2,$3) ON CONFLICT(issue_id) DO NOTHING").bind(issue_id).bind(machine.client_id).bind(&public).execute(&mut *tx).await?.rows_affected();
     if changed > 0 {
         sqlx::query("INSERT INTO audit_events(actor_kind,actor_id,action,resource_kind,resource_id) VALUES('client',$1,'ticket.saved_evidence_verified','booking',$2)").bind(machine.client_id.to_string()).bind(id.to_string()).execute(&mut *tx).await?;
@@ -364,7 +368,7 @@ fn replay(row: Issue, hash: &[u8], id: Uuid) -> Result<(StatusCode, Json<Value>)
     Ok(issue_reply(row))
 }
 #[utoipa::path(get,path="/api/bookings/{id}/ticket",operation_id="held_ticket_status",tag="Flights",security(("machine_token"=[])),params(("id"=String,Path)),responses((status=200,body=Object),(status=202,body=Object),(status=404,description="Unknown, foreign or not issued")))]
-async fn status(
+pub(super) async fn status(
     machine: Machine,
     State(state): State<AppState>,
     Path(id): Path<Uuid>,

@@ -42,7 +42,7 @@ A database-unique reservation prevents more than one Issue per booking even with
 
 Apply migrations `0015_held_ticketing.sql` and `0016_ticket_verification.sql` through the established backup/migrate workflow before serving this version. Existing release deployment grants cover new tables automatically. Raw responses/preflight and accepted original/selling data stay in the database, with redacted audit events.
 
-Resolution of uncertain issues without a verifiable captured success, an Admin ticket-resolution UI, ticket reports, production commercial controls and broader supplier acceptance remain unfinished. PNR remains a read-only evidence endpoint; it cannot silently turn an uncertain issue into a successful ticket record. Do not interpret a preserved Hold reply as current live supplier status; read `/ticket` and PNR.
+Report-backed uncertain Issue reconciliation is now implemented locally; see [reconciliation API](TICKET_RECONCILIATION_API.md). A dedicated Admin ticket-resolution UI, production commercial controls and broader supplier acceptance remain unfinished. Ticket report APIs were released separately. PNR remains a read-only evidence endpoint; it cannot silently turn an uncertain issue into a successful ticket record. Do not interpret a preserved Hold reply as current live supplier status; read `/ticket` and PNR.
 
 The opt-in `uat_held_ticket` example is restricted to the retained local BS return UAT database, requires an explicit environment guard and never calls Book. Back up that database before applying this migration. It temporarily scopes local ticket permissions/controls and removes its token/restores settings after the probe. Private evidence is written with restricted permissions under `.local/evidence/`.
 

@@ -82,3 +82,7 @@ After applying migrations through `0014_booking_public_reference.sql` and starti
 ## Ticket details reports
 
 Owner-scoped live report lookup by booking UUID, STR reference or platform transaction uses accepted selling fares and verified ticket evidence. See [report API](docs/TICKET_REPORT_API.md). Released on 2026-09-11 as `cd3f2b5`, including migration 0017; production readiness and all three report routes verified.
+
+## Uncertain ticket reconciliation
+
+Read-only recovery from verified PNR and ticket reports is implemented locally, with client and Admin endpoints, immutable evidence and no repeated Issue dispatch. See [ticket reconciliation](docs/TICKET_RECONCILIATION_API.md). Migration 0018 is required before rollout; this increment is not deployed.

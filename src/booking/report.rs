@@ -24,7 +24,7 @@ fn copy_fields(source: &Value, keys: &[&str]) -> Value {
     }
     out
 }
-fn numbers(v: &Value) -> Option<BTreeSet<String>> {
+pub(super) fn numbers(v: &Value) -> Option<BTreeSet<String>> {
     let values: Vec<&str> = if let Some(s) = v.as_str() {
         s.split(',').map(str::trim).collect()
     } else {
@@ -86,7 +86,7 @@ fn selling_fare(row: &mut Value, fare: &Value) -> Option<()> {
     Some(())
 }
 fn project(body: &Value, source: &Source, q: &Quote, id: Uuid) -> Option<Value> {
-    let ticket = &source.ticket.as_ref()?["item1"];
+    let ticket = source.ticket.as_ref().map(|v| &v["item1"]);
     let payload = source.issue_request.as_ref()?;
     let info = &body["ticketInfo"];
     if info["pnr"] != payload["PNR"]
@@ -129,8 +129,14 @@ fn project(body: &Value, source: &Source, q: &Quote, id: Uuid) -> Option<Value> 
     report_info["ticketingPrice"] = q.selling["item1"]["totalPrice"].clone();
     let rows = body["passengerInfo"].as_array()?;
     let booked = source.request["passengerInfoes"].as_array()?;
-    let issued = ticket["ticketInfoes"].as_array()?;
-    if rows.len() != booked.len() || issued.len() != booked.len() || rows.is_empty() {
+    let issued = match ticket {
+        Some(v) => Some(v["ticketInfoes"].as_array()?),
+        None => None,
+    };
+    if rows.len() != booked.len()
+        || issued.is_some_and(|v| v.len() != booked.len())
+        || rows.is_empty()
+    {
         return None;
     }
     let mut seen = BTreeSet::new();
@@ -173,7 +179,8 @@ fn project(body: &Value, source: &Source, q: &Quote, id: Uuid) -> Option<Value> 
         }
         let nums = numbers(&row["ticketNumbers"])?;
         let matches = issued
-            .iter()
+            .into_iter()
+            .flatten()
             .filter(|t| {
                 numbers(&t["ticketNumbers"]).as_ref() == Some(&nums)
                     && ticketing::passenger_matches(
@@ -184,7 +191,9 @@ fn project(body: &Value, source: &Source, q: &Quote, id: Uuid) -> Option<Value> 
                     )
             })
             .count();
-        if matches != 1 || nums.iter().any(|n| !used_tickets.insert(n.clone())) {
+        if (issued.is_some() && matches != 1)
+            || nums.iter().any(|n| !used_tickets.insert(n.clone()))
+        {
             return None;
         }
         let mut public = copy_fields(
@@ -310,6 +319,38 @@ fn project(body: &Value, source: &Source, q: &Quote, id: Uuid) -> Option<Value> 
         result["segments"] = json!(public);
     }
     Some(result)
+}
+/// Independent report proof for recovery: require full itinerary and explicit completion.
+/// No receipt is fabricated to satisfy the normal report verifier.
+pub(super) fn recover(
+    body: &Value,
+    request: &Value,
+    payload: &Value,
+    q: &Quote,
+    id: Uuid,
+    issue: Uuid,
+) -> Option<Value> {
+    if body["ticketInfo"]["isCompleted"] != true
+        || datetime(&body["ticketInfo"]["issueDate"]).is_none()
+        || body["segments"].as_array().is_none_or(Vec::is_empty)
+    {
+        return None;
+    }
+    let source = Source {
+        supplier_id: q.supplier_id.clone(),
+        public_ref: None,
+        request: request.clone(),
+        issue_request: Some(payload.clone()),
+        ticket: None,
+    };
+    let projected = project(body, &source, q, id)?;
+    let mut tickets = vec![];
+    for row in projected["passengerInfo"].as_array()? {
+        tickets.push(json!({"passengerInfo":{"nameElement":{"title":row["title"],"firstName":row["first"],"middleName":row["middle"],"lastName":row["last"]},"passengerType":row["passengerType"],"gender":row["gender"]},"ticketNumbers":numbers(&row["ticketNumbers"])?}));
+    }
+    Some(
+        json!({"item1":{"pnr":payload["PNR"],"bookingCodeRef":id,"priceCodeRef":q.price_id,"itemCodeRef":q.offer_id,"uniqueTransID":q.search_id,"ticketCodeRef":issue,"ticketInfoes":tickets},"item2":{"isSuccess":true}}),
+    )
 }
 async fn retrieve(
     machine: Machine,
@@ -489,5 +530,61 @@ mod tests {
             &["first", "last"],
         );
         assert_eq!(public, json!({"last":"Passenger"}));
+    }
+}
+
+#[cfg(test)]
+mod recovery_evidence {
+    use super::*;
+    /// Offline use of previously captured UAT proof, without reading a saved ticket receipt.
+    #[tokio::test]
+    #[ignore = "requires READ_PRIVATE_RECOVERY_EVIDENCE=yes and retained local UAT database"]
+    async fn recover_from_captured_uat_report_without_issue_response() {
+        assert_eq!(
+            std::env::var("READ_PRIVATE_RECOVERY_EVIDENCE").as_deref(),
+            Ok("yes")
+        );
+        let database = std::env::var("RECOVERY_EVIDENCE_DATABASE_URL").unwrap();
+        let url = url::Url::parse(&database).unwrap();
+        assert_eq!(url.host_str(), Some("localhost"));
+        assert_eq!(url.path(), "/shapon_bs_return_uat_booking_test");
+        let pool = sqlx::PgPool::connect(&database).await.unwrap();
+        let (id,issue,client,request,payload):(Uuid,Uuid,Uuid,Value,Value)=sqlx::query_as("SELECT b.id,t.id,b.client_id,b.request,t.request FROM flight_bookings b JOIN flight_ticket_issues t ON t.booking_id=b.id WHERE b.supplier_id='triplover'").fetch_one(&pool).await.unwrap();
+        let q = ticketing::load_quote(&pool, id, client).await.unwrap();
+        let report: Value = serde_json::from_slice(
+            &std::fs::read(
+                ".local/evidence/uat-ticket-report-20260911T042404966109000/supplier-report.json",
+            )
+            .unwrap(),
+        )
+        .unwrap();
+        let receipt = recover(&report, &request, &payload, &q, id, issue)
+            .expect("captured report should independently prove ticket identities and fare");
+        let (verified,): (Value,) = sqlx::query_as(
+            "SELECT public_response FROM flight_ticket_verifications WHERE issue_id=$1",
+        )
+        .bind(issue)
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+        let ticket_set = |v: &Value| {
+            v["item1"]["ticketInfoes"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .flat_map(|p| numbers(&p["ticketNumbers"]).unwrap())
+                .collect::<BTreeSet<_>>()
+        };
+        assert_eq!(ticket_set(&receipt), ticket_set(&verified));
+        assert_eq!(ticket_set(&receipt).len(), 2);
+        let mut invalid = report.clone();
+        invalid["segments"][0]["bookingCode"] = json!("WRONG");
+        assert!(recover(&invalid, &request, &payload, &q, id, issue).is_none());
+        invalid = report;
+        invalid["passengerInfo"][1]["totalPrice"] = json!(1);
+        assert!(recover(&invalid, &request, &payload, &q, id, issue).is_none());
+        println!(
+            "Offline captured UAT report recovers the same two tickets; changed flight/fare rejected; zero supplier calls and database writes"
+        );
     }
 }
