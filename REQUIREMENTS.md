@@ -1032,3 +1032,10 @@ User explicitly requested same-airline alternative selection through the step be
 
 - User authorized database migrations and Git push for the completed held-ticket implementation. Release migrations 0015–0016 through the existing backup → migrate → deploy workflow, preserving production supplier execution restrictions.
 - Production ticketing remains disabled by the application/transport gates. No supplier calls or private UAT data transfer are part of this release.
+
+### Held-ticket release completed — 2026-09-11
+
+- Committed and pushed held-ticket implementation to main as `08a569e`. GitHub Actions [run 34561334396](https://github.com/babuas25/shapontravels/actions/runs/34561334396) passed checks, Linux build and production deployment.
+- Existing workflow completed backup → migrations 0015–0016 → grants → restart → readiness. Independent public HTTPS checks returned `/health/live` 200/ok and `/health/ready` 200/ready; served OpenAPI includes NewTicket, ticket retrieval and saved-ticket verification. Readiness verifies all embedded migration checksums.
+- Local working database also backed up privately and migrated successfully; versions 15 and 16 confirmed successful. No UAT booking data transferred, supplier mutation or execution-gate change.
+- Prior local-only notes describe the implementation stage and are superseded by this release. Documentation-only completion commit uses `[skip ci]`; deployed application remains `08a569e`.

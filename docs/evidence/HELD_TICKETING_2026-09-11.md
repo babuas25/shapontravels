@@ -36,3 +36,7 @@ Private capture paths use UTC timestamps on 2026-09-10; the session date in Asia
 Captures and backups are restricted local files; passenger information, opaque references and ticket numbers are not copied into this report or source control. The retained UAT database remains available for continuation.
 
 No Direct Issue, cancellation, new Hold, production supplier mutation, working/production database migration, commit, push or deployment. Migrations 0015–0016 were applied only to isolated test/UAT databases. Production commercial authorization, ticket reports and resolution without captured successful ticket evidence remain future work. This verifies a representative BS return flow, not every carrier/fare/supplier.
+
+## Subsequent authorized release
+
+User subsequently authorized database migrations and Git push. Application commit `08a569e` was pushed to main and [workflow 34561334396](https://github.com/babuas25/shapontravels/actions/runs/34561334396) completed successfully, including checks, build and production backup/migration/deployment. Public HTTPS liveness/readiness returned 200 and all three ticket endpoints appeared in served OpenAPI. Migrations 0015–0016 were also applied to the backed-up local working database. Earlier local-only statements above are historical. No supplier mutation or private UAT data transfer occurred during this release.
