@@ -85,4 +85,4 @@ Owner-scoped live report lookup by booking UUID, STR reference or platform trans
 
 ## Uncertain ticket reconciliation
 
-Read-only recovery from verified PNR and ticket reports is implemented locally, with client and Admin endpoints, immutable evidence and no repeated Issue dispatch. See [ticket reconciliation](docs/TICKET_RECONCILIATION_API.md). Migration 0018 is required before rollout; this increment is not deployed.
+Read-only recovery from verified PNR and ticket reports has client and Admin endpoints, immutable evidence and no repeated Issue dispatch. See [ticket reconciliation](docs/TICKET_RECONCILIATION_API.md). Released as `15e8e58` on 2026-09-11, including migration 0018; production readiness and endpoint authentication verified.

@@ -30,3 +30,7 @@ This test made zero supplier calls and zero database writes. It demonstrates com
 Migration 0018 ran only in disposable test databases. Working, retained UAT and production database schemas remain unchanged by this increment. No supplier network request, real booking/issue/cancellation, Git commit/push or deployment occurred. Test databases are disposable and removed after successful verification.
 
 Admin operations are APIs; a dedicated screen/background scheduler and manual resolution without sufficient proof are not included. Live lost-response incident acceptance, broader carrier/supplier coverage and private-evidence retention policy remain separate. Deploy through the existing backup/migration workflow when authorized.
+
+## Subsequent authorized release
+
+User explicitly requested deployment of migration 0018. Application commit `15e8e58` was pushed to main and [workflow 34564419172](https://github.com/babuas25/shapontravels/actions/runs/34564419172) completed checks, build and deployment successfully. Production migration ran through the existing backup-first workflow. Public HTTPS health checks returned 200, OpenAPI serves all three reconciliation routes, and unauthenticated client/Admin requests return 401. Local working database was also backed up and migrated. Earlier local-only statements are historical; no supplier calls or private UAT data transfer occurred during release.

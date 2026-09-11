@@ -33,4 +33,4 @@ Migration `0018_ticket_reconciliation.sql` stores append-only PNR/report evidenc
 
 Supplier read timeout/failure is retained as an insufficient-evidence attempt and returns the normal unresolved 202 response. Database failure can prevent saving evidence; clients can safely repeat reconciliation because it is read-only upstream. There is no background scheduler or indefinite retry loop. Admin queue pagination beyond the oldest 100, a dedicated UI, and evidence retention policy remain separate work.
 
-Implemented locally; migration 0018 has only been applied to disposable test databases. No production/UAT database mutation, supplier call, push or deployment is part of this increment. See [verification evidence](evidence/TICKET_RECONCILIATION_2026-09-11.md).
+Released as `15e8e58` on 2026-09-11 through the existing backup/migration workflow, including migration 0018. Production readiness, all three routes and unauthenticated access rejection were verified. No supplier calls or private UAT data transfer occurred during deployment. See [verification evidence](evidence/TICKET_RECONCILIATION_2026-09-11.md).
