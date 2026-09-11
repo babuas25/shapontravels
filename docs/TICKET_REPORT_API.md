@@ -44,4 +44,4 @@ Migration `0017_ticket_reports.sql` creates append-only report evidence with boo
 
 The implementation is covered by supplier GET/retry/path-encoding tests, pricing/identity tests, full database integration and read-only Triplover UAT checks against the existing BS return ticket. See [evidence](evidence/TICKET_REPORT_2026-09-11.md).
 
-Apply migration 0017 through the normal backup/migrate workflow before serving the new binary. This report increment has not been pushed or deployed. Production ticket mutation remains blocked; Direct Issue and Cancel remain outside this increment.
+Apply migration 0017 through the normal backup/migrate workflow before serving the new binary. This report increment was released as `cd3f2b5` on 2026-09-11, with migration 0017, successful readiness and all three report routes verified. Production ticket mutation remains blocked; Direct Issue and Cancel remain outside this increment.

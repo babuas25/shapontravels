@@ -33,3 +33,7 @@ Private evidence:
 Raw/private artifacts use restricted permissions and stay ignored by Git. Temporary test tokens are removed and original local client permissions restored. Migration 0017 was applied only to disposable test databases and the privately backed-up retained UAT database. No new booking, Issue, Direct Issue, cancellation, production supplier request, production migration, working database migration, push or deployment occurred.
 
 The report contract currently supports unchanged issued tickets only. Reissue/refund/cancel servicing, report evidence retention policy, missing-response Issue reconciliation and broader carrier/supplier coverage remain separate work.
+
+## Subsequent authorized release
+
+User requested the stated next step of migration and Git push. Commit `cd3f2b5` was pushed to main and [workflow 34562629848](https://github.com/babuas25/shapontravels/actions/runs/34562629848) succeeded through checks, build and production deployment. Migration 0017 ran after backup through the existing workflow. Independent public HTTPS checks returned liveness/readiness 200, confirmed all three report routes in OpenAPI, and verified unauthenticated report access returns 401. Local working database backup/migration also succeeded. No supplier calls, ticket mutations or UAT data transfer were part of release verification. Earlier local-only statements above describe the implementation stage.

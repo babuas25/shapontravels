@@ -1053,3 +1053,10 @@ User explicitly requested same-airline alternative selection through the step be
 ### Ticket report release authorization — 2026-09-11
 
 - User requested continuing the stated next step: migration 0017, Git push and deployment of the completed report increment through the established backup/migrate workflow. Production ticket mutation restrictions remain unchanged.
+
+### Ticket report release completed — 2026-09-11
+
+- Pushed report implementation to main as `cd3f2b5`. GitHub Actions [run 34562629848](https://github.com/babuas25/shapontravels/actions/runs/34562629848) passed Rust/PostgreSQL checks, release build and production deployment.
+- Established backup → migration 0017 → grants → restart workflow succeeded. Independent HTTPS liveness/readiness checks returned 200/ok and 200/ready. Served OpenAPI includes all three report routes; unauthenticated report lookup returns 401.
+- Local working database was privately backed up and migrated; migration 17 is recorded successful. No supplier mutation, production authenticated report read or private UAT data transfer occurred.
+- Earlier local-only report notes are historical and superseded by this release. Documentation-only completion uses `[skip ci]`; deployed binary remains `cd3f2b5`.
