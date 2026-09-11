@@ -18,6 +18,8 @@ use std::{
 use tower::ServiceExt;
 use uuid::Uuid;
 struct Mock {
+    report_calls: AtomicUsize,
+    report_mode: AtomicUsize,
     issue_calls: AtomicUsize,
     issue_mode: AtomicUsize,
     ticket_enabled: AtomicBool,
@@ -32,6 +34,45 @@ struct Mock {
     fare: Mutex<Value>,
 }
 impl ReadSupplier for Mock {
+    fn ticket_report<'a>(
+        &'a self,
+        transaction: &'a str,
+    ) -> std::pin::Pin<
+        Box<dyn std::future::Future<Output = Result<Value, SupplierError>> + Send + 'a>,
+    > {
+        Box::pin(async move {
+            assert_eq!(transaction, "shared-ref");
+            self.report_calls.fetch_add(1, Ordering::SeqCst);
+            let mode = self.report_mode.load(Ordering::SeqCst);
+            if mode == 9 {
+                return Err(SupplierError::Timeout);
+            }
+            if mode == 10 {
+                return Err(SupplierError::Response);
+            }
+            let fare = self.fare.lock().unwrap().clone();
+            let passengers=self.payload.lock().unwrap()["passengerInfoes"].as_array().unwrap().iter().map(|p|{
+                let f=&fare["passengerFares"][p["passengerType"].as_str().unwrap().to_lowercase()];
+                json!({"first":p["nameElement"]["firstName"],"last":p["nameElement"]["lastName"],"passengerType":p["passengerType"],"ticketNumbers":"7792411762343","pnr":"TESTPN","basePrice":f["basePrice"],"tax":f["taxes"],"ait":f["ait"],"totalPrice":f["totalPrice"],"secretExtra":"private-supplier-data"})
+            }).collect::<Vec<_>>();
+            let mut body = json!({"ticketInfo":{"status":"Issued","statusFor":"Ticket","pnr":"TESTPN","uniqueTransID":transaction,"itemCodeRef":"shared-ref","ticketingPrice":fare["totalPrice"],"agentEmail":"private-supplier-data","referenceLog":"private-supplier-data","markup":999},"passengerInfo":passengers,"serviceCharge":[{"internal":"private-supplier-data"}]});
+            match mode {
+                1 => body["ticketInfo"]["pnr"] = json!("WRONG"),
+                2 => body["ticketInfo"]["uniqueTransID"] = json!("WRONG"),
+                3 => body["passengerInfo"][0]["ticketNumbers"] = json!("9999999999999"),
+                4 => body["passengerInfo"][0]["last"] = json!("Wrong"),
+                5 => body["passengerInfo"][0]["totalPrice"] = json!(1),
+                6 => body["ticketInfo"]["status"] = json!("Refunded"),
+                7 => {
+                    let p = body["passengerInfo"][0].clone();
+                    body["passengerInfo"].as_array_mut().unwrap().push(p);
+                }
+                8 => body["ticketInfo"]["ticketingPrice"] = json!(1),
+                _ => {}
+            }
+            Ok(body)
+        })
+    }
     fn held_ticketing_enabled(&self) -> bool {
         self.ticket_enabled.load(Ordering::SeqCst)
     }
@@ -196,6 +237,8 @@ pub async fn verify(pool: &PgPool, token: &str, admin: &str) {
     let (request, fare, supplier) = quote(pool).await;
     let price = Uuid::parse_str(request["priceCodeRef"].as_str().unwrap()).unwrap();
     let mock = Arc::new(Mock {
+        report_calls: AtomicUsize::new(0),
+        report_mode: AtomicUsize::new(0),
         issue_calls: AtomicUsize::new(0),
         issue_mode: AtomicUsize::new(0),
         ticket_enabled: AtomicBool::new(true),
@@ -1061,6 +1104,7 @@ async fn verify_ticketing(app: &Router, pool: &PgPool, token: &str, mock: &Arc<M
         final_reply
     );
     assert_eq!(call(app, token, "ticket-hold", request).await, (200, held));
+    verify_reports(app, pool, token, &foreign_token, mock, id).await;
     for statement in [
         "DELETE FROM flight_ticket_issues",
         "TRUNCATE flight_ticket_issues",
@@ -1167,4 +1211,141 @@ async fn verify_ticketing(app: &Router, pool: &PgPool, token: &str, mock: &Arc<M
         .execute(pool)
         .await
         .unwrap();
+}
+
+async fn verify_reports(
+    app: &Router,
+    pool: &PgPool,
+    token: &str,
+    foreign: &str,
+    mock: &Mock,
+    id: Uuid,
+) {
+    let path = format!("/api/bookings/{id}/ticket/report");
+    let mutations = mock.issue_calls.load(Ordering::SeqCst) + mock.calls.load(Ordering::SeqCst);
+    assert_eq!(
+        super::call(app, "GET", &path, Some(foreign), Value::Null)
+            .await
+            .0,
+        404
+    );
+    sqlx::query("UPDATE api_clients SET permissions=ARRAY['booking'] WHERE id=(SELECT client_id FROM flight_bookings WHERE id=$1)").bind(id).execute(pool).await.unwrap();
+    assert_eq!(
+        super::call(app, "GET", &path, Some(token), Value::Null)
+            .await
+            .0,
+        403
+    );
+    sqlx::query("UPDATE api_clients SET permissions=ARRAY['booking','ticketing'] WHERE id=(SELECT client_id FROM flight_bookings WHERE id=$1)").bind(id).execute(pool).await.unwrap();
+    sqlx::query("UPDATE supplier_connections SET servicing_enabled=false")
+        .execute(pool)
+        .await
+        .unwrap();
+    assert_eq!(
+        super::call(app, "GET", &path, Some(token), Value::Null)
+            .await
+            .1["error"],
+        "SUPPLIER_SERVICING_DISABLED"
+    );
+    assert_eq!(mock.report_calls.load(Ordering::SeqCst), 0);
+    // Report servicing does not require Search participation or ticket mutation enablement.
+    sqlx::query("UPDATE supplier_connections SET servicing_enabled=true,search_enabled=false,ticketing_enabled=false").execute(pool).await.unwrap();
+    let result = super::call(app, "GET", &path, Some(token), Value::Null).await;
+    assert_eq!(result.0, 200, "{result:?}");
+    assert_eq!(
+        result.1["ticketInfo"]["ticketingPrice"].to_string(),
+        "4533.05"
+    );
+    assert_eq!(
+        result.1["passengerInfo"][0]["totalPrice"].to_string(),
+        "4533.05"
+    );
+    assert_eq!(result.1["ticketInfo"]["bookingId"], json!(id));
+    assert!(!result.1.to_string().contains("private-supplier-data"));
+    assert!(!result.1.to_string().contains("shared-ref"));
+    assert!(result.1.get("item1").is_none());
+    let (search,):(Uuid,)=sqlx::query_as("SELECT search_id FROM flight_offers WHERE id=(SELECT offer_id FROM flight_bookings WHERE id=$1)").bind(id).fetch_one(pool).await.unwrap();
+    assert_eq!(
+        super::call(
+            app,
+            "GET",
+            &format!("/api/B2BReport/AirTicketingDetails/{search}/Confirmed"),
+            Some(token),
+            Value::Null
+        )
+        .await
+        .0,
+        409
+    );
+    assert_eq!(
+        super::call(
+            app,
+            "GET",
+            &format!("/api/B2BReport/AirTicketingDetails/{search}/Refunded"),
+            Some(token),
+            Value::Null
+        )
+        .await
+        .0,
+        422
+    );
+    assert_eq!(
+        super::call(
+            app,
+            "GET",
+            "/api/bookings/by-reference/STRZZZZZZZZZZZZ/ticket/report",
+            Some(token),
+            Value::Null
+        )
+        .await
+        .0,
+        404
+    );
+    let (reference,): (String,) =
+        sqlx::query_as("SELECT public_ref FROM flight_bookings WHERE id=$1")
+            .bind(id)
+            .fetch_one(pool)
+            .await
+            .unwrap();
+    assert_eq!(
+        super::call(
+            app,
+            "GET",
+            &format!("/api/bookings/by-reference/{reference}/ticket/report"),
+            Some(token),
+            Value::Null
+        )
+        .await
+        .0,
+        409
+    );
+    for mode in 1..=10 {
+        mock.report_mode.store(mode, Ordering::SeqCst);
+        let result = super::call(app, "GET", &path, Some(token), Value::Null).await;
+        assert_eq!(
+            result.0,
+            if mode == 9 { 504 } else { 502 },
+            "mode {mode}: {result:?}"
+        );
+        assert!(!result.1.to_string().contains("private-supplier-data"));
+    }
+    let (valid,invalid):(i64,i64)=sqlx::query_as("SELECT count(*) FILTER(WHERE verified),count(*) FILTER(WHERE NOT verified) FROM flight_ticket_reports WHERE booking_id=$1").bind(id).fetch_one(pool).await.unwrap();
+    assert_eq!((valid, invalid), (1, 8));
+    for statement in [
+        "DELETE FROM flight_ticket_reports",
+        "UPDATE flight_ticket_reports SET verified=true",
+        "TRUNCATE flight_ticket_reports",
+    ] {
+        assert!(sqlx::query(statement).execute(pool).await.is_err());
+    }
+    assert_eq!(
+        mock.issue_calls.load(Ordering::SeqCst) + mock.calls.load(Ordering::SeqCst),
+        mutations
+    );
+    mock.report_mode.store(0, Ordering::SeqCst);
+    sqlx::query("UPDATE supplier_connections SET search_enabled=true,ticketing_enabled=true")
+        .execute(pool)
+        .await
+        .unwrap();
+    sqlx::query("UPDATE api_clients SET permissions=ARRAY['search:read','booking','ticketing'] WHERE id=(SELECT client_id FROM flight_bookings WHERE id=$1)").bind(id).execute(pool).await.unwrap();
 }

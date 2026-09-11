@@ -20,6 +20,9 @@ use uuid::Uuid;
 
 type ReadFuture<'a> = Pin<Box<dyn Future<Output = Result<Value, SupplierError>> + Send + 'a>>;
 pub trait ReadSupplier: Send + Sync {
+    fn ticket_report<'a>(&'a self, _transaction: &'a str) -> ReadFuture<'a> {
+        Box::pin(async { Err(SupplierError::Configuration) })
+    }
     fn held_ticketing_enabled(&self) -> bool {
         false
     }
@@ -36,6 +39,9 @@ pub trait ReadSupplier: Send + Sync {
     fn read<'a>(&'a self, operation: ReadOperation, payload: &'a Value) -> ReadFuture<'a>;
 }
 impl ReadSupplier for SupplierAdapter {
+    fn ticket_report<'a>(&'a self, transaction: &'a str) -> ReadFuture<'a> {
+        Box::pin(SupplierAdapter::ticket_report(self, transaction))
+    }
     fn held_ticketing_enabled(&self) -> bool {
         SupplierAdapter::held_ticketing_enabled(self)
     }

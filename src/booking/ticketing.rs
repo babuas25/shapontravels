@@ -66,7 +66,7 @@ fn supplier_payload(original: &Value, saved: &Value) -> Option<Value> {
     }
     Some(payload)
 }
-fn identity(v: &Value) -> Option<Vec<String>> {
+pub(super) fn identity(v: &Value) -> Option<Vec<String>> {
     let mut result = Vec::new();
     for key in ["firstName", "lastName"] {
         result.push(
@@ -91,7 +91,7 @@ fn identity(v: &Value) -> Option<Vec<String>> {
     }
     Some(result)
 }
-fn passenger_matches(
+pub(super) fn passenger_matches(
     expected: &Value,
     actual: &Value,
     supplier: &str,
@@ -314,7 +314,11 @@ async fn issue(
         Ok::<_,sqlx::Error>(row)
     }).await.map_err(|_|ApiError(StatusCode::SERVICE_UNAVAILABLE,"TICKETING_OUTCOME_UNKNOWN"))?.map(issue_reply).map_err(ApiError::from)
 }
-async fn load_quote(pool: &sqlx::PgPool, id: Uuid, client: Uuid) -> Result<Quote, ApiError> {
+pub(super) async fn load_quote(
+    pool: &sqlx::PgPool,
+    id: Uuid,
+    client: Uuid,
+) -> Result<Quote, ApiError> {
     let q: Quote = sqlx::query_as("SELECT r.id AS price_id,r.offer_id,o.search_id,o.supplier_id,o.availability_epoch,o.reprice_required,r.original,r.selling,r.reference_map,o.original AS search_original,s.request,true AS valid,(r.accepted_at IS NOT NULL) AS accepted,true AS latest,r.audience,r.agent_id FROM flight_bookings b JOIN flight_reprices r ON r.id=b.price_id JOIN flight_offers o ON o.id=b.offer_id JOIN flight_searches s ON s.id=o.search_id WHERE b.id=$1 AND b.client_id=$2").bind(id).bind(client).fetch_one(pool).await?;
     Ok(q)
 }

@@ -1039,3 +1039,17 @@ User explicitly requested same-airline alternative selection through the step be
 - Existing workflow completed backup → migrations 0015–0016 → grants → restart → readiness. Independent public HTTPS checks returned `/health/live` 200/ok and `/health/ready` 200/ready; served OpenAPI includes NewTicket, ticket retrieval and saved-ticket verification. Readiness verifies all embedded migration checksums.
 - Local working database also backed up privately and migrated successfully; versions 15 and 16 confirmed successful. No UAT booking data transferred, supplier mutation or execution-gate change.
 - Prior local-only notes describe the implementation stage and are superseded by this release. Documentation-only completion commit uses `[skip ci]`; deployed application remains `08a569e`.
+
+### Ticket details/report continuation — 2026-09-11
+
+- User requested continuation after held-ticket release; implemented the next proposed Ticket details/report API increment. Direct Issue, Cancel and production ticket execution remain excluded.
+- Added owner-scoped report lookup by booking UUID, STR reference, and `GET /api/B2BReport/AirTicketingDetails/{platformSearchUuid}/Confirmed`. Ambiguous references/search transactions return 409; foreign/unknown records return 404; verified issued evidence and ticketing permission are required.
+- Original supplier servicing uses a bounded GET with safely encoded stored transaction, read-only retries and servicing control independent of Search/ticket mutation flags.
+- Reports validate PNR/transaction, ticket/passenger sets, original fare, passenger-type groups and itinerary when present. Public report preserves the top-level report shape and accepted selling prices without another markup; internal supplier account/reference/payment/financial extras are excluded.
+- Migration 0017 stores immutable raw/report verification evidence and redacted audit without changing issue outcomes. Missing-success ticket reconciliation remains separate.
+- Actual retained BS return UAT report returned Issued with two passengers, two flight segments and supplier total BDT 17,382; public report uses accepted selling BDT 18,382. No new booking, issue, cancellation or production supplier request was sent.
+- This increment is local; production database, deployed binary and Git remote remain unchanged. Evidence and final checks: [ticket report](docs/evidence/TICKET_REPORT_2026-09-11.md).
+
+### Ticket report release authorization — 2026-09-11
+
+- User requested continuing the stated next step: migration 0017, Git push and deployment of the completed report increment through the established backup/migrate workflow. Production ticket mutation restrictions remain unchanged.

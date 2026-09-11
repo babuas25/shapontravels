@@ -19,7 +19,7 @@ Supplier connections start disabled in PostgreSQL. Configuration validates HTTPS
 
 ## Current implementation
 
-Foundation and authentication are verified. See [authentication contract](docs/AUTHENTICATION.md) for machine tokens, one-time bootstrap and admin/client management. Public Search selects equivalent offers by original supplier total, then applies markup. [Prebooking flow](docs/PREBOOKING_FLOW.md) covers selected-direction FareRules/RePrice, explicit local acceptance and customer-selected alternatives. Hold booking, public PNR status/deadline lookup and reconciliation evidence are implemented within documented coverage; an Admin reconciliation screen and audited manual outcomes are implemented locally. [Held-ticket Issue](docs/TICKETING_API.md) is implemented and verified on Triplover UAT; Direct Issue, Cancel, reports and production commercial authorization remain unfinished. `REQUIREMENTS.md` tracks completion per step; later evidence supersedes historical baseline notes.
+Foundation and authentication are verified. See [authentication contract](docs/AUTHENTICATION.md) for machine tokens, one-time bootstrap and admin/client management. Public Search selects equivalent offers by original supplier total, then applies markup. [Prebooking flow](docs/PREBOOKING_FLOW.md) covers selected-direction FareRules/RePrice, explicit local acceptance and customer-selected alternatives. Hold booking, public PNR status/deadline lookup and reconciliation evidence are implemented within documented coverage; an Admin reconciliation screen and audited manual outcomes are implemented locally. [Held-ticket Issue](docs/TICKETING_API.md) is implemented and verified on Triplover UAT; [Ticket reports](docs/TICKET_REPORT_API.md) are now implemented locally; Direct Issue, Cancel and production commercial authorization remain unfinished. `REQUIREMENTS.md` tracks completion per step; later evidence supersedes historical baseline notes.
 
 On this workspace a PostgreSQL 18.3 development runtime has been built under the ignored `.local/` directory. Its cluster listens only on a private Unix socket. The helper sets the Rust PATH and dedicated local database URL without changing `.env`:
 
@@ -78,3 +78,7 @@ After applying migrations through `0014_booking_public_reference.sql` and starti
 ## Held-ticket Issue
 
 `POST /api/ticket/NewTicket` confirms a verified held booking with booking/ticketing permissions and a required idempotency key. `GET /api/bookings/{id}/ticket` retrieves saved ticket evidence. Migration 0015 adds the durable issue reservation; 0016 adds append-only saved-response verification. See [contract and execution limits](docs/TICKETING_API.md) and [UAT verification](docs/evidence/HELD_TICKETING_2026-09-11.md). Released on 2026-09-11 in `08a569e`, including migrations 0015–0016; production readiness and the three ticket endpoints were verified. Production supplier ticketing remains blocked.
+
+## Ticket details reports
+
+Owner-scoped live report lookup by booking UUID, STR reference or platform transaction is implemented locally with accepted selling fares and verified ticket evidence. See [report API](docs/TICKET_REPORT_API.md). Requires migration 0017 before rollout; this increment is not deployed.

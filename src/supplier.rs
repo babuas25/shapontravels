@@ -246,17 +246,47 @@ impl SupplierAdapter {
             &self.base
         };
         let endpoint = Self::endpoint(base, operation.path())?;
+        self.read_endpoint(endpoint, Some(payload), operation.response_limit())
+            .await
+    }
+    /// Read-only report; supplier transaction is encoded as one URL path segment.
+    pub async fn ticket_report(&self, transaction: &str) -> Result<Value, SupplierError> {
+        if transaction.is_empty()
+            || transaction.len() > 4096
+            || transaction.chars().any(char::is_control)
+            || [".", ".."].contains(&transaction)
+        {
+            return Err(SupplierError::Configuration);
+        }
+        let mut endpoint = Self::endpoint(&self.base, "api/B2BReport/AirTicketingDetails")?;
+        endpoint
+            .path_segments_mut()
+            .map_err(|_| SupplierError::Configuration)?
+            .push(transaction)
+            .push("Confirmed");
+        tokio::time::timeout(
+            self.timeout,
+            self.read_endpoint(endpoint, None, READ_RESPONSE_LIMIT),
+        )
+        .await
+        .map_err(|_| SupplierError::Timeout)?
+    }
+    async fn read_endpoint(
+        &self,
+        endpoint: Url,
+        payload: Option<&Value>,
+        limit: usize,
+    ) -> Result<Value, SupplierError> {
         let mut auth_retried = false;
         let mut transient_retried = false;
         loop {
             let token = self.token().await?;
-            let result = self
-                .client
-                .post(endpoint.clone())
-                .bearer_auth(&token)
-                .json(payload)
-                .send()
-                .await;
+            let request = if let Some(payload) = payload {
+                self.client.post(endpoint.clone()).json(payload)
+            } else {
+                self.client.get(endpoint.clone())
+            };
+            let result = request.bearer_auth(&token).send().await;
             let response = match result {
                 Ok(response) => response,
                 Err(error) if !transient_retried => {
@@ -286,7 +316,7 @@ impl SupplierAdapter {
             if !response.status().is_success() {
                 return Err(SupplierError::Response);
             }
-            return bounded_json(response, operation.response_limit()).await;
+            return bounded_json(response, limit).await;
         }
     }
 }
@@ -355,6 +385,62 @@ mod tests {
         let address = listener.local_addr().unwrap();
         let task = tokio::spawn(async move { axum::serve(listener, routes).await.unwrap() });
         (Url::parse(&format!("http://{address}")).unwrap(), task)
+    }
+    #[tokio::test]
+    async fn report_uses_get_encodes_transaction_and_bounds_read_retries() {
+        use axum::{extract::Path, routing::get};
+        let mock = Mock::default();
+        let calls = mock.reads.clone();
+        let (base, task) = server(
+            Router::new()
+                .route("/api/user/apiLogIn", post(login))
+                .route(
+                    "/api/B2BReport/AirTicketingDetails/{transaction}/Confirmed",
+                    get(
+                        |State(mock): State<Mock>,
+                         Path(transaction): Path<String>,
+                         headers: HeaderMap| async move {
+                            assert_eq!(transaction, "a/b?x=#value");
+                            let n = mock.reads.fetch_add(1, Ordering::SeqCst);
+                            if n == 0 {
+                                assert_eq!(headers["authorization"], "Bearer token-1");
+                                return (StatusCode::UNAUTHORIZED, Json(Value::Null));
+                            }
+                            if n == 1 {
+                                return (StatusCode::INTERNAL_SERVER_ERROR, Json(Value::Null));
+                            }
+                            (
+                                StatusCode::OK,
+                                Json(serde_json::json!({"ticketInfo":{"status":"Issued"}})),
+                            )
+                        },
+                    ),
+                )
+                .with_state(mock),
+        )
+        .await;
+        let adapter = SupplierAdapter::build(
+            "triplover",
+            base.clone(),
+            base,
+            "test@example.invalid".into(),
+            "already-encoded".into(),
+            Duration::from_secs(2),
+        )
+        .unwrap();
+        assert_eq!(
+            adapter.ticket_report("a/b?x=#value").await.unwrap()["ticketInfo"]["status"],
+            "Issued"
+        );
+        assert_eq!(calls.load(Ordering::SeqCst), 3);
+        for invalid in ["", ".", "..", "bad\nref"] {
+            assert_eq!(
+                adapter.ticket_report(invalid).await.unwrap_err(),
+                SupplierError::Configuration
+            );
+        }
+        assert_eq!(calls.load(Ordering::SeqCst), 3);
+        task.abort();
     }
     #[tokio::test]
     async fn separate_hosts_single_flight_login_and_one_401_refresh() {
