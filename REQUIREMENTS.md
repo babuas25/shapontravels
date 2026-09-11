@@ -1114,3 +1114,10 @@ Final validation: 60 regular tests passed; the complete disposable-database suit
 
 - User authorized Admin cancellation review plus migration 0020, commit/push and deployment. Added all/uncertain cancellation queues, independent cancellation status and private-data-minimized evidence summaries in the Admin panel. Viewing records performs no supplier mutation or read.
 - Release follows backup → migrate → deploy, with real cancellation and Direct Issue disabled.
+
+### Cancellation release completed — 2026-09-11
+
+- Application commit `4b8bf1a` pushed and deployed through [workflow 34569830412](https://github.com/babuas25/shapontravels/actions/runs/34569830412); checks, release build and production activation all succeeded.
+- Local working database privately backed up, archive verified, migration 20 successful. Production completed the established backup/migrate/grants/restart sequence. Public health endpoints return 200/ok and 200/ready; new Cancel API and Admin filters are served; unauthenticated Admin data access returns 401.
+- 60 regular tests, full DB suite (43.79 seconds), Clippy, formatting, JS syntax/render checks and deployment-script tests passed. Temporary task DB removed. No live Book/Issue/Cancel test occurred; real cancellation and Direct Issue remain disabled.
+- Prior local-only notes describe implementation before authorized deployment. Completion documentation uses `[skip ci]`; application release remains `4b8bf1a`.
