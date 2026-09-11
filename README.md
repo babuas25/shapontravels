@@ -19,7 +19,7 @@ Supplier connections start disabled in PostgreSQL. Configuration validates HTTPS
 
 ## Current implementation
 
-Foundation and authentication are verified. See [authentication contract](docs/AUTHENTICATION.md) for machine tokens, one-time bootstrap and admin/client management. Public Search selects equivalent offers by original supplier total, then applies markup. [Prebooking flow](docs/PREBOOKING_FLOW.md) covers selected-direction FareRules/RePrice, explicit local acceptance and customer-selected alternatives. Hold booking, public PNR status/deadline lookup and reconciliation evidence are implemented within documented coverage; an Admin reconciliation screen and audited manual outcomes are implemented locally. Cancel, ticketing and reports remain unfinished. `REQUIREMENTS.md` tracks completion per step; later evidence supersedes historical baseline notes.
+Foundation and authentication are verified. See [authentication contract](docs/AUTHENTICATION.md) for machine tokens, one-time bootstrap and admin/client management. Public Search selects equivalent offers by original supplier total, then applies markup. [Prebooking flow](docs/PREBOOKING_FLOW.md) covers selected-direction FareRules/RePrice, explicit local acceptance and customer-selected alternatives. Hold booking, public PNR status/deadline lookup and reconciliation evidence are implemented within documented coverage; an Admin reconciliation screen and audited manual outcomes are implemented locally. [Held-ticket Issue](docs/TICKETING_API.md) is implemented and verified on Triplover UAT; Direct Issue, Cancel, reports and production commercial authorization remain unfinished. `REQUIREMENTS.md` tracks completion per step; later evidence supersedes historical baseline notes.
 
 On this workspace a PostgreSQL 18.3 development runtime has been built under the ignored `.local/` directory. Its cluster listens only on a private Unix socket. The helper sets the Rust PATH and dedicated local database URL without changing `.env`:
 
@@ -64,7 +64,7 @@ See [Swagger walkthrough and API contract](docs/MARKUP_API.md). Create a draft, 
 
 ## Initial public Search
 
-`POST /api/Search` and `POST /api/FareRules` now use machine tokens. [Setup, examples and initial-release limits](docs/SEARCH_API.md). Activate your own markup rule and selected supplier Search controls before testing. Search now selects the lowest original supplier total for conservatively equivalent fares before markup; equal totals prefer Takeoff, Firsttrip, Triplover. Summary counts, airline/stops filters and net selling-price ranges now derive from retained offers. Broader equivalence and complex-fare coverage remain partial. Hold Book/status/reconciliation exist; Cancel and ticketing remain unfinished.
+`POST /api/Search` and `POST /api/FareRules` now use machine tokens. [Setup, examples and initial-release limits](docs/SEARCH_API.md). Activate your own markup rule and selected supplier Search controls before testing. Search now selects the lowest original supplier total for conservatively equivalent fares before markup; equal totals prefer Takeoff, Firsttrip, Triplover. Summary counts, airline/stops filters and net selling-price ranges now derive from retained offers. Broader equivalence and complex-fare coverage remain partial. Hold Book/status/reconciliation and UAT held-ticket Issue exist; Direct Issue and Cancel remain unfinished.
 
 ## Deployment
 
@@ -74,3 +74,7 @@ See [Swagger walkthrough and API contract](docs/MARKUP_API.md). Create a draft, 
 ## Admin reconciliation screen
 
 After applying migrations through `0014_booking_public_reference.sql` and starting the updated backend, open `/admin/reconciliation` on the same API origin. Sign in with an existing human Admin/Super Admin account. The Bengali screen lists unresolved bookings, performs read-only supplier status checks and records evidence-backed manual outcomes with history. No client token, code editing or Swagger input is needed. See [manual reconciliation](docs/BOOKING_API.md#admin-manual-reconciliation-and-screen) for boundaries. Released through the existing deployment workflow on 2026-09-11 (`bdd3ec7`), including migrations 0013–0014; no production supplier Hold/Issue is authorized.
+
+## Held-ticket Issue
+
+`POST /api/ticket/NewTicket` confirms a verified held booking with booking/ticketing permissions and a required idempotency key. `GET /api/bookings/{id}/ticket` retrieves saved ticket evidence. Migration 0015 adds the durable issue reservation; 0016 adds append-only saved-response verification. See [contract and execution limits](docs/TICKETING_API.md) and [UAT verification](docs/evidence/HELD_TICKETING_2026-09-11.md). This increment is local and has not been deployed.

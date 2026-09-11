@@ -118,6 +118,7 @@ pub fn router_with_search_limits(
     doc.merge(search::SearchDoc::openapi());
     doc.merge(reprice::RepriceDoc::openapi());
     doc.merge(booking::BookingDoc::openapi());
+    doc.merge(booking::ticketing::TicketDoc::openapi());
     doc.merge(admin_bookings::AdminBookingDoc::openapi());
     if let Some(components) = doc.components.as_mut() {
         use utoipa::openapi::security::{Http, HttpAuthScheme, SecurityScheme};

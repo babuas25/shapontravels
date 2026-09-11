@@ -1,4 +1,5 @@
-//! Hold booking with durable at-most-one dispatch reservation. No ticket issue.
+//! Hold booking with durable at-most-one dispatch reservation.
+pub mod ticketing;
 use crate::{
     AppState,
     auth::{ApiError, Machine},
@@ -97,6 +98,7 @@ struct Quote {
 #[derive(sqlx::FromRow)]
 struct Booking {
     id: Uuid,
+    ticket_state: Option<String>,
     public_ref: Option<String>,
     request_hash: Vec<u8>,
     state: String,
@@ -105,6 +107,12 @@ struct Booking {
 type BookingReply = (StatusCode, HeaderMap, Json<Value>);
 fn reply(row: Booking) -> BookingReply {
     let mut headers = HeaderMap::new();
+    if let Some(ticket_state) = row.ticket_state {
+        headers.insert(
+            "x-ticket-state",
+            HeaderValue::from_str(&ticket_state).expect("database-constrained ticket state"),
+        );
+    }
     if let Some(reference) = row.public_ref.as_ref() {
         headers.insert(
             "x-booking-reference",
@@ -267,7 +275,7 @@ async fn book(
         .bind(machine.client_id)
         .execute(&mut *tx)
         .await?;
-    if let Some(previous)=sqlx::query_as::<_,Booking>("SELECT id,public_ref,request_hash,state,public_response FROM flight_bookings WHERE client_id=$1 AND idempotency_key=$2").bind(machine.client_id).bind(key).fetch_optional(&mut *tx).await? {
+    if let Some(previous)=sqlx::query_as::<_,Booking>("SELECT id,public_ref,request_hash,state,public_response,(SELECT CASE WHEN EXISTS(SELECT 1 FROM flight_ticket_verifications v WHERE v.issue_id=t.id) THEN 'issued' ELSE t.state END FROM flight_ticket_issues t WHERE booking_id=flight_bookings.id) AS ticket_state FROM flight_bookings WHERE client_id=$1 AND idempotency_key=$2").bind(machine.client_id).bind(key).fetch_optional(&mut *tx).await? {
   if previous.request_hash!=hash{return Err(ApiError(StatusCode::CONFLICT,"IDEMPOTENCY_KEY_REUSED"));}
   return Ok(reply(previous));
  }
@@ -366,12 +374,12 @@ async fn book(
    sqlx::query("INSERT INTO booking_late_outcomes(booking_id,response) VALUES($1,$2)").bind(booking_id).bind(&original).execute(&mut *tx).await?;
    sqlx::query("UPDATE flight_bookings SET state='outcome_unknown',public_response=NULL,original_response=COALESCE($2,original_response),pnr=COALESCE($3,pnr),supplier_booking_ref=COALESCE($4,supplier_booking_ref),error_code='LATE_BOOKING_OUTCOME',updated_at=clock_timestamp() WHERE id=$1").bind(booking_id).bind(&original).bind(&pnr).bind(&supplier_ref).execute(&mut *tx).await?;
    sqlx::query("INSERT INTO audit_events(actor_kind,action,resource_kind,resource_id) VALUES('system','booking.late_outcome','booking',$1)").bind(booking_id.to_string()).execute(&mut *tx).await?;
-   let saved=sqlx::query_as::<_,Booking>("SELECT id,public_ref,request_hash,state,public_response FROM flight_bookings WHERE id=$1").bind(booking_id).fetch_one(&mut *tx).await?;
+   let saved=sqlx::query_as::<_,Booking>("SELECT id,public_ref,request_hash,state,public_response,(SELECT CASE WHEN EXISTS(SELECT 1 FROM flight_ticket_verifications v WHERE v.issue_id=t.id) THEN 'issued' ELSE t.state END FROM flight_ticket_issues t WHERE booking_id=flight_bookings.id) AS ticket_state FROM flight_bookings WHERE id=$1").bind(booking_id).fetch_one(&mut *tx).await?;
    tx.commit().await?;
    return Ok::<_,sqlx::Error>(saved);
   }
   sqlx::query("INSERT INTO audit_events(actor_kind,action,resource_kind,resource_id,metadata) VALUES('system','booking.outcome','booking',$1,$2)").bind(booking_id.to_string()).bind(json!({"state":status})).execute(&mut *tx).await?;
-  let saved = sqlx::query_as::<_,Booking>("SELECT id,public_ref,request_hash,state,public_response FROM flight_bookings WHERE id=$1").bind(booking_id).fetch_one(&mut *tx).await?;
+  let saved = sqlx::query_as::<_,Booking>("SELECT id,public_ref,request_hash,state,public_response,(SELECT CASE WHEN EXISTS(SELECT 1 FROM flight_ticket_verifications v WHERE v.issue_id=t.id) THEN 'issued' ELSE t.state END FROM flight_ticket_issues t WHERE booking_id=flight_bookings.id) AS ticket_state FROM flight_bookings WHERE id=$1").bind(booking_id).fetch_one(&mut *tx).await?;
   tx.commit().await?;
   Ok::<_,sqlx::Error>(saved)
  }).await.map_err(|_|ApiError(StatusCode::SERVICE_UNAVAILABLE,"BOOKING_OUTCOME_UNKNOWN"))?.map(reply).map_err(ApiError::from)
@@ -479,6 +487,10 @@ fn held_response(body: &Value, q: &Quote, id: Uuid) -> Option<Value> {
     {
         return None;
     }
+    project_booking_response(body, q, id)
+}
+fn project_booking_response(body: &Value, q: &Quote, id: Uuid) -> Option<Value> {
+    let info = &body["item1"];
     if ["totalPrice", "passengerFares", "bookingComponents"]
         .iter()
         .any(|key| info.get(key).is_some())
@@ -606,7 +618,7 @@ async fn status(
     Path(id): Path<Uuid>,
 ) -> Result<BookingReply, ApiError> {
     machine.require("booking")?;
-    let row=sqlx::query_as::<_,Booking>("SELECT id,public_ref,request_hash,state,public_response FROM flight_bookings WHERE id=$1 AND client_id=$2").bind(id).bind(machine.client_id).fetch_optional(&state.pool).await?.ok_or(ApiError(StatusCode::NOT_FOUND,"NOT_FOUND"))?;
+    let row=sqlx::query_as::<_,Booking>("SELECT id,public_ref,request_hash,state,public_response,(SELECT CASE WHEN EXISTS(SELECT 1 FROM flight_ticket_verifications v WHERE v.issue_id=t.id) THEN 'issued' ELSE t.state END FROM flight_ticket_issues t WHERE booking_id=flight_bookings.id) AS ticket_state FROM flight_bookings WHERE id=$1 AND client_id=$2").bind(id).bind(machine.client_id).fetch_optional(&state.pool).await?.ok_or(ApiError(StatusCode::NOT_FOUND,"NOT_FOUND"))?;
     Ok(reply(row))
 }
 #[utoipa::path(get,path="/api/bookings/by-reference/{reference}",operation_id="booking_status_by_reference",tag="Flights",security(("machine_token"=[])),params(("reference"=String,Path,description="Platform public booking reference, e.g. STR8FE94RKECOCE")),responses((status=200,body=Object,description="Saved booking response; X-Booking-Reference carries the stable public reference"),(status=202,body=Object,description="Unresolved booking; X-Booking-Reference remains stable"),(status=404,description="Malformed, unknown or foreign reference"),(status=409,description="Reference matches multiple bookings; use booking UUID")))]
@@ -624,7 +636,7 @@ async fn status_by_reference(
     {
         return Err(ApiError(StatusCode::NOT_FOUND, "NOT_FOUND"));
     }
-    let mut rows = sqlx::query_as::<_, Booking>("SELECT id,public_ref,request_hash,state,public_response FROM flight_bookings WHERE public_ref=$1 AND client_id=$2 LIMIT 2")
+    let mut rows = sqlx::query_as::<_, Booking>("SELECT id,public_ref,request_hash,state,public_response,(SELECT CASE WHEN EXISTS(SELECT 1 FROM flight_ticket_verifications v WHERE v.issue_id=t.id) THEN 'issued' ELSE t.state END FROM flight_ticket_issues t WHERE booking_id=flight_bookings.id) AS ticket_state FROM flight_bookings WHERE public_ref=$1 AND client_id=$2 LIMIT 2")
         .bind(reference).bind(machine.client_id).fetch_all(&state.pool).await?;
     if rows.len() > 1 {
         return Err(ApiError(
@@ -841,6 +853,7 @@ pub(crate) async fn reconcile_owned(
 pub struct BookingDoc;
 pub fn routes() -> Router<AppState> {
     Router::new()
+        .merge(ticketing::routes())
         .route("/api/Book", post(book))
         .route("/api/pnr", post(pnr))
         .route("/api/bookings/{id}", get(status))

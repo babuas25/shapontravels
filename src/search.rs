@@ -20,6 +20,12 @@ use uuid::Uuid;
 
 type ReadFuture<'a> = Pin<Box<dyn Future<Output = Result<Value, SupplierError>> + Send + 'a>>;
 pub trait ReadSupplier: Send + Sync {
+    fn held_ticketing_enabled(&self) -> bool {
+        false
+    }
+    fn issue_held<'a>(&'a self, _payload: &'a Value) -> ReadFuture<'a> {
+        Box::pin(async { Err(SupplierError::Configuration) })
+    }
     /// Transport-level enablement; hold bookings do not require payment authorization.
     fn hold_booking_enabled(&self) -> bool {
         false
@@ -30,6 +36,12 @@ pub trait ReadSupplier: Send + Sync {
     fn read<'a>(&'a self, operation: ReadOperation, payload: &'a Value) -> ReadFuture<'a>;
 }
 impl ReadSupplier for SupplierAdapter {
+    fn held_ticketing_enabled(&self) -> bool {
+        SupplierAdapter::held_ticketing_enabled(self)
+    }
+    fn issue_held<'a>(&'a self, payload: &'a Value) -> ReadFuture<'a> {
+        Box::pin(SupplierAdapter::issue_held(self, payload))
+    }
     fn hold_booking_enabled(&self) -> bool {
         SupplierAdapter::hold_booking_enabled(self)
     }

@@ -1,6 +1,6 @@
 # Flight Aggregation & Booking API — Requirements
 
-Status: Implementation in progress — Steps 1–2 verified complete; Step 5 implemented within documented coverage; Steps 3–4 and 6 partially implemented; Step 7 pending; Step 8 partially verified. Latest prebooking/release verification update: 2026-09-10. Historical milestone notes below are superseded where later updates say so.
+Status: Implementation in progress — Steps 1–2 verified complete; Step 5 implemented within documented coverage; Steps 3–4 and 6 partially implemented; Step 7 partially implemented (held-ticket UAT); Step 8 partially verified. Latest prebooking/release verification update: 2026-09-10. Historical milestone notes below are superseded where later updates say so.
 
 Important current priority (2026-09-10): আরও optimization প্রয়োজন, কোনো valid offer/field বাদ দিয়ে নয়। See [Tripfeels source comparison](docs/evidence/TRIPFEELS_OPTIMIZATION_COMPARISON_2026-09-10.md).
 
@@ -19,7 +19,8 @@ Important current priority (2026-09-10): আরও optimization প্রয়ো�
 - [x] BG three-route multicity UAT Hold ও retrieval সফল; supplier status Created এবং deadline খালি—ticket issue readiness এখনও প্রতিষ্ঠিত নয়।
 - [x] `STR` + GDS PNR + airline PNR public reference, owner-scoped reference retrieval, Admin display; `STR8FE94RKECOCE` দিয়ে retained UAT booking HTTP 200 যাচাই।
 - [x] Latest reference work: ordinary tests, PostgreSQL integration, real saved UAT retrieval, Clippy, formatting ও JavaScript syntax checks pass।
-- [ ] Ticket Issue/NewTicket → Direct Issue, reports এবং প্রয়োজনীয় execution controls/verification।
+- [x] Held-booking NewTicket implemented; Triplover UAT BS return confirmed with two tickets and saved retrieval HTTP 200।
+- [ ] Direct Issue (latest user instruction excludes it), reports এবং production commercial controls/verification।
 - [ ] Cancel flow (user-deferred), unresolved booking cases এবং full lifecycle/supplier acceptance।
 - [ ] Real populated branded/multiple-component evidence পেলে সেই coverage-এর কাজ (user-deferred)।
 - [ ] Broader normalization/equivalence coverage, production private-data protection/retention এবং remaining contract/release acceptance।
@@ -1015,3 +1016,19 @@ User explicitly requested same-airline alternative selection through the step be
 - [x] GitHub Actions [run 34512844417](https://github.com/babuas25/shapontravels/actions/runs/34512844417): Rust/PostgreSQL checks, Linux release build and VPS deployment all succeeded. Existing activation workflow requires backup success before migrations and checks schema readiness after restart.
 - [x] Independent SSH read-only checks: production `/health/live` ok, `/health/ready` ready, new `/api/bookings/by-reference/{reference}` present in served OpenAPI, `/admin/reconciliation` HTTP 200. Readiness verifies embedded migration checksums, including 0013–0014.
 - No supplier mutation performed; no local UAT data, credentials or database dumps committed/copied to production. The prior local-only release notes are historical and superseded for this deployed code. Documentation-only follow-up uses `[skip ci]`; deployed application remains `bdd3ec7`.
+
+### Held-ticket Issue authorization and implementation — 2026-09-11
+
+- User explicitly authorized confirming holdable bookings in Triplover UAT and excluded Direct Issue. Production supplier Issue remains prohibited.
+- Added `POST /api/ticket/NewTicket` and owner-scoped ticket retrieval, machine booking/ticketing permissions, database/transport enablement, exact Triplover UAT host gates and production deny. Search/RePrice `bookable=true`, verified held state, accepted fare and fresh PNR Booked/no-ticket/deadline checks are required.
+- Durable unique per-booking issue reservation, key conflict protection, no transport retries, cancellation-resistant completion, immutable raw outcomes and redacted audit. Unknown outcomes remain blocked even with a different key. Original Hold replies stay unchanged; `X-Ticket-State` exposes the effective ticket state.
+- Exactly one NewTicket sent for the retained BS return UAT Hold. Supplier succeeded with two ticket numbers; subsequent PNR returned Ticketed. No new Hold, Direct Issue, Cancel or production call was sent.
+- First public result was 202 because Triplover returned a CNN child as CHD in ticket passenger metadata. All names, references, flight counts, itinerary and original fares matched. Added narrowly scoped Triplover child-label compatibility with unchanged flight-count/fare verification; saved-response verification returned HTTP 200 with two ticket passengers, and ticket retrieval matched exactly. No repeat Issue request was needed.
+- Append-only `POST /api/bookings/{id}/ticket/verify` validates a captured success without supplier calls. Original unknown evidence remains immutable. Timeout/missing/invalid evidence cannot become issued through this endpoint.
+- Migrations 0015–0016 applied to disposable tests and the privately backed-up retained BS return UAT database only. Local permissions/controls restored and temporary token removed. No commit, push or deployment in this increment.
+- Production commercial authorization, Direct Issue, reports, missing-response ticket reconciliation and broader supplier/lifecycle acceptance remain unfinished. Detailed evidence: [held ticketing](docs/evidence/HELD_TICKETING_2026-09-11.md).
+
+### Held-ticket release authorization — 2026-09-11
+
+- User authorized database migrations and Git push for the completed held-ticket implementation. Release migrations 0015–0016 through the existing backup → migrate → deploy workflow, preserving production supplier execution restrictions.
+- Production ticketing remains disabled by the application/transport gates. No supplier calls or private UAT data transfer are part of this release.

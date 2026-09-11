@@ -58,6 +58,7 @@ pub struct SupplierAdapter {
     password: String,
     timeout: Duration,
     booking_enabled: bool,
+    ticketing_enabled: bool,
     session: Mutex<Option<Session>>,
 }
 #[derive(Deserialize)]
@@ -89,6 +90,11 @@ impl SupplierAdapter {
             timeout,
         )?;
         adapter.booking_enabled = config.booking_enabled;
+        // This release permits real ticket issue only on the approved Triplover UAT hosts.
+        adapter.ticketing_enabled = config.ticketing_enabled
+            && config.id == "triplover"
+            && adapter.base.as_str() == "https://userapi-uat.triplover.com/"
+            && adapter.search_base.as_str() == "https://searchapi-uat.triplover.com/";
         Ok(adapter)
     }
     fn build(
@@ -121,6 +127,7 @@ impl SupplierAdapter {
             password,
             timeout,
             booking_enabled: false,
+            ticketing_enabled: false,
             session: Mutex::new(None),
         })
     }
@@ -180,6 +187,32 @@ impl SupplierAdapter {
             let response = self
                 .client
                 .post(Self::endpoint(&self.base, "api/Book")?)
+                .bearer_auth(token)
+                .json(payload)
+                .send()
+                .await
+                .map_err(transport)?;
+            if !response.status().is_success() {
+                return Err(SupplierError::Response);
+            }
+            bounded_json(response, READ_RESPONSE_LIMIT).await
+        })
+        .await
+        .map_err(|_| SupplierError::Timeout)?
+    }
+    pub fn held_ticketing_enabled(&self) -> bool {
+        self.ticketing_enabled
+    }
+    /// Never retry ticket mutations, even after authentication or transport failure.
+    pub async fn issue_held(&self, payload: &Value) -> Result<Value, SupplierError> {
+        if !self.ticketing_enabled {
+            return Err(SupplierError::Configuration);
+        }
+        tokio::time::timeout(self.timeout, async {
+            let token = self.token().await?;
+            let response = self
+                .client
+                .post(Self::endpoint(&self.base, "api/ticket/NewTicket")?)
                 .bearer_auth(token)
                 .json(payload)
                 .send()
@@ -530,6 +563,57 @@ mod tests {
             assert!(crate::search::ReadSupplier::hold_booking_enabled(&adapter));
             assert_eq!(
                 adapter.book(&Value::Null).await.unwrap_err(),
+                SupplierError::Response
+            );
+            assert_eq!(calls.load(Ordering::SeqCst), 1);
+            task.abort();
+        }
+    }
+
+    #[tokio::test]
+    async fn issue_does_not_retry_401_or_5xx() {
+        for status in [StatusCode::UNAUTHORIZED, StatusCode::INTERNAL_SERVER_ERROR] {
+            let calls = Arc::new(AtomicUsize::new(0));
+            let counter = calls.clone();
+            let (base, task) = server(
+                Router::new()
+                    .route("/api/user/apiLogIn", post(login))
+                    .route(
+                        "/api/ticket/NewTicket",
+                        post(move || {
+                            let counter = counter.clone();
+                            async move {
+                                counter.fetch_add(1, Ordering::SeqCst);
+                                status
+                            }
+                        }),
+                    )
+                    .with_state(Mock::default()),
+            )
+            .await;
+            let mut adapter = SupplierAdapter::build(
+                "triplover",
+                base.clone(),
+                base,
+                "test@example.invalid".into(),
+                "already-encoded".into(),
+                Duration::from_secs(2),
+            )
+            .unwrap();
+            assert_eq!(
+                adapter.issue_held(&Value::Null).await.unwrap_err(),
+                SupplierError::Configuration
+            );
+            assert_eq!(calls.load(Ordering::SeqCst), 0);
+            assert!(!crate::search::ReadSupplier::held_ticketing_enabled(
+                &adapter
+            ));
+            adapter.ticketing_enabled = true;
+            assert!(crate::search::ReadSupplier::held_ticketing_enabled(
+                &adapter
+            ));
+            assert_eq!(
+                adapter.issue_held(&Value::Null).await.unwrap_err(),
                 SupplierError::Response
             );
             assert_eq!(calls.load(Ordering::SeqCst), 1);
