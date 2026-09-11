@@ -610,6 +610,31 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn direct_issue_is_disabled_even_with_all_real_adapter_flags_enabled() {
+        use crate::search::ReadSupplier;
+        let adapter = SupplierAdapter::new(
+            SupplierConfig {
+                id: "triplover",
+                currency: Some("BDT".into()),
+                search_base_url: Some("https://searchapi-uat.triplover.com/".parse().unwrap()),
+                base_url: Some("https://userapi-uat.triplover.com/".parse().unwrap()),
+                email: Some("test@example.invalid".into()),
+                password: Some("fake".into()),
+                booking_enabled: true,
+                ticketing_enabled: true,
+            },
+            Duration::from_secs(1),
+        )
+        .unwrap();
+        assert!(!adapter.direct_issue_enabled());
+        // Default denial returns without authentication or an HTTP request.
+        assert_eq!(
+            adapter.book_direct(&Value::Null).await.unwrap_err(),
+            SupplierError::Configuration
+        );
+    }
+
+    #[tokio::test]
     async fn book_does_not_retry_401_or_5xx() {
         for status in [StatusCode::UNAUTHORIZED, StatusCode::INTERNAL_SERVER_ERROR] {
             let calls = Arc::new(AtomicUsize::new(0));

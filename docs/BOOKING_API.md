@@ -2,7 +2,7 @@
 
 User-approved policy: **hold booking requires no payment, balance or credit check**. The earlier deny-by-default commercial authorizer has been removed. A valid client `booking` permission, supplier database Search/booking enablement and the transport `<SUPPLIER>_BOOKING_ENABLED=true` flag permit a verified hold request, subject to the existing accepted-price, passenger and reference checks. This policy does not authorize instant purchase or ticket issue.
 
-Direct issue is intentionally unsupported in this stage. Either Search or RePrice having `bookable != true`, or a caller requesting `directIssueIntent=true`, yields `DIRECT_ISSUE_UNSUPPORTED`. Ticketing permission does not enable direct issue here. No NewTicket/Cancel implementation was added, no supplier booking was performed during development, and no running production settings were enabled.
+Current Direct Issue behavior is described in [Direct Issue](DIRECT_ISSUE.md): an offline implementation requires explicit intent, both non-holdable flags and dual permissions. A mismatched mode returns `BOOKING_MODE_MISMATCH`; real execution remains disabled. Historical Hold-only evidence below predates that increment.
 
 ## POST /api/Book
 
@@ -155,7 +155,7 @@ Migration `0013_manual_reconciliation.sql` adds the manual state, immutable reso
 
 Migration 0008 adds client/offer/price ownership constraints and dispatch records; migration 0009 allows multiple intents per offer while retaining client/key uniqueness. The records include original/public outcomes, reconciliation evidence and PNR/deadline fields. Sensitive passenger requests and raw supplier outcomes are stored in the application's private database; they are not logged. Production storage encryption/access/retention remain deployment considerations for real passenger data.
 
-No migration was applied to the user's running database and no server was restarted. Mock/database tests use disposable local databases and synthetic passengers. No live Book was executed as part of the payment-policy change. Instant purchase/direct issue remains unsupported and needs its own design and explicit authorization.
+No migration was applied to the user's running database and no server was restarted. Mock/database tests use disposable local databases and synthetic passengers. No live Book was executed as part of the payment-policy change. At that stage instant purchase was unsupported. The later [Direct Issue increment](DIRECT_ISSUE.md) adds an authorized offline implementation with real execution disabled.
 
 
 A quote whose offer has subsequently received a classified fare/session rejection cannot be used for a new booking: HTTP 409 `REPRICE_REQUIRED`. Migration 0011 adds this guard. A fresh successful RePrice and acceptance are required; existing idempotent booking-result replays remain unchanged. This guard was mock-tested only; the 2026-09-10 prebooking work did not execute any live Book or ticketing operation.

@@ -42,7 +42,7 @@ fn deadline_safe(raw: &str, now: DateTime<Utc>, margin: i64) -> bool {
         });
     deadline.is_some_and(|d| d > now + Duration::seconds(margin))
 }
-fn supplier_payload(original: &Value, saved: &Value) -> Option<Value> {
+pub(super) fn supplier_payload(original: &Value, saved: &Value) -> Option<Value> {
     let mut payload = json!({});
     for (target, source) in [
         ("PNR", "pnr"),
@@ -107,7 +107,7 @@ pub(super) fn passenger_matches(
     }
     expected == actual
 }
-fn issued_response(
+pub(super) fn issued_response(
     body: &Value,
     payload: &Value,
     passengers: &Value,
@@ -198,6 +198,9 @@ async fn issue(
         .filter(|s| !s.is_empty() && s.len() <= 128 && s.bytes().all(|b| b.is_ascii_graphic()))
         .ok_or(error("IDEMPOTENCY_KEY_REQUIRED"))?
         .to_owned();
+    if key.starts_with("direct:") {
+        return Err(error("RESERVED_IDEMPOTENCY_KEY"));
+    }
     let id = request.booking_id;
     let hash = crate::auth::digest(
         &serde_json::to_string(&json!([
@@ -222,6 +225,14 @@ async fn issue(
         || request.booking_ref_number != request.pnr
     {
         return Err(error("BOOKING_REFERENCE_MISMATCH"));
+    }
+    let (mode,): (String,) =
+        sqlx::query_as("SELECT execution_mode FROM flight_bookings WHERE id=$1")
+            .bind(id)
+            .fetch_one(&state.pool)
+            .await?;
+    if mode == "direct" {
+        return Err(conflict("DIRECT_ISSUE_ALREADY_RESERVED"));
     }
     if let Some(old) = existing(&state.pool, machine.client_id, &key, id).await? {
         return replay(old, &hash, id);

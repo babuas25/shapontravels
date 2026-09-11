@@ -1080,3 +1080,17 @@ User explicitly requested same-airline alternative selection through the step be
 - Established backup → migration 0018 → grants → restart workflow completed. Independent public HTTPS liveness/readiness returned 200/ok and 200/ready, confirming embedded migration checksums. All three reconciliation routes are served; unauthenticated client and Admin checks return 401.
 - Local working database was privately backed up and migrated; migration 18 is successful. No supplier mutation or private UAT data transfer occurred. Production ticket execution restrictions remain unchanged.
 - Earlier local-only notes describe implementation before this authorized release. Documentation-only completion uses `[skip ci]`; application release remains `15e8e58`.
+
+
+### Direct Issue implementation authorization and local delivery — 2026-09-11
+
+- User clarified that Direct Issue must be implemented, but real Issue testing is prohibited, and authorized proceeding. This supersedes earlier Direct Issue exclusions.
+- Added explicit non-holdable intent validation, dual permissions and enablement checks, durable one-dispatch reservation, immutable execution mode, ticket receipt validation/storage and servicing compatibility. Subsequent NewTicket execution is rejected for Direct Issue bookings.
+- Real adapters deny Direct Issue unconditionally. Only the test environment with an offline-capable transport may dispatch; no real supplier Book/Issue request was sent during this increment.
+- Added migration 0019 and synthetic integration coverage for success, replay, duplicate offer, timeout, bad references/tickets/passengers/fares, live-environment denial, ticket/report retrieval and immutable mode. See [Direct Issue contract](docs/DIRECT_ISSUE.md).
+- This increment remains local. Working/production migration, git push and deployment are pending.
+- Final checks passed: formatting, Clippy with warnings denied, 60 regular tests and the complete disposable-database suite (43.90 seconds). All task-created temporary databases were removed; live/private opt-in tests were not run.
+
+### Direct Issue release authorization — 2026-09-11
+
+- User authorized continuing the proposed backup, migration 0019, git push and deployment sequence. The local working database was privately backed up, its archive checked, and migration 0019 applied successfully. Production release follows the established backup → migrate → deploy workflow. Real Direct Issue execution stays disabled; no supplier mutation test is authorized or performed.

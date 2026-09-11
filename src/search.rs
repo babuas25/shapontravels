@@ -20,6 +20,14 @@ use uuid::Uuid;
 
 type ReadFuture<'a> = Pin<Box<dyn Future<Output = Result<Value, SupplierError>> + Send + 'a>>;
 pub trait ReadSupplier: Send + Sync {
+    /// Offline capability only. Real adapters intentionally inherit this denial.
+    fn direct_issue_enabled(&self) -> bool {
+        false
+    }
+    fn book_direct<'a>(&'a self, _payload: &'a Value) -> ReadFuture<'a> {
+        Box::pin(async { Err(SupplierError::Configuration) })
+    }
+
     fn ticket_report<'a>(&'a self, _transaction: &'a str) -> ReadFuture<'a> {
         Box::pin(async { Err(SupplierError::Configuration) })
     }

@@ -1,4 +1,5 @@
 //! Hold booking with durable at-most-one dispatch reservation.
+mod direct;
 pub mod report;
 pub mod ticket_reconciliation;
 pub mod ticketing;
@@ -121,7 +122,7 @@ fn reply(row: Booking) -> BookingReply {
             HeaderValue::from_str(reference).expect("database-constrained reference"),
         );
     }
-    if row.state == "held" || row.state == "manually_resolved" {
+    if row.state == "held" || row.state == "issued" || row.state == "manually_resolved" {
         return (
             StatusCode::OK,
             headers,
@@ -256,7 +257,7 @@ fn validate(request: &BookRequest, q: &Quote) -> Result<(), ApiError> {
     }
     Ok(())
 }
-#[utoipa::path(post,path="/api/Book",operation_id="book_hold",tag="Flights",security(("machine_token"=[])),params(("Idempotency-Key"=String,Header,description="Required client-scoped key, 1–128 ASCII characters")),request_body=BookRequest,responses((status=200,body=Object,description="Verified held booking or exact replay"),(status=202,body=Object,description="Outcome unresolved; do not retry supplier mutation"),(status=403,description="Permission/enablement denied"),(status=409,description="Quote/idempotency conflict"),(status=422,description="Invalid passenger or unsupported direct issue")))]
+#[utoipa::path(post,path="/api/Book",operation_id="book_hold",tag="Flights",security(("machine_token"=[])),params(("Idempotency-Key"=String,Header,description="Required client-scoped key, 1–128 ASCII characters")),request_body=BookRequest,responses((status=200,body=Object,description="Verified booking/ticket receipt or exact replay"),(status=202,body=Object,description="Outcome unresolved; do not retry supplier mutation"),(status=403,description="Permission/enablement denied"),(status=409,description="Quote/idempotency conflict"),(status=422,description="Invalid passenger or booking mode mismatch")))]
 async fn book(
     machine: Machine,
     State(state): State<AppState>,
@@ -264,6 +265,9 @@ async fn book(
     Json(request): Json<BookRequest>,
 ) -> Result<BookingReply, ApiError> {
     machine.require("booking")?;
+    if request.direct_issue_intent {
+        machine.require("ticketing")?;
+    }
     let key = headers
         .get("idempotency-key")
         .and_then(|v| v.to_str().ok())
@@ -303,11 +307,11 @@ async fn book(
     if machine.audience != q.audience || machine.agent_id != q.agent_id {
         return Err(ApiError(StatusCode::CONFLICT, "PRICE_CONTEXT_CHANGED"));
     }
-    if request.direct_issue_intent
-        || q.search_original["bookable"] != true
-        || q.original["item1"]["bookable"] != true
+    let expected_bookable = !request.direct_issue_intent;
+    if q.search_original["bookable"] != expected_bookable
+        || q.original["item1"]["bookable"] != expected_bookable
     {
-        return Err(error("DIRECT_ISSUE_UNSUPPORTED"));
+        return Err(error("BOOKING_MODE_MISMATCH"));
     }
     if !request.tax_redemptions.is_empty() {
         return Err(error("TAX_REDEMPTION_UNSUPPORTED"));
@@ -341,7 +345,22 @@ async fn book(
         .ok_or(error("SUPPLIER_CONFIGURATION_ERROR"))?
         .transport
         .clone();
-    if !transport.hold_booking_enabled() {
+    if request.direct_issue_intent {
+        let (reserved,): (bool,) = sqlx::query_as("SELECT EXISTS(SELECT 1 FROM flight_bookings WHERE offer_id=$1 AND execution_mode='direct')").bind(q.offer_id).fetch_one(&mut *tx).await?;
+        if reserved {
+            return Err(ApiError(
+                StatusCode::CONFLICT,
+                "DIRECT_ISSUE_ALREADY_RESERVED",
+            ));
+        }
+        let (enabled,): (bool,) = sqlx::query_as("SELECT ticketing_enabled AND servicing_enabled FROM supplier_connections WHERE id=$1 FOR SHARE").bind(&q.supplier_id).fetch_one(&mut *tx).await?;
+        if state.environment != "test" || !transport.direct_issue_enabled() || !enabled {
+            return Err(ApiError(
+                StatusCode::FORBIDDEN,
+                "DIRECT_ISSUE_EXECUTION_DISABLED",
+            ));
+        }
+    } else if !transport.hold_booking_enabled() {
         return Err(ApiError(StatusCode::FORBIDDEN, "SUPPLIER_BOOKING_DISABLED"));
     }
     // The first SELECT may have waited on another RePrice/acceptance transaction.
@@ -355,9 +374,21 @@ async fn book(
     }
     let booking_id = Uuid::new_v4();
     let payload = json!({"uniqueTransID":q.original["item1"]["uniqueTransID"],"itemCodeRef":q.original["item1"]["itemCodeRef"],"priceCodeRef":q.original["item1"]["priceCodeRef"],"passengerInfoes":request.passenger_infoes,"taxRedemptions":[],"commissionOnTaxes":commission});
-    sqlx::query("INSERT INTO flight_bookings(id,client_id,offer_id,price_id,supplier_id,idempotency_key,request_hash,request,state) VALUES($1,$2,$3,$4,$5,$6,$7,$8,'pending')").bind(booking_id).bind(machine.client_id).bind(q.offer_id).bind(request.price_code_ref).bind(&q.supplier_id).bind(key).bind(hash).bind(&payload).execute(&mut *tx).await?;
+    sqlx::query("INSERT INTO flight_bookings(id,client_id,offer_id,price_id,supplier_id,idempotency_key,request_hash,request,state,execution_mode) VALUES($1,$2,$3,$4,$5,$6,$7,$8,'pending',$9)").bind(booking_id).bind(machine.client_id).bind(q.offer_id).bind(request.price_code_ref).bind(&q.supplier_id).bind(key).bind(hash).bind(&payload).bind(if request.direct_issue_intent {"direct"} else {"hold"}).execute(&mut *tx).await?;
     sqlx::query("INSERT INTO audit_events(actor_kind,actor_id,action,resource_kind,resource_id) VALUES('client',$1,'booking.dispatch_reserved','booking',$2)").bind(machine.client_id.to_string()).bind(booking_id.to_string()).execute(&mut *tx).await?;
     tx.commit().await?;
+    if request.direct_issue_intent {
+        return direct::dispatch(
+            state.pool.clone(),
+            transport,
+            timeout,
+            q,
+            booking_id,
+            machine.client_id,
+            payload,
+        )
+        .await;
+    }
     // Cancellation of the HTTP request must not discard a received supplier outcome.
     let pool = state.pool.clone();
     tokio::spawn(async move {

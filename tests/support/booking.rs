@@ -18,6 +18,8 @@ use std::{
 use tower::ServiceExt;
 use uuid::Uuid;
 struct Mock {
+    direct_calls: AtomicUsize,
+    direct_enabled: AtomicBool,
     report_calls: AtomicUsize,
     report_mode: AtomicUsize,
     recovery_report: AtomicBool,
@@ -35,6 +37,42 @@ struct Mock {
     fare: Mutex<Value>,
 }
 impl ReadSupplier for Mock {
+    fn direct_issue_enabled(&self) -> bool {
+        self.direct_enabled.load(Ordering::SeqCst)
+    }
+    fn book_direct<'a>(
+        &'a self,
+        payload: &'a Value,
+    ) -> std::pin::Pin<
+        Box<dyn std::future::Future<Output = Result<Value, SupplierError>> + Send + 'a>,
+    > {
+        Box::pin(async move {
+            self.direct_calls.fetch_add(1, Ordering::SeqCst);
+            *self.payload.lock().unwrap() = payload.clone();
+            if self.mode.load(Ordering::SeqCst) == 1 {
+                return Err(SupplierError::Timeout);
+            }
+            let tickets = payload["passengerInfoes"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .map(|p| json!({"passengerInfo":p,"ticketNumbers":["7792411762343"]}))
+                .collect::<Vec<_>>();
+            let mut body = json!({"item1":{"pnr":"TESTPN","bookingCodeRef":"direct-booking","uniqueTransID":payload["uniqueTransID"],"itemCodeRef":payload["itemCodeRef"],"priceCodeRef":payload["priceCodeRef"],"ticketCodeRef":"direct-ticket","ticketInfoes":tickets,"flightInfo":self.fare.lock().unwrap().clone()},"item2":{"isSuccess":true}});
+            match self.mode.load(Ordering::SeqCst) {
+                2 => body["item1"]["priceCodeRef"] = json!("WRONG"),
+                3 => body["item1"]["ticketInfoes"][0]["ticketNumbers"] = json!([]),
+                4 => {
+                    body["item1"]["ticketInfoes"][0]["passengerInfo"]["nameElement"]["lastName"] =
+                        json!("WRONG")
+                }
+                5 => body["item1"]["flightInfo"]["totalPrice"] = json!(1),
+                _ => {}
+            }
+            Ok(body)
+        })
+    }
+
     fn ticket_report<'a>(
         &'a self,
         transaction: &'a str,
@@ -42,7 +80,16 @@ impl ReadSupplier for Mock {
         Box<dyn std::future::Future<Output = Result<Value, SupplierError>> + Send + 'a>,
     > {
         Box::pin(async move {
-            assert_eq!(transaction, "shared-ref");
+            let direct = self.direct_calls.load(Ordering::SeqCst) > 0;
+            let saved = self.payload.lock().unwrap().clone();
+            assert_eq!(
+                transaction,
+                if direct {
+                    saved["uniqueTransID"].as_str().unwrap()
+                } else {
+                    "shared-ref"
+                }
+            );
             self.report_calls.fetch_add(1, Ordering::SeqCst);
             let mode = self.report_mode.load(Ordering::SeqCst);
             if mode == 9 {
@@ -57,6 +104,9 @@ impl ReadSupplier for Mock {
                 json!({"first":p["nameElement"]["firstName"],"last":p["nameElement"]["lastName"],"passengerType":p["passengerType"],"ticketNumbers":"7792411762343","pnr":"TESTPN","basePrice":f["basePrice"],"tax":f["taxes"],"ait":f["ait"],"totalPrice":f["totalPrice"],"secretExtra":"private-supplier-data"})
             }).collect::<Vec<_>>();
             let mut body = json!({"ticketInfo":{"status":"Issued","statusFor":"Ticket","pnr":"TESTPN","uniqueTransID":transaction,"itemCodeRef":"shared-ref","ticketingPrice":fare["totalPrice"],"agentEmail":"private-supplier-data","referenceLog":"private-supplier-data","markup":999},"passengerInfo":passengers,"serviceCharge":[{"internal":"private-supplier-data"}]});
+            if direct {
+                body["ticketInfo"]["itemCodeRef"] = saved["itemCodeRef"].clone();
+            }
             if self.recovery_report.load(Ordering::SeqCst) {
                 body["ticketInfo"]["isCompleted"] = json!(true);
                 body["ticketInfo"]["issueDate"] = json!("2026-09-11T10:00:00");
@@ -254,6 +304,8 @@ pub async fn verify(pool: &PgPool, token: &str, admin: &str) {
     let (request, fare, supplier) = quote(pool).await;
     let price = Uuid::parse_str(request["priceCodeRef"].as_str().unwrap()).unwrap();
     let mock = Arc::new(Mock {
+        direct_calls: AtomicUsize::new(0),
+        direct_enabled: AtomicBool::new(true),
         report_calls: AtomicUsize::new(0),
         report_mode: AtomicUsize::new(0),
         recovery_report: AtomicBool::new(false),
@@ -315,12 +367,12 @@ pub async fn verify(pool: &PgPool, token: &str, admin: &str) {
     bad["directIssueIntent"] = json!(true);
     assert_eq!(
         call(&app, token, "direct", bad).await.1["error"],
-        "DIRECT_ISSUE_UNSUPPORTED"
+        "FORBIDDEN"
     );
     sqlx::query("UPDATE flight_reprices SET original=jsonb_set(original,'{item1,bookable}','false') WHERE id=$1").bind(price).execute(pool).await.unwrap();
     assert_eq!(
         call(&app, token, "direct-fare", request.clone()).await.1["error"],
-        "DIRECT_ISSUE_UNSUPPORTED"
+        "BOOKING_MODE_MISMATCH"
     );
     sqlx::query("UPDATE flight_reprices SET original=jsonb_set(original,'{item1,bookable}','true'),accepted_at=NULL WHERE id=$1").bind(price).execute(pool).await.unwrap();
     assert_eq!(
@@ -694,6 +746,7 @@ pub async fn verify(pool: &PgPool, token: &str, admin: &str) {
     }
     mock.mode.store(0, Ordering::SeqCst);
     verify_ticketing(&app, pool, token, admin, &mock).await;
+    verify_direct(&app, pool, token, &mock).await;
     // Keep this larger booking suite from exhausting the following auth test's
     // 60/minute bucket; production rate-limit behavior is tested separately.
     let (client,): (Uuid,) = sqlx::query_as("SELECT client_id FROM flight_reprices WHERE id=$1")
@@ -1554,4 +1607,126 @@ async fn verify_recovery(
         .execute(pool)
         .await
         .unwrap();
+}
+
+async fn verify_direct(app: &Router, pool: &PgPool, token: &str, mock: &Arc<Mock>) {
+    sqlx::query("UPDATE api_clients SET permissions=ARRAY['search:read','booking','ticketing'],rate_limit_per_minute=1000").execute(pool).await.unwrap();
+    sqlx::query("UPDATE supplier_connections SET booking_enabled=true,ticketing_enabled=true,servicing_enabled=true").execute(pool).await.unwrap();
+    mock.report_mode.store(0, Ordering::SeqCst);
+    mock.recovery_report.store(false, Ordering::SeqCst);
+    let held_before = mock.calls.load(Ordering::SeqCst);
+    let issue_before = mock.issue_calls.load(Ordering::SeqCst);
+    for mode in 0..=5 {
+        let (mut request, mut fare, supplier) = quote(pool).await;
+        let price = Uuid::parse_str(request["priceCodeRef"].as_str().unwrap()).unwrap();
+        sqlx::query("UPDATE flight_reprices SET original=jsonb_set(original,'{item1,bookable}','false') WHERE id=$1").bind(price).execute(pool).await.unwrap();
+        sqlx::query("UPDATE flight_offers SET original=jsonb_set(original,'{bookable}','false') WHERE id=(SELECT offer_id FROM flight_reprices WHERE id=$1)").bind(price).execute(pool).await.unwrap();
+        fare["bookable"] = json!(false);
+        *mock.fare.lock().unwrap() = fare;
+        mock.mode.store(mode, Ordering::SeqCst);
+        assert_eq!(
+            call(app, token, "missing-direct-intent", request.clone())
+                .await
+                .0,
+            422
+        );
+        request["directIssueIntent"] = json!(true);
+        if mode == 0 {
+            mock.direct_enabled.store(false, Ordering::SeqCst);
+            assert_eq!(
+                call(app, token, "disabled-direct", request.clone()).await.0,
+                403
+            );
+            mock.direct_enabled.store(true, Ordering::SeqCst);
+            for environment in ["uat", "production"] {
+                let blocked = router(AppState {
+                    pool: pool.clone(),
+                    environment: environment.into(),
+                    db_timeout: Duration::from_secs(2),
+                    suppliers: Arc::new(HashMap::from([(
+                        supplier.clone(),
+                        ConfiguredSupplier {
+                            currency: Some("BDT".into()),
+                            transport: mock.clone(),
+                        },
+                    )])),
+                });
+                assert_eq!(
+                    call(&blocked, token, "live-direct", request.clone())
+                        .await
+                        .0,
+                    403
+                );
+            }
+            assert_eq!(mock.direct_calls.load(Ordering::SeqCst), 0);
+        }
+        let key = format!("direct-test-{mode}");
+        let before = mock.direct_calls.load(Ordering::SeqCst);
+        let (code, body) = call(app, token, &key, request.clone()).await;
+        assert_eq!(code, if mode == 0 { 200 } else { 202 }, "{body}");
+        assert_eq!(
+            call(app, token, &key, request.clone()).await,
+            (code, body.clone())
+        );
+        assert_eq!(mock.direct_calls.load(Ordering::SeqCst), before + 1);
+        let (id, state, execution): (Uuid, String, String) =
+            sqlx::query_as("SELECT id,state,execution_mode FROM flight_bookings WHERE price_id=$1")
+                .bind(price)
+                .fetch_one(pool)
+                .await
+                .unwrap();
+        assert_eq!(execution, "direct");
+        assert_eq!(
+            state,
+            if mode == 0 {
+                "issued"
+            } else {
+                "outcome_unknown"
+            }
+        );
+        let input = json!({"PNR":"TESTPN","BookingRefNumber":"TESTPN","BookingCodeRef":id,"UniqueTransID":request["uniqueTransID"],"PriceCodeRef":price,"ItemCodeRef":request["itemCodeRef"]});
+        let issue_result = issue_call(app, token, "never-issue-direct", input).await;
+        if mode != 1 {
+            assert_eq!(issue_result.1["error"], "DIRECT_ISSUE_ALREADY_RESERVED");
+        }
+        assert!(
+            sqlx::query("UPDATE flight_bookings SET execution_mode='hold' WHERE id=$1")
+                .bind(id)
+                .execute(pool)
+                .await
+                .is_err()
+        );
+        assert_eq!(mock.issue_calls.load(Ordering::SeqCst), issue_before);
+        if mode == 0 {
+            assert_eq!(body["item1"]["bookingCodeRef"], json!(id));
+            let (saved,):(Value,)=sqlx::query_as("SELECT public_response FROM flight_ticket_issues WHERE booking_id=$1 AND state='issued'").bind(id).fetch_one(pool).await.unwrap();
+            assert_eq!(saved, body);
+            assert_eq!(
+                super::call(
+                    app,
+                    "GET",
+                    &format!("/api/bookings/{id}/ticket"),
+                    Some(token),
+                    Value::Null
+                )
+                .await,
+                (200, body.clone())
+            );
+            let report = super::call(
+                app,
+                "GET",
+                &format!("/api/bookings/{id}/ticket/report"),
+                Some(token),
+                Value::Null,
+            )
+            .await;
+            assert_eq!(report.0, 200, "{report:?}");
+            let before = mock.direct_calls.load(Ordering::SeqCst);
+            let duplicate = call(app, token, "another-direct-key", request.clone()).await;
+            assert_ne!(duplicate.0, 200);
+            assert_eq!(mock.direct_calls.load(Ordering::SeqCst), before);
+        }
+    }
+    assert_eq!(mock.calls.load(Ordering::SeqCst), held_before);
+    mock.mode.store(0, Ordering::SeqCst);
 }
