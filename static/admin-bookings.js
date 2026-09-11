@@ -91,15 +91,17 @@ function node(tag, text, cls) {
 }
 async function list(append = false) {
   const resolved = el("view").value === "resolved";
+  const pendingCancel = el("view").value === "cancellation_pending";
+  const cancellations = pendingCancel || el("view").value === "cancellations";
   const body = await api(
     "/admin/bookings?resolved=" +
-      resolved +
+      resolved + "&cancellations=" + cancellations + "&cancellation_pending=" + pendingCancel +
       (append && cursor ? "&before=" + encodeURIComponent(cursor) : ""),
   );
-  el("queueTitle").textContent = resolved
+  el("queueTitle").textContent = cancellations ? "Cancellation status" : resolved
     ? "সমাধান নথিভুক্ত"
     : "যাচাইয়ের অপেক্ষায়";
-  el("queueDescription").textContent = resolved
+  el("queueDescription").textContent = cancellations ? "Cancel-এর ফল ও সংরক্ষিত যাচাইয়ের প্রমাণ দেখুন। অনিশ্চিত ফল আলাদাভাবে চিহ্নিত আছে।" : resolved
     ? "নথিভুক্ত সিদ্ধান্ত ও তার প্রমাণ দেখতে একটি booking নির্বাচন করুন।"
     : "Supplier থেকে নিশ্চিত ফল না পাওয়া bookingগুলো এখানে দেখুন।";
   if (!append) el("bookings").replaceChildren();
@@ -113,7 +115,7 @@ async function list(append = false) {
       "booking",
     );
     button.append(
-      node("span", labels[b.state] + " · " + b.supplier),
+      node("span", (b.cancellationState ? "Cancel: " + labels[b.cancellationState] : labels[b.state]) + " · " + b.supplier),
       node("span", new Date(b.createdAt).toLocaleString("bn-BD")),
     );
     button.onclick = () => action(() => open(b.id));
@@ -150,6 +152,22 @@ function render() {
     facts.append(node("dt", name), node("dd", value));
   }
   d.append(facts);
+  if (b.cancellation) {
+    const c = b.cancellation;
+    d.append(node("h2", "Cancellation"));
+    d.append(node("p", "Cancel: " + (labels[c.state] || c.state)));
+    d.append(node("p", c.requiresReview ? "Cancel-এর ফল নিশ্চিত নয়। Supplier-এর নিশ্চিত তথ্য নিয়ে পর্যালোচনা প্রয়োজন।" : "Cancel response যাচাই করে সংরক্ষিত হয়েছে।", "notice"));
+    d.append(node("p", "উপরের booking তথ্য মূল Hold-এর রেকর্ড। Cancellation-এর ফল আলাদাভাবে দেখানো হচ্ছে।", "muted"));
+    const refresh = node("button", "সংরক্ষিত তথ্য আপডেট করুন", "secondary");
+    refresh.onclick = () => action(() => open(b.id));
+    d.append(refresh, node("h2", "Reconciliation evidence"));
+    for (const e of c.evidence) {
+      const entry = node("p", new Date(e.checkedAt).toLocaleString("bn-BD") + " · " + (e.verifiedCancelled ? "PNR-এ Cancelled এবং references মিলেছে" : e.responseAvailable ? "Response আছে; cancellation নিশ্চিত নয়" : "Supplier response পাওয়া যায়নি"));
+      d.append(entry);
+    }
+    if (!c.evidence.length) d.append(node("p", "এখনও reconciliation evidence সংরক্ষিত হয়নি।", "muted"));
+    return;
+  }
   const recheck = node("button", "Status আবার চেক করুন", "secondary");
   recheck.onclick = () =>
     action(async () => {

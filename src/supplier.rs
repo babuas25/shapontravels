@@ -626,6 +626,11 @@ mod tests {
             Duration::from_secs(1),
         )
         .unwrap();
+        assert!(!adapter.cancellation_enabled());
+        assert_eq!(
+            adapter.cancel_held(&Value::Null).await.unwrap_err(),
+            SupplierError::Configuration
+        );
         assert!(!adapter.direct_issue_enabled());
         // Default denial returns without authentication or an HTTP request.
         assert_eq!(

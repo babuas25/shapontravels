@@ -1100,3 +1100,17 @@ User explicitly requested same-airline alternative selection through the step be
 - Pushed application commit `0200efc`; [workflow 34566216193](https://github.com/babuas25/shapontravels/actions/runs/34566216193) passed Rust/PostgreSQL checks, Ubuntu release build and production deployment.
 - Local working backup archive verified and migration 19 confirmed successful. Production workflow completed backup → migration 0019 → grants → restart → health checks. Independent public live/readiness returned 200/ok and 200/ready; OpenAPI serves the new Book receipt description.
 - No real supplier Book/Issue test occurred. Real Direct Issue remains disabled. Earlier local-only statements describe the implementation before this authorized release; completion documentation is committed with `[skip ci]`.
+
+### Held Cancel implementation — 2026-09-11
+
+- User authorized the proposed Cancel implementation with mock/offline validation and no real booking cancellation. Added Cancel, saved cancellation status and read-only reconciliation endpoints with booking/cancellation permissions and ownership checks.
+- Migration 0020 adds durable immutable cancellation reservations, append-only PNR observations and mutual Issue/Cancel exclusion. Cancellation requires a verified held PNR; direct, issued and uncertain Issue bookings cannot cancel. Unknown Cancel results never permit another mutation. Historical Hold retrieval includes X-Cancellation-State.
+- Real cancellation remains disabled in all supplier adapters. Only test-environment offline transports can execute; no real Book/Issue/Cancel request was sent. Reconciliation records evidence for manual review and does not promote or retry an uncertain result.
+- This increment is local; migration 0020 is tested only in disposable databases. Working/production migration, commit/push and deployment are pending. See [Cancel contract](docs/CANCELLATION_API.md).
+
+Final validation: 60 regular tests passed; the complete disposable-database suite including migration 0020 and concurrent Issue/Cancel passed in 39.09 seconds. Clippy with warnings denied, formatting and diff checks passed. All task-created test databases were removed.
+
+### Cancellation Admin review and release authorization — 2026-09-11
+
+- User authorized Admin cancellation review plus migration 0020, commit/push and deployment. Added all/uncertain cancellation queues, independent cancellation status and private-data-minimized evidence summaries in the Admin panel. Viewing records performs no supplier mutation or read.
+- Release follows backup → migrate → deploy, with real cancellation and Direct Issue disabled.

@@ -64,7 +64,7 @@ pub(super) async fn dispatch(
                 .execute(&mut *tx).await?;
         }
         sqlx::query("INSERT INTO audit_events(actor_kind,action,resource_kind,resource_id,metadata) VALUES('system','booking.direct_outcome','booking',$1,$2)").bind(id.to_string()).bind(json!({"state":status,"late":written==0})).execute(&mut *tx).await?;
-        let saved = sqlx::query_as::<_,Booking>("SELECT id,public_ref,request_hash,state,public_response,(SELECT state FROM flight_ticket_issues WHERE booking_id=$1) AS ticket_state FROM flight_bookings WHERE id=$1").bind(id).fetch_one(&mut *tx).await?;
+        let saved = sqlx::query_as::<_,Booking>("SELECT id,public_ref,request_hash,state,public_response,(SELECT state FROM flight_ticket_issues WHERE booking_id=$1) AS ticket_state,(SELECT state FROM flight_cancellations c WHERE c.booking_id=flight_bookings.id) AS cancellation_state FROM flight_bookings WHERE id=$1").bind(id).fetch_one(&mut *tx).await?;
         tx.commit().await?;
         Ok::<_,sqlx::Error>(saved)
     }).await.map_err(|_| ApiError(StatusCode::SERVICE_UNAVAILABLE,"DIRECT_ISSUE_OUTCOME_UNKNOWN"))?.map(reply).map_err(ApiError::from)

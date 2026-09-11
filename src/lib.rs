@@ -118,6 +118,7 @@ pub fn router_with_search_limits(
     doc.merge(search::SearchDoc::openapi());
     doc.merge(reprice::RepriceDoc::openapi());
     doc.merge(booking::BookingDoc::openapi());
+    doc.merge(booking::cancellation::CancellationDoc::openapi());
     doc.merge(booking::ticketing::TicketDoc::openapi());
     doc.merge(booking::report::ReportDoc::openapi());
     doc.merge(booking::ticket_reconciliation::ReconciliationDoc::openapi());

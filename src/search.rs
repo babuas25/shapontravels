@@ -20,6 +20,14 @@ use uuid::Uuid;
 
 type ReadFuture<'a> = Pin<Box<dyn Future<Output = Result<Value, SupplierError>> + Send + 'a>>;
 pub trait ReadSupplier: Send + Sync {
+    /// Offline only; real adapters inherit unconditional cancellation denial.
+    fn cancellation_enabled(&self) -> bool {
+        false
+    }
+    fn cancel_held<'a>(&'a self, _payload: &'a Value) -> ReadFuture<'a> {
+        Box::pin(async { Err(SupplierError::Configuration) })
+    }
+
     /// Offline capability only. Real adapters intentionally inherit this denial.
     fn direct_issue_enabled(&self) -> bool {
         false

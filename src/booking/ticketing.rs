@@ -285,6 +285,14 @@ async fn issue(
         .await?;
     if let Some(old) = sqlx::query_as::<_,Issue>("SELECT id,booking_id,request_hash,CASE WHEN EXISTS(SELECT 1 FROM flight_ticket_verifications v WHERE v.issue_id=flight_ticket_issues.id) THEN 'issued' ELSE state END AS state,COALESCE((SELECT public_response FROM flight_ticket_verifications v WHERE v.issue_id=flight_ticket_issues.id),public_response) AS public_response FROM flight_ticket_issues WHERE client_id=$1 AND (idempotency_key=$2 OR booking_id=$3) ORDER BY (idempotency_key=$2) DESC LIMIT 1").bind(machine.client_id).bind(&key).bind(id).fetch_optional(&mut *tx).await? { return replay(old,&hash,id); }
     let (held,verified,preflight,fresh):(bool,bool,Option<Value>,bool) = sqlx::query_as("SELECT state='held',last_reconciliation_verified,last_reconciliation,reconciled_at>clock_timestamp()-INTERVAL '30 seconds' FROM flight_bookings WHERE id=$1 FOR UPDATE").bind(id).fetch_one(&mut *tx).await?;
+    let (cancelled,): (bool,) =
+        sqlx::query_as("SELECT EXISTS(SELECT 1 FROM flight_cancellations WHERE booking_id=$1)")
+            .bind(id)
+            .fetch_one(&mut *tx)
+            .await?;
+    if cancelled {
+        return Err(conflict("CANCELLATION_ALREADY_RESERVED"));
+    }
     let preflight = preflight.ok_or(conflict("PNR_VERIFICATION_REQUIRED"))?;
     if !held
         || !verified

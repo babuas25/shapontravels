@@ -18,6 +18,9 @@ use std::{
 use tower::ServiceExt;
 use uuid::Uuid;
 struct Mock {
+    cancel_calls: AtomicUsize,
+    cancel_enabled: AtomicBool,
+    cancel_mode: AtomicUsize,
     direct_calls: AtomicUsize,
     direct_enabled: AtomicBool,
     report_calls: AtomicUsize,
@@ -37,6 +40,31 @@ struct Mock {
     fare: Mutex<Value>,
 }
 impl ReadSupplier for Mock {
+    fn cancellation_enabled(&self) -> bool {
+        self.cancel_enabled.load(Ordering::SeqCst)
+    }
+    fn cancel_held<'a>(
+        &'a self,
+        payload: &'a Value,
+    ) -> std::pin::Pin<
+        Box<dyn std::future::Future<Output = Result<Value, SupplierError>> + Send + 'a>,
+    > {
+        Box::pin(async move {
+            self.cancel_calls.fetch_add(1, Ordering::SeqCst);
+            if self.cancel_mode.load(Ordering::SeqCst) == 1 {
+                return Err(SupplierError::Timeout);
+            }
+            let mut body = json!({"item1":{"isCancel":true,"uniqueTransID":payload["UniqueTransID"],"itemCodeRef":payload["ItemCodeRef"],"priceCodeRef":payload["PriceCodeRef"],"bookingCodeRef":payload["BookingCodeRef"]},"item2":{"isSuccess":true}});
+            match self.cancel_mode.load(Ordering::SeqCst) {
+                2 => body["item1"]["bookingCodeRef"] = json!("WRONG"),
+                3 => body["item1"]["isCancel"] = json!(false),
+                4 => body["item1"]["netRefund"] = json!(100),
+                _ => {}
+            }
+            Ok(body)
+        })
+    }
+
     fn direct_issue_enabled(&self) -> bool {
         self.direct_enabled.load(Ordering::SeqCst)
     }
@@ -197,6 +225,10 @@ impl ReadSupplier for Mock {
                 6 => response["item1"]["lastTicketTime"] = json!("01/01/2000 00:00:00"),
                 7 => response["item1"]["status"] = json!("Created"),
                 8 => response["item1"]["ticketNumbers"] = json!(["7792411762343"]),
+                11 => {
+                    response["item1"]["status"] = json!("Cancelled");
+                    response["item1"]["uniqueTransID"] = payload["UniqueTransID"].clone();
+                }
                 9 => response["item1"]["status"] = json!("Ticketed"),
                 10 => {
                     response["item1"]["status"] = json!("Ticketed");
@@ -304,6 +336,9 @@ pub async fn verify(pool: &PgPool, token: &str, admin: &str) {
     let (request, fare, supplier) = quote(pool).await;
     let price = Uuid::parse_str(request["priceCodeRef"].as_str().unwrap()).unwrap();
     let mock = Arc::new(Mock {
+        cancel_calls: AtomicUsize::new(0),
+        cancel_enabled: AtomicBool::new(true),
+        cancel_mode: AtomicUsize::new(0),
         direct_calls: AtomicUsize::new(0),
         direct_enabled: AtomicBool::new(true),
         report_calls: AtomicUsize::new(0),
@@ -747,6 +782,7 @@ pub async fn verify(pool: &PgPool, token: &str, admin: &str) {
     mock.mode.store(0, Ordering::SeqCst);
     verify_ticketing(&app, pool, token, admin, &mock).await;
     verify_direct(&app, pool, token, &mock).await;
+    verify_cancellation(&app, pool, token, admin, &mock).await;
     // Keep this larger booking suite from exhausting the following auth test's
     // 60/minute bucket; production rate-limit behavior is tested separately.
     let (client,): (Uuid,) = sqlx::query_as("SELECT client_id FROM flight_reprices WHERE id=$1")
@@ -1729,4 +1765,208 @@ async fn verify_direct(app: &Router, pool: &PgPool, token: &str, mock: &Arc<Mock
     }
     assert_eq!(mock.calls.load(Ordering::SeqCst), held_before);
     mock.mode.store(0, Ordering::SeqCst);
+}
+
+async fn cancel_call(app: &Router, token: &str, key: &str, input: Value) -> (u16, Value) {
+    let r = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri("/api/Cancel")
+                .header("authorization", format!("Bearer {token}"))
+                .header("content-type", "application/json")
+                .header("idempotency-key", key)
+                .body(Body::from(input.to_string()))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    (
+        r.status().as_u16(),
+        serde_json::from_slice(&r.into_body().collect().await.unwrap().to_bytes()).unwrap(),
+    )
+}
+async fn verify_cancellation(
+    app: &Router,
+    pool: &PgPool,
+    token: &str,
+    admin: &str,
+    mock: &Arc<Mock>,
+) {
+    mock.mode.store(0, Ordering::SeqCst);
+    mock.pnr_mode.store(0, Ordering::SeqCst);
+    for mode in 0..=4 {
+        let (request, fare, supplier) = quote(pool).await;
+        *mock.fare.lock().unwrap() = fare;
+        let (code, held) = call(app, token, &format!("cancel-hold-{mode}"), request.clone()).await;
+        assert_eq!(code, 200, "{held}");
+        let id = Uuid::parse_str(held["item1"]["bookingCodeRef"].as_str().unwrap()).unwrap();
+        let input = json!({"PNR":held["item1"]["pnr"],"BookingRefNumber":held["item1"]["pnr"],"BookingCodeRef":id,"UniqueTransID":request["uniqueTransID"],"PriceCodeRef":request["priceCodeRef"],"ItemCodeRef":request["itemCodeRef"]});
+        if mode == 0 {
+            assert_eq!(
+                cancel_call(app, token, "cancel-denied", input.clone())
+                    .await
+                    .0,
+                403
+            );
+            sqlx::query("UPDATE api_clients SET permissions=ARRAY['search:read','booking','ticketing','cancellation']").execute(pool).await.unwrap();
+            mock.cancel_enabled.store(false, Ordering::SeqCst);
+            assert_eq!(
+                cancel_call(app, token, "cancel-disabled", input.clone())
+                    .await
+                    .0,
+                403
+            );
+            mock.cancel_enabled.store(true, Ordering::SeqCst);
+            for environment in ["uat", "production"] {
+                let blocked = router(AppState {
+                    pool: pool.clone(),
+                    environment: environment.into(),
+                    db_timeout: Duration::from_secs(2),
+                    suppliers: Arc::new(HashMap::from([(
+                        supplier.clone(),
+                        ConfiguredSupplier {
+                            currency: Some("BDT".into()),
+                            transport: mock.clone(),
+                        },
+                    )])),
+                });
+                assert_eq!(
+                    cancel_call(&blocked, token, "cancel-live", input.clone())
+                        .await
+                        .0,
+                    403
+                );
+            }
+            let (issued_id,): (Uuid,) = sqlx::query_as(
+                "SELECT booking_id FROM flight_ticket_issues WHERE state='issued' LIMIT 1",
+            )
+            .fetch_one(pool)
+            .await
+            .unwrap();
+            let (issued_input,):(Value,)=sqlx::query_as("SELECT jsonb_build_object('PNR',b.pnr,'BookingRefNumber',b.pnr,'BookingCodeRef',b.id,'UniqueTransID',o.search_id,'PriceCodeRef',b.price_id,'ItemCodeRef',b.offer_id) FROM flight_bookings b JOIN flight_offers o ON o.id=b.offer_id WHERE b.id=$1").bind(issued_id).fetch_one(pool).await.unwrap();
+            let denied = cancel_call(app, token, "cancel-issued", issued_input).await;
+            assert_eq!(denied.0, 409);
+            let mut bad = input.clone();
+            bad["PriceCodeRef"] = json!(Uuid::new_v4());
+            assert_eq!(cancel_call(app, token, "bad-reference", bad).await.0, 422);
+            assert_eq!(mock.cancel_calls.load(Ordering::SeqCst), 0);
+        }
+        mock.cancel_mode.store(mode, Ordering::SeqCst);
+        let key = format!("cancel-{mode}");
+        let before = mock.cancel_calls.load(Ordering::SeqCst);
+        let outcome = cancel_call(app, token, &key, input.clone()).await;
+        assert_eq!(outcome.0, if mode == 0 { 200 } else { 202 }, "{outcome:?}");
+        assert_eq!(cancel_call(app, token, &key, input.clone()).await, outcome);
+        assert_eq!(
+            cancel_call(app, token, "another-cancel-key", input.clone()).await,
+            outcome
+        );
+        assert_eq!(mock.cancel_calls.load(Ordering::SeqCst), before + 1);
+        assert_eq!(
+            super::call(
+                app,
+                "GET",
+                &format!("/api/bookings/{id}/cancellation"),
+                Some(token),
+                Value::Null
+            )
+            .await,
+            outcome
+        );
+        let issues = mock.issue_calls.load(Ordering::SeqCst);
+        let denied = issue_call(app, token, &format!("issue-after-cancel-{mode}"), input).await;
+        assert_eq!(denied.1["error"], "CANCELLATION_ALREADY_RESERVED");
+        assert_eq!(mock.issue_calls.load(Ordering::SeqCst), issues);
+        mock.pnr_mode.store(11, Ordering::SeqCst);
+        let evidence = super::call(
+            app,
+            "POST",
+            &format!("/api/bookings/{id}/cancellation/reconcile"),
+            Some(token),
+            Value::Null,
+        )
+        .await;
+        assert_eq!(evidence.0, 200, "{evidence:?}");
+        assert_eq!(evidence.1["dispatchAllowed"], false);
+        assert_eq!(evidence.1["verifiedCancelled"], true);
+        let detail = super::call(
+            app,
+            "GET",
+            &format!("/admin/bookings/{id}"),
+            Some(admin),
+            Value::Null,
+        )
+        .await;
+        assert_eq!(detail.0, 200);
+        assert_eq!(
+            detail.1["cancellation"]["evidence"][0]["verifiedCancelled"],
+            true
+        );
+        assert!(detail.1["cancellation"].get("request").is_none());
+        assert!(detail.1["cancellation"].get("original_response").is_none());
+        let queue = super::call(
+            app,
+            "GET",
+            "/admin/bookings?cancellations=true",
+            Some(admin),
+            Value::Null,
+        )
+        .await;
+        assert_eq!(queue.0, 200);
+        assert!(
+            queue.1["items"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .any(|b| b["id"] == json!(id))
+        );
+        assert_eq!(
+            super::call(
+                app,
+                "GET",
+                "/admin/bookings?cancellations=true",
+                Some(token),
+                Value::Null
+            )
+            .await
+            .0,
+            401
+        );
+
+        mock.pnr_mode.store(0, Ordering::SeqCst);
+        assert_eq!(mock.cancel_calls.load(Ordering::SeqCst), before + 1);
+        assert!(
+            sqlx::query("DELETE FROM flight_cancellations WHERE booking_id=$1")
+                .bind(id)
+                .execute(pool)
+                .await
+                .is_err()
+        );
+        assert!(
+            sqlx::query("UPDATE flight_cancellations SET state='pending' WHERE booking_id=$1")
+                .bind(id)
+                .execute(pool)
+                .await
+                .is_err()
+        );
+    }
+    let (request, fare, _) = quote(pool).await;
+    *mock.fare.lock().unwrap() = fare;
+    mock.cancel_mode.store(0, Ordering::SeqCst);
+    mock.issue_mode.store(0, Ordering::SeqCst);
+    let (_, held) = call(app, token, "cancel-issue-race-hold", request.clone()).await;
+    let id = held["item1"]["bookingCodeRef"].clone();
+    let input = json!({"PNR":held["item1"]["pnr"],"BookingRefNumber":held["item1"]["pnr"],"BookingCodeRef":id,"UniqueTransID":request["uniqueTransID"],"PriceCodeRef":request["priceCodeRef"],"ItemCodeRef":request["itemCodeRef"]});
+    let before = mock.cancel_calls.load(Ordering::SeqCst) + mock.issue_calls.load(Ordering::SeqCst);
+    let (cancel, issue) = tokio::join!(
+        cancel_call(app, token, "race-cancel", input.clone()),
+        issue_call(app, token, "race-issue", input)
+    );
+    assert!(cancel.0 == 200 || issue.0 == 200, "{cancel:?} {issue:?}");
+    assert_eq!(
+        mock.cancel_calls.load(Ordering::SeqCst) + mock.issue_calls.load(Ordering::SeqCst),
+        before + 1
+    );
 }
