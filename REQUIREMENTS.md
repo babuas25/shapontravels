@@ -1094,3 +1094,9 @@ User explicitly requested same-airline alternative selection through the step be
 ### Direct Issue release authorization — 2026-09-11
 
 - User authorized continuing the proposed backup, migration 0019, git push and deployment sequence. The local working database was privately backed up, its archive checked, and migration 0019 applied successfully. Production release follows the established backup → migrate → deploy workflow. Real Direct Issue execution stays disabled; no supplier mutation test is authorized or performed.
+
+### Direct Issue release completed — 2026-09-11
+
+- Pushed application commit `0200efc`; [workflow 34566216193](https://github.com/babuas25/shapontravels/actions/runs/34566216193) passed Rust/PostgreSQL checks, Ubuntu release build and production deployment.
+- Local working backup archive verified and migration 19 confirmed successful. Production workflow completed backup → migration 0019 → grants → restart → health checks. Independent public live/readiness returned 200/ok and 200/ready; OpenAPI serves the new Book receipt description.
+- No real supplier Book/Issue test occurred. Real Direct Issue remains disabled. Earlier local-only statements describe the implementation before this authorized release; completion documentation is committed with `[skip ci]`.
