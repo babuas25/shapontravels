@@ -2,7 +2,7 @@
 
 Frontend follow-up (2026-09-14): the sibling ShoponTravels frontend now implements commission settings and client tier controls inside API Management. Migration 0023 adds managed-client eligibility and identity linking. See [API Management](API_MANAGEMENT.md). Earlier statements below describe the original backend-only increment; frontend booking-engine integration and settlement remain separate.
 
-Implemented locally on 2026-09-14. Migrations `0021_b2b_tiers.sql` and `0022_tier_share_policy.sql` are required. This feature does not enable supplier execution, API Management eligibility, payments, wallets or settlements.
+Backend released on 2026-09-14 as `44fc47d`, including migrations `0021_b2b_tiers.sql` and `0022_tier_share_policy.sql`; local working and production migration readiness are verified. See [release evidence](evidence/API_MANAGEMENT_RELEASE_2026-09-14.md). Historical local-only verification notes below describe the implementation stage. This feature does not enable supplier execution, API Management eligibility, payments, wallets or settlements.
 
 ## Business rule
 

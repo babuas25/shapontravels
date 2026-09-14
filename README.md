@@ -62,6 +62,10 @@ These tests run locally and never call production suppliers or issue tickets.
 
 See [Swagger walkthrough and API contract](docs/MARKUP_API.md). Create a draft, activate it by ID/version, and use list/get/edit/status endpoints under the `Markup rules` Swagger group. Same-scope active duplicates return 409.
 
+## B2B tiers and API Management
+
+[Tier pricing](docs/B2B_TIERS.md) and [managed API access](docs/API_MANAGEMENT.md) were released on 2026-09-14 as `44fc47d`, including migrations 0021–0023. Commercial documentation excludes Admin definitions, which require a human Admin session. [Release verification](docs/evidence/API_MANAGEMENT_RELEASE_2026-09-14.md) records successful CI, database backups/migrations and production health/authentication checks. The sibling frontend remains committed locally and unpushed at the user's instruction; its production bridge and booking-price integration remain separate work.
+
 ## Initial public Search
 
 `POST /api/Search` and `POST /api/FareRules` now use machine tokens. [Setup, examples and initial-release limits](docs/SEARCH_API.md). Activate your own markup rule and selected supplier Search controls before testing. Search now selects the lowest original supplier total for conservatively equivalent fares before markup; equal totals prefer Takeoff, Firsttrip, Triplover. Summary counts, airline/stops filters and net selling-price ranges now derive from retained offers. Broader equivalence and complex-fare coverage remain partial. Hold Book/status/reconciliation and UAT held-ticket Issue exist; [Direct Issue](docs/DIRECT_ISSUE.md) is deployed with real execution disabled; [held cancellation](docs/CANCELLATION_API.md) is deployed with real execution disabled.

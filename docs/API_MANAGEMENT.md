@@ -1,6 +1,6 @@
 # API Management integration
 
-Implemented locally on 2026-09-14 with the sibling `shopontravels` Next.js/Clerk frontend. Migrations 0021–0023 are required. Deployment and working/production database migration remain pending.
+Backend released on 2026-09-14 as `44fc47d`, with migrations 0021–0023 applied to the local working and production databases. The sibling `shopontravels` Next.js/Clerk frontend is committed locally as `7caaf8c`; the user explicitly instructed not to push it. Frontend deployment and production bridge configuration remain deferred. See [release verification](evidence/API_MANAGEMENT_RELEASE_2026-09-14.md). Historical local-verification notes below describe the earlier implementation stage.
 
 ## Contract
 

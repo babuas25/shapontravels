@@ -1174,3 +1174,12 @@ Final validation: 60 regular tests passed; the complete disposable-database suit
 - Fresh verification passed: 64 regular Rust tests, formatting, all-target Clippy, full disposable PostgreSQL integration (41.11 seconds), five deployment-helper tests and diff checks. The disposable database was removed after verification.
 - Frontend full ESLint, TypeScript, production build, route/audit/network checks and actual-component desktop/mobile browser checks passed. Existing API Management authority/isolation checks are now included in frontend CI.
 - The legacy frontend Supabase security script stopped on missing configuration before any remote call; it is not included in the passed checks. Live Supabase remains disconnected and untouched. Production bridge credentials and deployment verification remain subsequent release steps.
+- Subsequent user instruction: do not push the frontend project. Frontend commit `7caaf8c` stays local; frontend deployment and Vercel changes are deferred. Continue only the already-started backend release verification.
+
+### API Management backend release completed — 2026-09-14
+
+- Backend application `44fc47d` pushed to main and deployed through [workflow 34845637264](https://github.com/babuas25/shapontravels/actions/runs/34845637264). Rust/PostgreSQL checks, Ubuntu release build and VPS activation all succeeded.
+- Local working database privately backed up and archive verified before migrations 0021–0023; all three are recorded successful. Production completed the established backup → migrate → grants → restart → readiness workflow.
+- Independent HTTPS checks returned 200 for live/readiness/Swagger/OpenAPI. Production readiness verifies migration checksums through 23. Commercial docs include tier-pricing routes and exclude Admin definitions; new protected Admin and pricing routes reject anonymous requests with 401.
+- Frontend remains local at `7caaf8c`, with no push/deployment or Vercel configuration change. Live Supabase remains untouched; no real supplier Book/Issue/Cancel or private UAT data transfer occurred. Authenticated frontend production integration is deferred, and frontend booking calculations still use the existing engine.
+- [Release evidence](docs/evidence/API_MANAGEMENT_RELEASE_2026-09-14.md). Prior local-only backend notes are superseded by this release; documentation-only follow-up uses `[skip ci]` and the deployed application stays `44fc47d`.
