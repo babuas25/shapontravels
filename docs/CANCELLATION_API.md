@@ -39,3 +39,11 @@ The Admin reconciliation panel includes all cancellation records and a separate 
 Application commit `4b8bf1acae16fe51291d0643de54343920bcdf13` is deployed. [Workflow 34569830412](https://github.com/babuas25/shapontravels/actions/runs/34569830412) passed all checks, release build and production activation. Local backup archive was verified before migration 20 (successful); production completed the required backup → migration → grants → restart → health workflow. Independent production live/readiness returned 200/ok and 200/ready. OpenAPI serves Cancel and the Admin shell serves cancellation filters; unauthenticated Admin queue access returns 401.
 
 Validation included 60 regular tests, the complete disposable-database suite (43.79 seconds), Clippy, formatting, JavaScript syntax/render checks and five deployment-script tests. The task test database was removed. Real cancellation and Direct Issue remain disabled; no real supplier mutation was tested.
+
+## Explicit UAT cancellation verification — 2026-09-11
+
+The user subsequently authorized cancelling an existing UAT hold, creating a new hold only if needed. The retained BG multicity booking was used, so no new Book or Issue occurred. Its database was privately backed up before migrating and testing. The supplier PNR returned Created with matching references and no tickets; that observed held-status compatibility is accepted only for explicitly authorized Triplover UAT cancellation.
+
+An explicit per-instance `enable_authorized_uat_cancellation` opt-in now validates both exact HTTPS Triplover UAT hosts. Normal server construction remains disabled; production is blocked. The local opt-in runner sent one Cancel through the public API and durable reservation. The supplier returned success and `isCancel=true`; reference validation, receipt persistence and retrieval succeeded (HTTP 200, cancelled). Both subsequent PNR checks failed supplier validation (HTTP 502), so independent Cancelled PNR status is unconfirmed. A read-only observation was retained; no second Cancel was sent.
+
+This supersedes the earlier blanket offline-only implementation description. The opt-in changes and runner remain local, not deployed. Private evidence is retained locally; raw payloads are not committed.

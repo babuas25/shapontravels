@@ -51,6 +51,7 @@ struct Offer {
     request: Value,
     currency: String,
     valid: bool,
+    tier_pricing: Option<Value>,
 }
 #[utoipa::path(post,path="/api/Reprice",tag="Flights",security(("machine_token"=[])),request_body=RepriceRequest,responses((status=200,body=Object,description="Versioned selling response. X-Pricing-Version identifies the revision; explicitly accept its priceCodeRef before future booking."),(status=404,description="Unknown or foreign offer"),(status=409,description="FARE_UNAVAILABLE: choose another offer; NEW_SEARCH_REQUIRED: search again"),(status=410,description="Expired offer or supplier session: search again"),(status=422,description="Invalid references or unsupported pricing"),(status=502,description="Supplier failure"),(status=504,description="Supplier timeout")))]
 async fn reprice(
@@ -63,7 +64,7 @@ async fn reprice(
         Uuid::parse_str(&request.item_code_ref).map_err(|_| error("INVALID_OFFER_REFERENCE"))?;
     // Serialize versions of one offer; acceptance takes the same lock.
     let mut tx = state.pool.begin().await?;
-    let row:Option<Offer>=sqlx::query_as("SELECT o.search_id,o.supplier_id,o.availability_epoch,o.original,o.selling,o.reference_map,s.request,s.currency,(o.expires_at>clock_timestamp() AND s.expires_at>clock_timestamp()) AS valid FROM flight_offers o JOIN flight_searches s ON s.id=o.search_id WHERE o.id=$1 AND o.client_id=$2 FOR UPDATE OF o")
+    let row:Option<Offer>=sqlx::query_as("SELECT o.search_id,o.supplier_id,o.availability_epoch,o.original,o.selling,o.tier_pricing,o.reference_map,s.request,s.currency,(o.expires_at>clock_timestamp() AND s.expires_at>clock_timestamp()) AS valid FROM flight_offers o JOIN flight_searches s ON s.id=o.search_id WHERE o.id=$1 AND o.client_id=$2 FOR UPDATE OF o")
  .bind(id).bind(machine.client_id).fetch_optional(&mut *tx).await?;
     let Some(row) = row else {
         return Err(crate::cleanup::missing_offer_error(&mut *tx, id, machine.client_id).await?);
@@ -183,6 +184,13 @@ async fn reprice(
     if decimal(&fare["taxes"])? != decimal(&fare["bookingComponents"][0]["taxes"])? {
         return Err(error("SUPPLIER_PRICING_COVERAGE_UNSUPPORTED"));
     }
+    let tier_pricing = crate::tier::snapshot(
+        fare,
+        &selling_fare,
+        machine.tier,
+        machine.commission_share_percent,
+        &row.currency,
+    )?;
     let revision = Uuid::new_v4();
     let mut references = row
         .reference_map
@@ -206,6 +214,7 @@ async fn reprice(
     // A platform markup change can change selling fare even if supplier fare did not change.
     selling["item1"]["isPriceChanged"] = json!(
         fare["isPriceChanged"] == true
+            || row.tier_pricing.as_ref().map(|v| &v["payable"]) != Some(&tier_pricing["payable"])
             || decimal(&selling["item1"]["totalPrice"])? != decimal(&row.selling["totalPrice"])?
     );
     bind_references(&mut selling, &mut references);
@@ -232,8 +241,8 @@ async fn reprice(
             .bind(id)
             .fetch_one(&mut *tx)
             .await?;
-    sqlx::query("INSERT INTO flight_reprices(id,offer_id,client_id,version,original,selling,reference_map,rule_id,rule_version,audience,agent_id,currency,selected_directions,expires_at) SELECT $1,id,client_id,$2,$3,$4,$5,$6,$7,$8,$9,$10,$12,expires_at FROM flight_offers WHERE id=$11")
- .bind(revision).bind(version).bind(original).bind(&selling).bind(json!(references)).bind(record.id).bind(record.version).bind(&machine.audience).bind(machine.agent_id).bind(&row.currency).bind(id).bind(selection).execute(&mut *tx).await?;
+    sqlx::query("INSERT INTO flight_reprices(id,offer_id,client_id,version,original,selling,reference_map,rule_id,rule_version,audience,agent_id,currency,selected_directions,tier_pricing,expires_at) SELECT $1,id,client_id,$2,$3,$4,$5,$6,$7,$8,$9,$10,$12,$13,expires_at FROM flight_offers WHERE id=$11")
+ .bind(revision).bind(version).bind(original).bind(&selling).bind(json!(references)).bind(record.id).bind(record.version).bind(&machine.audience).bind(machine.agent_id).bind(&row.currency).bind(id).bind(selection).bind(tier_pricing).execute(&mut *tx).await?;
     sqlx::query("UPDATE flight_offers SET reprice_required=FALSE WHERE id=$1")
         .bind(id)
         .execute(&mut *tx)

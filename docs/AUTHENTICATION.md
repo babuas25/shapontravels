@@ -33,3 +33,9 @@ Use separate least-privilege PostgreSQL roles for migration and runtime in deplo
 - [Argon2 password hashing API](https://docs.rs/argon2/0.5.3/argon2/)
 - [Axum request-parts extractors](https://docs.rs/axum/0.8.9/axum/extract/trait.FromRequestParts.html)
 - [Vendored Swagger UI integration](https://docs.rs/utoipa-swagger-ui/9.0.2/utoipa_swagger_ui/)
+
+## B2B tier assignment
+
+`GET /auth/me` includes the trusted `tier` (`basic`, `professional`, `enterprise`; null for B2C). New/existing B2B clients default to Basic under migration 0021. Existing client edits preserve tier. Only a human Superadmin can assign another tier through `PUT /admin/clients/{id}/tier`; human Admin can read it through GET. Machine credentials cannot assign a tier. See [B2B tiers and frontend pricing](B2B_TIERS.md).
+
+`/auth/me` also exposes the current `commission_share_percent`, captured atomically with tier. Human Admin/Superadmin can configure the global shares via `GET/PUT /admin/tier-policy`; only Superadmin can assign a client tier. Existing tokens use current configuration on subsequent requests.

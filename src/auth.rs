@@ -133,6 +133,8 @@ pub struct Machine {
     #[schema(value_type = Option<String>)]
     pub agent_id: Option<Uuid>,
     pub permissions: Vec<String>,
+    pub tier: Option<crate::tier::Tier>,
+    pub commission_share_percent: i32,
 }
 impl Machine {
     pub fn require(&self, permission: &str) -> Result<(), ApiError> {
@@ -154,7 +156,15 @@ impl Machine {
         if exists.0 { Ok(()) } else { Err(missing()) }
     }
 }
-type MachineRow = (Uuid, String, Option<Uuid>, Vec<String>, i32);
+type MachineRow = (
+    Uuid,
+    String,
+    Option<Uuid>,
+    Vec<String>,
+    i32,
+    Option<String>,
+    i32,
+);
 
 impl FromRequestParts<AppState> for Machine {
     type Rejection = ApiError;
@@ -163,15 +173,18 @@ impl FromRequestParts<AppState> for Machine {
         state: &AppState,
     ) -> Result<Self, Self::Rejection> {
         let token = bearer(parts, "stm_")?;
-        let row: Option<MachineRow> = sqlx::query_as("SELECT c.id,c.audience,c.agent_id,c.permissions,c.rate_limit_per_minute FROM machine_tokens t JOIN api_clients c ON c.id=t.client_id JOIN client_credentials k ON k.id=t.credential_id AND k.client_id=c.id WHERE t.token_hash=$1 AND t.expires_at>now() AND c.active AND k.active")
+        let row: Option<MachineRow> = sqlx::query_as("SELECT c.id,c.audience,c.agent_id,c.permissions,c.rate_limit_per_minute,CASE WHEN c.audience='b2b' THEN c.tier END,CASE WHEN c.audience='b2c' THEN 0 WHEN c.tier='basic' THEN p.basic WHEN c.tier='professional' THEN p.professional ELSE p.enterprise END FROM machine_tokens t JOIN api_clients c ON c.id=t.client_id JOIN client_credentials k ON k.id=t.credential_id AND k.client_id=c.id CROSS JOIN b2b_tier_policy p WHERE p.singleton AND t.token_hash=$1 AND t.expires_at>now() AND c.active AND k.active AND (c.external_user_id IS NULL OR (c.api_management_enabled AND c.tier='enterprise'))")
             .bind(digest(&token)).fetch_optional(&state.pool).await?;
-        let (client_id, audience, agent_id, permissions, limit) = row.ok_or_else(unauthorized)?;
+        let (client_id, audience, agent_id, permissions, limit, tier, commission_share_percent) =
+            row.ok_or_else(unauthorized)?;
         rate_limit(&state.pool, &format!("client:{client_id}"), limit).await?;
         Ok(Self {
             client_id,
             audience,
             agent_id,
             permissions,
+            commission_share_percent,
+            tier: tier.as_deref().map(crate::tier::Tier::parse).transpose()?,
         })
     }
 }
@@ -181,7 +194,7 @@ pub struct Admin {
     token_hash: Vec<u8>,
 }
 impl Admin {
-    fn super_admin(&self) -> Result<(), ApiError> {
+    pub(crate) fn super_admin(&self) -> Result<(), ApiError> {
         if self.role == "super_admin" {
             Ok(())
         } else {
@@ -228,13 +241,13 @@ async fn token(
     if request.client_secret.len() > 256 {
         return Err(unauthorized());
     }
-    let row: Option<(Uuid,String)> = sqlx::query_as("SELECT k.id,k.secret_hash FROM client_credentials k JOIN api_clients c ON c.id=k.client_id WHERE c.id=$1 AND c.active AND k.active").bind(request.client_id).fetch_optional(&state.pool).await?;
+    let row: Option<(Uuid,String)> = sqlx::query_as("SELECT k.id,k.secret_hash FROM client_credentials k JOIN api_clients c ON c.id=k.client_id WHERE c.id=$1 AND c.active AND k.active AND (c.external_user_id IS NULL OR (c.api_management_enabled AND c.tier='enterprise'))").bind(request.client_id).fetch_optional(&state.pool).await?;
     if !verify(request.client_secret, row.as_ref().map(|r| r.1.clone())).await? {
         return Err(unauthorized());
     }
     let credential = row.ok_or_else(unauthorized)?.0;
     let mut tx = state.pool.begin().await?;
-    let still_active: Option<(Uuid,)> = sqlx::query_as("SELECT k.id FROM client_credentials k JOIN api_clients c ON c.id=k.client_id WHERE k.id=$1 AND c.active AND k.active FOR SHARE OF k,c").bind(credential).fetch_optional(&mut *tx).await?;
+    let still_active: Option<(Uuid,)> = sqlx::query_as("SELECT k.id FROM client_credentials k JOIN api_clients c ON c.id=k.client_id WHERE k.id=$1 AND c.active AND k.active AND (c.external_user_id IS NULL OR (c.api_management_enabled AND c.tier='enterprise')) FOR SHARE OF k,c").bind(credential).fetch_optional(&mut *tx).await?;
     if still_active.is_none() {
         return Err(unauthorized());
     }

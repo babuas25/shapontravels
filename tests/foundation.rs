@@ -128,16 +128,41 @@ async fn openapi_and_swagger_are_served_locally() {
             assert!(operation_ids.insert(id), "duplicate operationId: {id}");
         }
     }
-    assert_eq!(
-        doc["paths"]["/admin/suppliers"]["get"]["operationId"],
-        "list_suppliers"
+    assert!(
+        doc["paths"]
+            .as_object()
+            .unwrap()
+            .keys()
+            .all(|p| p.starts_with("/api/") || p == "/auth/token" || p == "/auth/me")
     );
-    assert_eq!(
-        doc["paths"]["/admin/suppliers/{id}"]["put"]["operationId"],
-        "update_supplier"
+    assert!(
+        doc["components"]["securitySchemes"]
+            .get("admin_session")
+            .is_none()
     );
-
-    assert!(doc["paths"]["/health/ready"]["get"]["responses"]["503"].is_object());
+    for name in [
+        "ClientInput",
+        "LoginRequest",
+        "RuleInput",
+        "TierPolicyInput",
+        "AdminInput",
+    ] {
+        assert!(
+            doc["components"]["schemas"].get(name).is_none(),
+            "private schema {name} leaked"
+        );
+    }
+    let denied = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .uri("/admin/openapi.json")
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(denied.status(), StatusCode::UNAUTHORIZED);
     let response = app
         .oneshot(
             Request::builder()

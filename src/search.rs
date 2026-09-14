@@ -20,7 +20,10 @@ use uuid::Uuid;
 
 type ReadFuture<'a> = Pin<Box<dyn Future<Output = Result<Value, SupplierError>> + Send + 'a>>;
 pub trait ReadSupplier: Send + Sync {
-    /// Offline only; real adapters inherit unconditional cancellation denial.
+    fn authorized_uat_cancellation(&self) -> bool {
+        false
+    }
+    /// Disabled by default; explicit UAT opt-in is separate from server configuration.
     fn cancellation_enabled(&self) -> bool {
         false
     }
@@ -55,6 +58,16 @@ pub trait ReadSupplier: Send + Sync {
     fn read<'a>(&'a self, operation: ReadOperation, payload: &'a Value) -> ReadFuture<'a>;
 }
 impl ReadSupplier for SupplierAdapter {
+    fn authorized_uat_cancellation(&self) -> bool {
+        self.cancellation_enabled()
+    }
+    fn cancellation_enabled(&self) -> bool {
+        SupplierAdapter::cancellation_enabled(self)
+    }
+    fn cancel_held<'a>(&'a self, payload: &'a Value) -> ReadFuture<'a> {
+        Box::pin(SupplierAdapter::cancel_held(self, payload))
+    }
+
     fn ticket_report<'a>(&'a self, transaction: &'a str) -> ReadFuture<'a> {
         Box::pin(SupplierAdapter::ticket_report(self, transaction))
     }
@@ -560,8 +573,16 @@ async fn search(
             let mut references = serde_json::Map::new();
             references.insert(supplier_transaction.into(), json!(search_id.to_string()));
             references.insert(supplier_item.into(), json!(id.to_string()));
+            let tier_original = json!({"passengerCounts":original["passengerCounts"],"passengerFares":original["passengerFares"]});
             let mut selling = projection::single_component_owned(original, &winner.markup)
                 .map_err(|_| error("SUPPLIER_PRICING_COVERAGE_UNSUPPORTED"))?;
+            let tier_pricing = crate::tier::snapshot(
+                &tier_original,
+                &selling,
+                machine.tier,
+                machine.commission_share_percent,
+                &currency,
+            )?;
             bind_references(&mut selling, &mut references);
             pending.push((
                 id,
@@ -570,6 +591,7 @@ async fn search(
                 Value::Object(references),
                 record.id,
                 record.version,
+                tier_pricing,
             ));
             retained_suppliers.insert(connection.id.clone());
             returned.push(selling);
@@ -581,7 +603,7 @@ async fn search(
         let encode_started = std::time::Instant::now();
         let selling_batch = &returned[selling_start..];
         let mut query = sqlx::QueryBuilder::<sqlx::Postgres>::new(
-            "INSERT INTO flight_offers(id,client_id,search_id,supplier_id,availability_epoch,original,selling,reference_map,rule_id,rule_version,expires_at) ",
+            "INSERT INTO flight_offers(id,client_id,search_id,supplier_id,availability_epoch,original,selling,reference_map,rule_id,rule_version,tier_pricing,expires_at) ",
         );
         query.push_values(
             batch.iter().zip(selling_batch),
@@ -596,6 +618,7 @@ async fn search(
                     .push_bind(&entry.3)
                     .push_bind(entry.4)
                     .push_bind(entry.5)
+                    .push_bind(&entry.6)
                     .push("now()+INTERVAL '10 minutes'");
             },
         );

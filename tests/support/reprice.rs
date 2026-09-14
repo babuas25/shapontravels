@@ -97,6 +97,10 @@ pub async fn verify(pool: &PgPool, token: &str, raw: &Value, offer: &Value) {
         "OFFER_REFERENCE_MISMATCH"
     );
     assert_eq!(mock.calls.load(Ordering::SeqCst), 0);
+    sqlx::query("UPDATE b2b_tier_policy SET basic=50")
+        .execute(pool)
+        .await
+        .unwrap();
     let (status, first) = call(&app, "POST", "/api/Reprice", Some(token), request.clone()).await;
     assert_eq!(status, 200, "{first}");
     assert_eq!(first["item1"]["totalPrice"], offer["totalPrice"]);
@@ -107,6 +111,27 @@ pub async fn verify(pool: &PgPool, token: &str, raw: &Value, offer: &Value) {
         raw["itemCodeRef"]
     );
     let price = first["item1"]["priceCodeRef"].clone();
+    let (status, pricing) = call(
+        &app,
+        "GET",
+        &format!("/api/pricing/reprice/{}", price.as_str().unwrap()),
+        Some(token),
+        Value::Null,
+    )
+    .await;
+    assert_eq!(status, 200);
+    assert_eq!(pricing["tier"], "basic");
+    assert_eq!(pricing["commissionSharePercent"], 50);
+    assert_eq!(
+        first["item1"]["isPriceChanged"], true,
+        "share-only policy change requires new acceptance"
+    );
+    sqlx::query("UPDATE b2b_tier_policy SET basic=60")
+        .execute(pool)
+        .await
+        .unwrap();
+    assert_eq!(pricing["gross"], first["item1"]["totalPrice"].to_string());
+
     let acceptance = json!({"priceCodeRef":price});
     assert_eq!(
         call(
@@ -132,7 +157,49 @@ pub async fn verify(pool: &PgPool, token: &str, raw: &Value, offer: &Value) {
         .0,
         200
     );
+    sqlx::query("UPDATE api_clients SET tier='enterprise' WHERE id=(SELECT client_id FROM flight_offers WHERE id=$1)").bind(id).execute(pool).await.unwrap();
+    sqlx::query("UPDATE b2b_tier_policy SET enterprise=90")
+        .execute(pool)
+        .await
+        .unwrap();
     let (_, second) = call(&app, "POST", "/api/Reprice", Some(token), request.clone()).await;
+    assert_eq!(
+        second["item1"]["isPriceChanged"], true,
+        "tier-only payable change needs acceptance"
+    );
+    let (_, enterprise) = call(
+        &app,
+        "GET",
+        &format!(
+            "/api/pricing/reprice/{}",
+            second["item1"]["priceCodeRef"].as_str().unwrap()
+        ),
+        Some(token),
+        Value::Null,
+    )
+    .await;
+    assert_eq!(enterprise["tier"], "enterprise");
+    assert_eq!(enterprise["commissionSharePercent"], 90);
+    sqlx::query("UPDATE b2b_tier_policy SET enterprise=100")
+        .execute(pool)
+        .await
+        .unwrap();
+    assert_eq!(enterprise["gross"], pricing["gross"]);
+    assert_ne!(enterprise["payable"], pricing["payable"]);
+    assert_eq!(
+        call(
+            &app,
+            "GET",
+            &format!("/api/pricing/reprice/{}", price.as_str().unwrap()),
+            Some(token),
+            Value::Null
+        )
+        .await
+        .1,
+        pricing
+    );
+    sqlx::query("UPDATE api_clients SET tier='basic' WHERE id=(SELECT client_id FROM flight_offers WHERE id=$1)").bind(id).execute(pool).await.unwrap();
+
     assert_eq!(
         second["item1"]["totalPrice"], first["item1"]["totalPrice"],
         "must not double markup"

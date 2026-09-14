@@ -59,6 +59,7 @@ pub struct SupplierAdapter {
     timeout: Duration,
     booking_enabled: bool,
     ticketing_enabled: bool,
+    cancellation_enabled: bool,
     session: Mutex<Option<Session>>,
 }
 #[derive(Deserialize)]
@@ -128,6 +129,7 @@ impl SupplierAdapter {
             timeout,
             booking_enabled: false,
             ticketing_enabled: false,
+            cancellation_enabled: false,
             session: Mutex::new(None),
         })
     }
@@ -187,6 +189,43 @@ impl SupplierAdapter {
             let response = self
                 .client
                 .post(Self::endpoint(&self.base, "api/Book")?)
+                .bearer_auth(token)
+                .json(payload)
+                .send()
+                .await
+                .map_err(transport)?;
+            if !response.status().is_success() {
+                return Err(SupplierError::Response);
+            }
+            bounded_json(response, READ_RESPONSE_LIMIT).await
+        })
+        .await
+        .map_err(|_| SupplierError::Timeout)?
+    }
+    /// Explicit per-process opt-in; normal server configuration never calls this.
+    pub fn enable_authorized_uat_cancellation(&mut self) -> Result<(), SupplierError> {
+        if self.id != "triplover"
+            || self.base.as_str() != "https://userapi-uat.triplover.com/"
+            || self.search_base.as_str() != "https://searchapi-uat.triplover.com/"
+        {
+            return Err(SupplierError::Configuration);
+        }
+        self.cancellation_enabled = true;
+        Ok(())
+    }
+    pub fn cancellation_enabled(&self) -> bool {
+        self.cancellation_enabled
+    }
+    /// Never retry cancellation mutations, even after authentication or transport failure.
+    pub async fn cancel_held(&self, payload: &Value) -> Result<Value, SupplierError> {
+        if !self.cancellation_enabled {
+            return Err(SupplierError::Configuration);
+        }
+        tokio::time::timeout(self.timeout, async {
+            let token = self.token().await?;
+            let response = self
+                .client
+                .post(Self::endpoint(&self.base, "api/Cancel")?)
                 .bearer_auth(token)
                 .json(payload)
                 .send()
@@ -612,7 +651,7 @@ mod tests {
     #[tokio::test]
     async fn direct_issue_is_disabled_even_with_all_real_adapter_flags_enabled() {
         use crate::search::ReadSupplier;
-        let adapter = SupplierAdapter::new(
+        let mut adapter = SupplierAdapter::new(
             SupplierConfig {
                 id: "triplover",
                 currency: Some("BDT".into()),
@@ -631,6 +670,15 @@ mod tests {
             adapter.cancel_held(&Value::Null).await.unwrap_err(),
             SupplierError::Configuration
         );
+        adapter.enable_authorized_uat_cancellation().unwrap();
+        assert!(adapter.authorized_uat_cancellation());
+        adapter.base = "https://userapi.triplover.com/".parse().unwrap();
+        adapter.cancellation_enabled = false;
+        assert_eq!(
+            adapter.enable_authorized_uat_cancellation().unwrap_err(),
+            SupplierError::Configuration
+        );
+        assert!(!adapter.cancellation_enabled());
         assert!(!adapter.direct_issue_enabled());
         // Default denial returns without authentication or an HTTP request.
         assert_eq!(
@@ -730,6 +778,53 @@ mod tests {
             ));
             assert_eq!(
                 adapter.issue_held(&Value::Null).await.unwrap_err(),
+                SupplierError::Response
+            );
+            assert_eq!(calls.load(Ordering::SeqCst), 1);
+            task.abort();
+        }
+    }
+
+    #[tokio::test]
+    async fn cancel_does_not_retry_401_or_5xx() {
+        for status in [StatusCode::UNAUTHORIZED, StatusCode::INTERNAL_SERVER_ERROR] {
+            let calls = Arc::new(AtomicUsize::new(0));
+            let counter = calls.clone();
+            let (base, task) = server(
+                Router::new()
+                    .route("/api/user/apiLogIn", post(login))
+                    .route(
+                        "/api/Cancel",
+                        post(move || {
+                            let counter = counter.clone();
+                            async move {
+                                counter.fetch_add(1, Ordering::SeqCst);
+                                status
+                            }
+                        }),
+                    )
+                    .with_state(Mock::default()),
+            )
+            .await;
+            let mut adapter = SupplierAdapter::build(
+                "triplover",
+                base.clone(),
+                base,
+                "test@example.invalid".into(),
+                "already-encoded".into(),
+                Duration::from_secs(2),
+            )
+            .unwrap();
+            assert_eq!(
+                adapter.cancel_held(&Value::Null).await.unwrap_err(),
+                SupplierError::Configuration
+            );
+            assert_eq!(calls.load(Ordering::SeqCst), 0);
+            assert!(!crate::search::ReadSupplier::cancellation_enabled(&adapter));
+            adapter.cancellation_enabled = true;
+            assert!(crate::search::ReadSupplier::cancellation_enabled(&adapter));
+            assert_eq!(
+                adapter.cancel_held(&Value::Null).await.unwrap_err(),
                 SupplierError::Response
             );
             assert_eq!(calls.load(Ordering::SeqCst), 1);

@@ -1121,3 +1121,56 @@ Final validation: 60 regular tests passed; the complete disposable-database suit
 - Local working database privately backed up, archive verified, migration 20 successful. Production completed the established backup/migrate/grants/restart sequence. Public health endpoints return 200/ok and 200/ready; new Cancel API and Admin filters are served; unauthenticated Admin data access returns 401.
 - 60 regular tests, full DB suite (43.79 seconds), Clippy, formatting, JS syntax/render checks and deployment-script tests passed. Temporary task DB removed. No live Book/Issue/Cancel test occurred; real cancellation and Direct Issue remain disabled.
 - Prior local-only notes describe implementation before authorized deployment. Completion documentation uses `[skip ci]`; application release remains `4b8bf1a`.
+
+### Authorized UAT Cancel test — 2026-09-11
+
+- User authorized cancellation verification, reusing a held booking or creating a hold if none existed. Reused retained BG multicity UAT hold; no new Book and no ticket Issue.
+- Privately backed up the retained database and migrated it. Added per-instance exact-host UAT cancellation opt-in, with normal server/default and production execution still disabled. Sent one durable Cancel; supplier success/isCancel true, reference validation and persisted receipt retrieval all succeeded.
+- Subsequent PNR reads failed supplier validation; independent Cancelled status remains unconfirmed. Saved read-only evidence without retrying cancellation. One cancellation reservation and no ticket issue exist in this retained database.
+- Local changes only; no deployment or git push for this UAT test. Mock no-retry transport test and full disposable database suite passed (39.07 seconds).
+
+### B2B tier commission shares — 2026-09-14
+
+- User approved applying Basic 60%, Professional 80%, Enterprise 100% shares to the existing resolved markup amount. Gross stays identical across tiers; payable is gross minus the tier commission. No independent tier markup rules or stacking.
+- Added migration 0021: Basic default client tier and immutable Search/RePrice pricing snapshots. Existing historical records are not backfilled/repriced. B2C has no tier commission.
+- Added Superadmin-only audited tier assignment, human Admin tier lookup, current tier in `/auth/me`, owner-scoped individual and bounded batch pricing APIs. Booking pricing uses its accepted RePrice snapshot through the ticket lifecycle; existing supplier-compatible responses keep gross totals.
+- Frontend integration contract: [B2B tiers](docs/B2B_TIERS.md). Separate ShoponTravels frontend, API Management enablement/sidebar and settlement are not implemented in this increment.
+- Local implementation; working/production database migration, Git push and deployment have not been performed. Supplier execution restrictions remain unchanged.
+- Validation complete: 63 regular tests, full disposable PostgreSQL integration (40.23 seconds), all-target Clippy with warnings denied, formatting and diff checks passed. Tests cover shares/rounding, admin authority, isolation, historical snapshots, immutable booking pricing and tier-only RePrice changes.
+
+### Admin-configurable tier shares — 2026-09-14
+
+- User clarified that Basic/Professional/Enterprise markup shares must be Admin-controlled. The 60/80/100 values are now database defaults, not fixed runtime percentages.
+- Migration 0022 stores an atomic, versioned global policy. Human Admin/Superadmin can GET/PUT `/admin/tier-policy`; client tier assignment remains Superadmin-only. Whole percentages 0–100 with Basic <= Professional <= Enterprise; stale writes return 409, and successful changes record previous/new policy and actor in audit.
+- Search/RePrice capture tier and configured share atomically at authentication. Existing tokens immediately see updates on subsequent requests; `/auth/me` and Admin tier lookup expose current shares. Quote/booking snapshots keep their original amounts. A changed payable requires RePrice acceptance even if tier/gross are unchanged.
+- Local backend only; frontend settings form, working/production migrations, push/deploy remain pending.
+- Verification: 64 regular tests, full disposable DB suite (39.74 seconds), all-target Clippy, formatting and diff checks pass. Includes custom-share pricing, share-only RePrice changes, existing-token refresh of configuration, Admin authority, optimistic concurrent writes and historical booking preservation. Test database removed; no working/production migration or supplier call.
+
+### API Management frontend and protected documentation — 2026-09-14
+
+- User authorized careful implementation across `shapontravels` API and `shopontravels` frontend. Added one API Management sidebar item with client controls, commission settings, documentation and client/policy history. Eligible Enterprise B2B owners receive only their own configuration, credentials and commercial reference.
+- Migration 0023 adds unique immutable Clerk identity links, optimistic client versions and managed-client access gates. Disabled/inactive/downgraded clients cannot issue/use tokens; revocation prevents old tokens from returning after re-enablement. Legacy unlinked clients preserve their prior policy.
+- Added registry/history endpoints and a server-only frontend integration bridge. Real Clerk role/ownership checks apply on every action, independent of development role preview. Superadmin controls provisioning, tier assignment and enablement; Admin controls policy, permissions, rate and suspension. Users & Roles lifecycle changes suspend linked API access first.
+- Public Swagger/OpenAPI now excludes Admin operations and unreachable Admin schemas. Full specifications require an Admin session. See [integration contract](docs/API_MANAGEMENT.md) and the sibling frontend's `docs/API_MANAGEMENT.md` for setup.
+- Validation: 64 regular Rust tests, full disposable PostgreSQL suite (40.92 seconds), Clippy, formatting; frontend route permission tests, actual-component browser checks at desktop/mobile, existing security-hardening verification and production build passed.
+- Local implementation only. Working/production migrations, bridge credentials and deployment remain pending; frontend environment settings were not populated. Existing frontend booking calculations were not moved to the Rust engine. No live supplier Book/Issue/Cancel request was executed.
+
+### Isolated frontend/API integration verification — 2026-09-14
+
+- User prohibited changes to live ShoponTravels Supabase and approved local isolation and connection testing. Disconnected only local frontend Supabase environment values, kept a private backup, stopped the previous local Next server and archived its compiled output.
+- Added a loopback-only Rust review example and frontend browser runner using actual React components, Next route handlers, server bridge, Rust HTTP and isolated local PostgreSQL. Clerk identity and frontend audit/limiter are explicit test doubles, not production bypasses.
+- Browser checks passed for provisioning, Enterprise access, persisted commission shares, credentials/token exchange, permissions, commercial/private docs, disable/downgrade invalidation, token non-revival, revocation and API audit. No supplier adapters or remote requests were used. See each project's API Management guide.
+- Separate local database has migrations 1–23. No working/production database migration, Supabase change, git push or deployment occurred during this follow-up. Full Clerk login/Next middleware and live configuration remain outside this isolated verification.
+
+### Real Clerk dashboard verification — 2026-09-14
+
+- User confirmed the Clerk instance is only for local testing. Real Superadmin, Admin and B2B sessions were established using short-lived Clerk sign-in tickets; Next middleware, dashboard sidebar and API facade were exercised without identity mocks.
+- Provisioning, tier/enablement, commission edits, B2B credential ownership, safe docs, role escalation rejection, development-cookie rejection and suspension access checks passed. Frontend audit records went to explicit development-only private local storage; the real local limiter remained active. Production audit behavior is unchanged.
+- Disposable Clerk test users were deleted and linked local API clients disabled. Local Supabase stayed disconnected; no live database change, production migration, deployment or supplier mutation occurred. Password-entry/MFA/email journeys remain outside this ticket-based authentication test. Evidence and repeatable commands are in the sibling frontend API Management guide.
+
+### API Management release review — 2026-09-14
+
+- User requested continuing the proposed release sequence step by step. Reviewed the pending tier/API Management work across both repositories, including the earlier explicit UAT cancellation adapter; normal server cancellation and production supplier mutation gates remain unchanged.
+- Fresh verification passed: 64 regular Rust tests, formatting, all-target Clippy, full disposable PostgreSQL integration (41.11 seconds), five deployment-helper tests and diff checks. The disposable database was removed after verification.
+- Frontend full ESLint, TypeScript, production build, route/audit/network checks and actual-component desktop/mobile browser checks passed. Existing API Management authority/isolation checks are now included in frontend CI.
+- The legacy frontend Supabase security script stopped on missing configuration before any remote call; it is not included in the passed checks. Live Supabase remains disconnected and untouched. Production bridge credentials and deployment verification remain subsequent release steps.

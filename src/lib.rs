@@ -1,4 +1,6 @@
 pub mod admin_bookings;
+pub mod api_docs;
+pub mod api_management;
 pub mod auth;
 pub mod booking;
 pub mod cleanup;
@@ -12,6 +14,7 @@ pub mod search;
 pub mod search_admission;
 mod selection;
 pub mod supplier;
+pub mod tier;
 
 use axum::{
     Json, Router,
@@ -29,7 +32,6 @@ use tower_http::compression::{
     predicate::{DefaultPredicate, Predicate, SizeAbove},
 };
 use utoipa::{OpenApi, ToSchema};
-use utoipa_swagger_ui::SwaggerUi;
 
 pub static MIGRATOR: sqlx::migrate::Migrator = sqlx::migrate!("./migrations");
 
@@ -113,6 +115,8 @@ pub fn router_with_search_limits(
 ) -> Router {
     let mut doc = ApiDoc::openapi();
     doc.merge(auth::AuthDoc::openapi());
+    doc.merge(api_management::ManagementDoc::openapi());
+    doc.merge(tier::TierDoc::openapi());
     doc.merge(connections::ConnectionDoc::openapi());
     doc.merge(markup::MarkupDoc::openapi());
     doc.merge(search::SearchDoc::openapi());
@@ -137,6 +141,8 @@ pub fn router_with_search_limits(
     doc.info.title = format!("Shapon Travels API — {}", state.environment);
     Router::new()
         .merge(auth::routes())
+        .merge(api_management::routes())
+        .merge(tier::routes())
         .merge(connections::routes())
         .merge(markup::routes())
         .merge(search::routes())
@@ -145,7 +151,7 @@ pub fn router_with_search_limits(
         .merge(admin_bookings::routes())
         .route("/health/live", get(live))
         .route("/health/ready", get(ready))
-        .merge(SwaggerUi::new("/docs").url("/openapi.json", doc))
+        .merge(api_docs::routes(doc))
         .layer(
             CompressionLayer::new()
                 .quality(CompressionLevel::Fastest)

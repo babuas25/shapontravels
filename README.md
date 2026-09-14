@@ -11,7 +11,7 @@ cargo run -- migrate
 cargo run -- serve
 ```
 
-The default listener is `127.0.0.1:8080`. Swagger is at `http://127.0.0.1:8080/docs/` and its downloadable contract at `/openapi.json`. `/health/live` checks the process; `/health/ready` checks PostgreSQL and all migration checksums, with a bounded timeout. Neither endpoint validates supplier credentials. The application refuses to serve with missing or mismatched migrations.
+The default listener is `127.0.0.1:8080`. Commercial Swagger is at `http://127.0.0.1:8080/docs/` and its downloadable contract at `/openapi.json`. These exclude Admin operations and schemas. Full definitions require a human Admin session at `/admin/openapi.json`. `/health/live` checks the process; `/health/ready` checks PostgreSQL and all migration checksums, with a bounded timeout. Neither endpoint validates supplier credentials. The application refuses to serve with missing or mismatched migrations.
 
 Migrations run only through the explicit `migrate` command. The VPS deployment workflow uses a dedicated migration role and a separate least-privilege application role, with backup before migration. PostgreSQL audit triggers prevent normal update/delete/truncate, but database owners/superusers remain a trusted boundary.
 

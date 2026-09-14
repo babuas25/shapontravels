@@ -1,4 +1,4 @@
-//! Offline held-PNR cancellation. No real adapter enables this operation.
+//! Held-PNR cancellation: offline tests or explicit per-process UAT authorization.
 use super::*;
 
 #[derive(sqlx::FromRow)]
@@ -114,7 +114,10 @@ async fn cancel(
         .ok_or(error("SUPPLIER_CONFIGURATION_ERROR"))?
         .transport
         .clone();
-    if state.environment != "test" || !transport.cancellation_enabled() {
+    if !(state.environment == "test"
+        || (state.environment == "uat" && transport.authorized_uat_cancellation()))
+        || !transport.cancellation_enabled()
+    {
         return Err(ApiError(
             StatusCode::FORBIDDEN,
             "CANCELLATION_EXECUTION_DISABLED",
@@ -133,7 +136,7 @@ async fn cancel(
     if issued {
         return Err(conflict("TICKET_ISSUE_ALREADY_RESERVED"));
     }
-    // This read is reached only through the offline capability gate.
+    // This read is reached only through the cancellation capability gate.
     let _ = reconcile_owned(&state, machine.client_id, id, "client", machine.client_id).await?;
     let mut tx = state.pool.begin().await?;
     sqlx::query("SELECT id FROM api_clients WHERE id=$1 FOR UPDATE")
@@ -143,9 +146,16 @@ async fn cancel(
     let (held,preflight,fresh):(bool,Option<Value>,bool)=sqlx::query_as("SELECT state='held' AND execution_mode='hold',last_reconciliation,COALESCE(last_reconciliation_verified AND reconciled_at>clock_timestamp()-INTERVAL '30 seconds',false) FROM flight_bookings WHERE id=$1 FOR UPDATE").bind(id).fetch_one(&mut *tx).await?;
     if let Some(old)=sqlx::query_as::<_,Cancellation>("SELECT id,booking_id,request_hash,state,public_response FROM flight_cancellations WHERE client_id=$1 AND (booking_id=$2 OR idempotency_key=$3) ORDER BY (idempotency_key=$3) DESC LIMIT 1").bind(machine.client_id).bind(id).bind(&key).fetch_optional(&mut *tx).await? { return replay(old,&hash,id); }
     let preflight = preflight.ok_or(conflict("PNR_VERIFICATION_REQUIRED"))?;
+    // Retained Triplover UAT held booking reports Created, not Booked.
+    // Restrict this observed compatibility to explicit UAT authorization.
+    let held_status = preflight["item1"]["status"] == "Booked"
+        || (state.environment == "uat"
+            && transport.authorized_uat_cancellation()
+            && q.supplier_id == "triplover"
+            && preflight["item1"]["status"] == "Created");
     if !held
         || !fresh
-        || preflight["item1"]["status"] != "Booked"
+        || !held_status
         || preflight["item1"]["pnr"] != payload["PNR"]
         || contains_ticket(&preflight)
     {
@@ -232,7 +242,10 @@ async fn reconcile(
         .ok_or(error("SUPPLIER_CONFIGURATION_ERROR"))?
         .transport
         .clone();
-    if state.environment != "test" || !transport.cancellation_enabled() {
+    if !(state.environment == "test"
+        || (state.environment == "uat" && transport.authorized_uat_cancellation()))
+        || !transport.cancellation_enabled()
+    {
         return Err(ApiError(
             StatusCode::FORBIDDEN,
             "CANCELLATION_EXECUTION_DISABLED",

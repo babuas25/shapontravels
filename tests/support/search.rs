@@ -127,6 +127,12 @@ pub async fn verify(original_app: &Router, admin: &str, machine: &str, pool: &Pg
     verify_admission(state, machine, &request, &mocks, pool).await;
     let mut latest = Value::Null;
     for mask in 1u8..8 {
+        let share = if mask == 1 { 50 } else { 60 };
+        sqlx::query("UPDATE b2b_tier_policy SET basic=$1")
+            .bind(share)
+            .execute(pool)
+            .await
+            .unwrap();
         for (i, name) in ["firsttrip", "takeoff", "triplover"].iter().enumerate() {
             sqlx::query("UPDATE supplier_connections SET search_enabled=$2 WHERE id=$1")
                 .bind(name)
@@ -181,6 +187,18 @@ pub async fn verify(original_app: &Router, admin: &str, machine: &str, pool: &Pg
                     .await
                     .unwrap();
             assert_eq!(source, expected);
+            let (status, pricing) = call(
+                &app,
+                "GET",
+                &format!("/api/pricing/offer/{id}"),
+                Some(machine),
+                Value::Null,
+            )
+            .await;
+            assert_eq!(status, 200);
+            assert_eq!(pricing["tier"], "basic");
+            assert_eq!(pricing["gross"], returned["totalPrice"].to_string());
+            assert_eq!(pricing["commissionSharePercent"], share);
         }
         let search_id = Uuid::parse_str(
             response["item1"]["airSearchResponses"][0]["uniqueTransID"]
