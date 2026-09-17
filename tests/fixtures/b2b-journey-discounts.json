@@ -1,0 +1,406 @@
+{
+  "triplover-return": {
+    "fixed_55": {
+      "gross": "165695.00",
+      "commission": "3365.43",
+      "payable": "162329.57",
+      "passengers": {
+        "adt": {
+          "count": 2,
+          "gross": "56969.00",
+          "commission": "1291.22",
+          "payable": "55677.78"
+        },
+        "chd": {
+          "count": 1,
+          "gross": "44830.00",
+          "commission": "900.87",
+          "payable": "43929.13"
+        },
+        "inf": {
+          "count": 1,
+          "gross": "6927.00",
+          "commission": "-117.88",
+          "payable": "7044.88"
+        }
+      }
+    },
+    "fixed_60": {
+      "gross": "165695.00",
+      "commission": "3671.36",
+      "payable": "162023.64",
+      "passengers": {
+        "adt": {
+          "count": 2,
+          "gross": "56969.00",
+          "commission": "1408.60",
+          "payable": "55560.40"
+        },
+        "chd": {
+          "count": 1,
+          "gross": "44830.00",
+          "commission": "982.76",
+          "payable": "43847.24"
+        },
+        "inf": {
+          "count": 1,
+          "gross": "6927.00",
+          "commission": "-128.60",
+          "payable": "7055.60"
+        }
+      }
+    },
+    "fixed_85": {
+      "gross": "165695.00",
+      "commission": "5201.11",
+      "payable": "160493.89",
+      "passengers": {
+        "adt": {
+          "count": 2,
+          "gross": "56969.00",
+          "commission": "1995.52",
+          "payable": "54973.48"
+        },
+        "chd": {
+          "count": 1,
+          "gross": "44830.00",
+          "commission": "1392.25",
+          "payable": "43437.75"
+        },
+        "inf": {
+          "count": 1,
+          "gross": "6927.00",
+          "commission": "-182.18",
+          "payable": "7109.18"
+        }
+      }
+    },
+    "fixed_100": {
+      "gross": "165695.00",
+      "commission": "6118.95",
+      "payable": "159576.05",
+      "passengers": {
+        "adt": {
+          "count": 2,
+          "gross": "56969.00",
+          "commission": "2347.67",
+          "payable": "54621.33"
+        },
+        "chd": {
+          "count": 1,
+          "gross": "44830.00",
+          "commission": "1637.94",
+          "payable": "43192.06"
+        },
+        "inf": {
+          "count": 1,
+          "gross": "6927.00",
+          "commission": "-214.33",
+          "payable": "7141.33"
+        }
+      }
+    },
+    "percentage_55": {
+      "gross": "165695.00",
+      "commission": "3598.75",
+      "payable": "162096.25",
+      "passengers": {
+        "adt": {
+          "count": 2,
+          "gross": "56969.00",
+          "commission": "1268.55",
+          "payable": "55700.45"
+        },
+        "chd": {
+          "count": 1,
+          "gross": "44830.00",
+          "commission": "941.06",
+          "payable": "43888.94"
+        },
+        "inf": {
+          "count": 1,
+          "gross": "6927.00",
+          "commission": "120.59",
+          "payable": "6806.41"
+        }
+      }
+    },
+    "percentage_60": {
+      "gross": "165695.00",
+      "commission": "3925.93",
+      "payable": "161769.07",
+      "passengers": {
+        "adt": {
+          "count": 2,
+          "gross": "56969.00",
+          "commission": "1383.88",
+          "payable": "55585.12"
+        },
+        "chd": {
+          "count": 1,
+          "gross": "44830.00",
+          "commission": "1026.61",
+          "payable": "43803.39"
+        },
+        "inf": {
+          "count": 1,
+          "gross": "6927.00",
+          "commission": "131.56",
+          "payable": "6795.44"
+        }
+      }
+    },
+    "percentage_85": {
+      "gross": "165695.00",
+      "commission": "5561.72",
+      "payable": "160133.28",
+      "passengers": {
+        "adt": {
+          "count": 2,
+          "gross": "56969.00",
+          "commission": "1960.49",
+          "payable": "55008.51"
+        },
+        "chd": {
+          "count": 1,
+          "gross": "44830.00",
+          "commission": "1454.37",
+          "payable": "43375.63"
+        },
+        "inf": {
+          "count": 1,
+          "gross": "6927.00",
+          "commission": "186.37",
+          "payable": "6740.63"
+        }
+      }
+    },
+    "percentage_100": {
+      "gross": "165695.00",
+      "commission": "6543.20",
+      "payable": "159151.80",
+      "passengers": {
+        "adt": {
+          "count": 2,
+          "gross": "56969.00",
+          "commission": "2306.46",
+          "payable": "54662.54"
+        },
+        "chd": {
+          "count": 1,
+          "gross": "44830.00",
+          "commission": "1711.02",
+          "payable": "43118.98"
+        },
+        "inf": {
+          "count": 1,
+          "gross": "6927.00",
+          "commission": "219.26",
+          "payable": "6707.74"
+        }
+      }
+    }
+  },
+  "triplover-multicity": {
+    "fixed_55": {
+      "gross": "170447.00",
+      "commission": "3304.98",
+      "payable": "167142.02",
+      "passengers": {
+        "adt": {
+          "count": 2,
+          "gross": "56630.00",
+          "commission": "1217.44",
+          "payable": "55412.56"
+        },
+        "chd": {
+          "count": 1,
+          "gross": "44491.00",
+          "commission": "846.61",
+          "payable": "43644.39"
+        },
+        "inf": {
+          "count": 1,
+          "gross": "12696.00",
+          "commission": "23.49",
+          "payable": "12672.51"
+        }
+      }
+    },
+    "fixed_60": {
+      "gross": "170447.00",
+      "commission": "3605.44",
+      "payable": "166841.56",
+      "passengers": {
+        "adt": {
+          "count": 2,
+          "gross": "56630.00",
+          "commission": "1328.12",
+          "payable": "55301.88"
+        },
+        "chd": {
+          "count": 1,
+          "gross": "44491.00",
+          "commission": "923.57",
+          "payable": "43567.43"
+        },
+        "inf": {
+          "count": 1,
+          "gross": "12696.00",
+          "commission": "25.63",
+          "payable": "12670.37"
+        }
+      }
+    },
+    "fixed_85": {
+      "gross": "170447.00",
+      "commission": "5107.70",
+      "payable": "165339.30",
+      "passengers": {
+        "adt": {
+          "count": 2,
+          "gross": "56630.00",
+          "commission": "1881.50",
+          "payable": "54748.50"
+        },
+        "chd": {
+          "count": 1,
+          "gross": "44491.00",
+          "commission": "1308.40",
+          "payable": "43182.60"
+        },
+        "inf": {
+          "count": 1,
+          "gross": "12696.00",
+          "commission": "36.30",
+          "payable": "12659.70"
+        }
+      }
+    },
+    "fixed_100": {
+      "gross": "170447.00",
+      "commission": "6009.06",
+      "payable": "164437.94",
+      "passengers": {
+        "adt": {
+          "count": 2,
+          "gross": "56630.00",
+          "commission": "2213.53",
+          "payable": "54416.47"
+        },
+        "chd": {
+          "count": 1,
+          "gross": "44491.00",
+          "commission": "1539.29",
+          "payable": "42951.71"
+        },
+        "inf": {
+          "count": 1,
+          "gross": "12696.00",
+          "commission": "42.71",
+          "payable": "12653.29"
+        }
+      }
+    },
+    "percentage_55": {
+      "gross": "170447.00",
+      "commission": "3511.57",
+      "payable": "166935.43",
+      "passengers": {
+        "adt": {
+          "count": 2,
+          "gross": "56630.00",
+          "commission": "1195.90",
+          "payable": "55434.10"
+        },
+        "chd": {
+          "count": 1,
+          "gross": "44491.00",
+          "commission": "888.12",
+          "payable": "43602.88"
+        },
+        "inf": {
+          "count": 1,
+          "gross": "12696.00",
+          "commission": "231.65",
+          "payable": "12464.35"
+        }
+      }
+    },
+    "percentage_60": {
+      "gross": "170447.00",
+      "commission": "3830.81",
+      "payable": "166616.19",
+      "passengers": {
+        "adt": {
+          "count": 2,
+          "gross": "56630.00",
+          "commission": "1304.62",
+          "payable": "55325.38"
+        },
+        "chd": {
+          "count": 1,
+          "gross": "44491.00",
+          "commission": "968.86",
+          "payable": "43522.14"
+        },
+        "inf": {
+          "count": 1,
+          "gross": "12696.00",
+          "commission": "252.71",
+          "payable": "12443.29"
+        }
+      }
+    },
+    "percentage_85": {
+      "gross": "170447.00",
+      "commission": "5426.97",
+      "payable": "165020.03",
+      "passengers": {
+        "adt": {
+          "count": 2,
+          "gross": "56630.00",
+          "commission": "1848.21",
+          "payable": "54781.79"
+        },
+        "chd": {
+          "count": 1,
+          "gross": "44491.00",
+          "commission": "1372.55",
+          "payable": "43118.45"
+        },
+        "inf": {
+          "count": 1,
+          "gross": "12696.00",
+          "commission": "358.00",
+          "payable": "12338.00"
+        }
+      }
+    },
+    "percentage_100": {
+      "gross": "170447.00",
+      "commission": "6384.69",
+      "payable": "164062.31",
+      "passengers": {
+        "adt": {
+          "count": 2,
+          "gross": "56630.00",
+          "commission": "2174.37",
+          "payable": "54455.63"
+        },
+        "chd": {
+          "count": 1,
+          "gross": "44491.00",
+          "commission": "1614.77",
+          "payable": "42876.23"
+        },
+        "inf": {
+          "count": 1,
+          "gross": "12696.00",
+          "commission": "421.18",
+          "payable": "12274.82"
+        }
+      }
+    }
+  }
+}

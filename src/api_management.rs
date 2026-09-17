@@ -92,10 +92,11 @@ async fn create(
     {
         return Err(ApiError(StatusCode::BAD_REQUEST, "INVALID_CLIENT"));
     }
-    let mut tx = state.pool.begin().await?;
+    let mut tx = crate::identity::business::begin(&state.pool).await?;
     let id = Uuid::new_v4();
     let row:Option<Client>=sqlx::query_as(&format!("INSERT INTO api_clients(id,name,audience,external_user_id,permissions) VALUES($1,$2,'b2b',$3,ARRAY['search:read']) ON CONFLICT(external_user_id) DO NOTHING RETURNING {FIELDS}")).bind(id).bind(input.name).bind(input.external_user_id).fetch_optional(&mut *tx).await?;
     let row = row.ok_or(ApiError(StatusCode::CONFLICT, "USER_ALREADY_LINKED"))?;
+    crate::identity::business::link_new_client(&mut tx, &row.external_user_id, id).await?;
     audit(&mut tx, admin.id, "api_client.create", "client", id).await?;
     tx.commit().await?;
     Ok((StatusCode::CREATED, Json(row)))
@@ -118,15 +119,21 @@ async fn update(
     Json(input): Json<UpdateInput>,
 ) -> Result<Json<Client>, ApiError> {
     if !(1..=10000).contains(&input.rate_limit_per_minute)
-        || input
-            .permissions
-            .iter()
-            .any(|p| !["search:read", "booking", "ticketing", "cancellation"].contains(&p.as_str()))
+        || input.permissions.iter().any(|p| {
+            ![
+                "search:read",
+                "booking",
+                "ticketing",
+                "cancellation",
+                "wallet:read",
+            ]
+            .contains(&p.as_str())
+        })
         || (input.api_management_enabled && input.tier != Tier::Enterprise)
     {
         return Err(ApiError(StatusCode::BAD_REQUEST, "INVALID_API_ACCESS"));
     }
-    let mut tx = state.pool.begin().await?;
+    let mut tx = crate::identity::business::begin(&state.pool).await?;
     let old: Client = sqlx::query_as(&format!(
         "SELECT {FIELDS} FROM api_clients WHERE id=$1 AND external_user_id IS NOT NULL FOR UPDATE"
     ))

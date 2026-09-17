@@ -93,6 +93,9 @@ async fn run() -> Result<(), String> {
         environment: config.environment.clone(),
         db_timeout: config.db_timeout,
     };
+    let identity_maintenance = shapontravels_api::identity::maintenance::Maintenance::from_env()?;
+    let identity_runtime = shapontravels_api::identity::api::Runtime::from_env(&pool)?
+        .map(|runtime| runtime.with_maintenance(identity_maintenance.0));
     let listener = tokio::net::TcpListener::bind(config.bind)
         .await
         .map_err(|_| "could not bind HTTP listener")?;
@@ -104,18 +107,37 @@ async fn run() -> Result<(), String> {
         "Search admission configured"
     );
     let (cleanup_stop, cleanup_receiver) = tokio::sync::oneshot::channel();
-    let cleanup = tokio::spawn(shapontravels_api::cleanup::run(
-        pool.clone(),
-        cleanup_receiver,
-    ));
-    let result = axum::serve(
-        listener,
-        router_with_search_limits(state, config.search_limits),
-    )
-    .with_graceful_shutdown(shutdown())
-    .await;
+    let cleanup = (!identity_maintenance.0).then(|| {
+        tokio::spawn(shapontravels_api::cleanup::run(
+            pool.clone(),
+            cleanup_receiver,
+        ))
+    });
+    let (identity_stop, identity_receiver) = tokio::sync::oneshot::channel();
+    let identity_worker = identity_runtime.clone().map(|runtime| {
+        tokio::spawn(shapontravels_api::identity::recovery::run(
+            pool.clone(),
+            runtime,
+            identity_receiver,
+        ))
+    });
+    let mut app = router_with_search_limits(state, config.search_limits)
+        .layer(axum::Extension(shapontravels_api::identity::rollout::Guard))
+        .layer(axum::Extension(identity_maintenance));
+    if let Some(runtime) = identity_runtime {
+        app = app.layer(axum::Extension(runtime));
+    }
+    let result = axum::serve(listener, app)
+        .with_graceful_shutdown(shutdown())
+        .await;
+    let _ = identity_stop.send(());
+    if let Some(worker) = identity_worker {
+        let _ = worker.await;
+    }
     let _ = cleanup_stop.send(());
-    let _ = cleanup.await;
+    if let Some(cleanup) = cleanup {
+        let _ = cleanup.await;
+    }
     result.map_err(|_| "HTTP server failed")?;
     pool.close().await;
     Ok(())

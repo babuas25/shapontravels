@@ -1,6 +1,6 @@
 # Flight Aggregation & Booking API — Requirements
 
-Status: Implementation in progress — Steps 1–2 verified complete; Step 5 implemented within documented coverage; Steps 3–4 and 6 partially implemented; Step 7 partially implemented (held-ticket UAT); Step 8 partially verified. Latest prebooking/release verification update: 2026-09-10. Historical milestone notes below are superseded where later updates say so.
+Status: Implementation in progress — Steps 1–2 verified complete; Step 5 implemented within documented coverage; Steps 3–4 and 6 partially implemented; Step 7 partially implemented (held-ticket UAT); Step 8 partially verified. Latest local B2B pricing verification update: 2026-09-17 (see the current pricing note below); this does not imply a new production release. Historical milestone notes below are superseded where later updates say so.
 
 Important current priority (2026-09-10): আরও optimization প্রয়োজন, কোনো valid offer/field বাদ দিয়ে নয়। See [Tripfeels source comparison](docs/evidence/TRIPFEELS_OPTIMIZATION_COMPARISON_2026-09-10.md).
 
@@ -31,6 +31,67 @@ Important current priority (2026-09-10): আরও optimization প্রয়ো�
 - User prohibits Hold/Book and Issue through production supplier APIs. Booking validation must use Triplover UAT only; the user has updated the local `.env` for this purpose. This restriction supersedes historical production mutation permissions.
 - Local configuration inspection confirms Triplover Search host `searchapi-uat.triplover.com` and servicing host `userapi-uat.triplover.com`, matching the supplied UAT contract. Credentials are present; this inspection does not verify authentication or a running/deployed process's configuration.
 - Before any booking execution, assert both UAT hosts and use fresh UAT Search/RePrice references. Do not reuse production references or fall back to a production supplier. An enabled ticketing configuration flag alone is not an instruction to issue a ticket.
+
+<a id="b2b-tier-pricing-current"></a>
+### বর্তমান B2B Markup, Tier Discount ও Agent Payable — implemented, 2026-09-17
+
+**এটিই বর্তমান অনুমোদিত ও implemented B2B pricing rule।** এই নোটের সঙ্গে নিচের পুরোনো markup/commission note-এর বিরোধ হলে এই নিয়ম প্রযোজ্য। Tier share markup-এর ওপর বা markup ছাড়া Gross − Supplier Fare-এর ওপর বসবে না; **markup যোগ করার পরে অবশিষ্ট Discount-এর ওপর বসবে**।
+
+#### Markup ও Discount কীভাবে হিসাব হবে
+
+প্রত্যেক passenger type-এর individual supplier fare দিয়ে আলাদাভাবে হিসাব হবে:
+
+```text
+Gross = original Base Fare + Taxes
+Percentage Markup = original Supplier totalPrice × configured percentage / 100
+Fixed Markup = configured fixed amount per passenger
+Marked-up Supplier Fare = round_half_up(Supplier totalPrice + Markup, 2)
+Available Discount = Gross − Marked-up Supplier Fare
+Agent Discount = round_half_up(Available Discount × Tier Share / 100, 2)
+Agent Payable = Gross − Agent Discount
+Journey totals = sum(each rounded passenger amount × its passenger count)
+```
+
+- একটি applicable markup rule-ই জিতবে; existing Specific Agent → All B2B fallback ও airline/route priority অপরিবর্তিত। একাধিক markup যোগ বা stacking হবে না।
+- Percentage-এর basis supplier-এর original individual `totalPrice`; adult fare দিয়ে child/infant fare অনুমান করা হবে না। Exact decimal ব্যবহার হবে; markup আলাদাভাবে round না করে supplier + markup-এর ফল দুই দশমিক half-up round হবে। Gross-এর base/taxes-ও per passenger দুই দশমিকে round করে যোগ হয়।
+- Supplier total-এ original AIT একবার অন্তর্ভুক্ত থাকে। AIT আবার যোগ হবে না; Gross শুধুই Base + Taxes। Fare breakdown-এ AIT আলাদা evidence হিসেবে থাকে।
+- Fixed markup প্রতিটি individual passenger-এর whole-journey fare-এ একবার। Round trip/multicity-তে প্রতি leg/segment-এ আবার markup হবে না। Rule নির্বাচন প্রথম requested route ও তার প্রথম segment airline অনুযায়ী; ফেরত/পরের route-এর markup stack বা average হবে না।
+
+#### Basic, Professional ও Enterprise
+
+বর্তমান local Admin settings **Basic 55%, Professional 85%, Enterprise 100%** ব্যবহারকারী রাখতে বলেছেন। এগুলো available discount-এর share। Admin settings বদলালে পরবর্তী Search/RePrice সেই share ব্যবহার করবে; নতুন শতাংশ hard-code করা হয়নি। পুরোনো migration defaults 60/80/100 বর্তমান saved settings নয়।
+
+অনুমোদিত উদাহরণ: Supplier Fare **BDT 5,263.48**, markup **1%**, Base **4,624.00**, Taxes **1,125.00**। Gross **5,749.00**, Marked-up Supplier Fare **5,316.11**, Available Discount **432.89**। প্রদর্শিত markup **52.63** হলো supplier fare-এর সঙ্গে যোগ হওয়া অঙ্ক; Fare tab-এর Discount নয়।
+
+| Tier | Available Discount-এর share | Agent Discount | Agent Payable |
+| --- | ---: | ---: | ---: |
+| Basic | 55% | BDT 238.09 | **BDT 5,510.91** |
+| Professional | 85% | BDT 367.96 | **BDT 5,381.04** |
+| Enterprise | 100% | BDT 432.89 | **BDT 5,316.11** |
+
+Enterprise 100% হলে পুরো available discount agent পায়, তাই **Agent Payable = Supplier Fare + Markup-এর rounded total**। একই supplier fare-এ markup বাড়ালে payable বাড়বে ও discount কমবে। Gross সব tier-এ একই থাকবে।
+
+#### Flight card, Fare tab ও API
+
+- Staff ও B2B—উভয় flight card-এর বড় অঙ্কে **Gross fare** দেখাবে। পাশের arrow চাপলে staff-এর **Supplier fare**, B2B-এর **Agent fare** প্রকাশ পাবে; শুরুতে secondary fare লুকানো থাকে।
+- Card-এ Basic/Professional/Enterprise বা share percentage দেখানো হবে না। B2B Fare tab এবং RePrice review-এ **Discount = Gross − Agent Payable** দেখাবে।
+- Frontend sorting, minimum-price summaries ও price filter B2B-এর actual payable ব্যবহার করে। Gross card display দিয়ে payment amount বদলানো হয় না।
+- Existing pricing API/snapshot-এর `commission` field backward compatibility-এর জন্য রাখা হয়েছে; বর্তমান অর্থ **Agent Discount**, supplier markup নয়। Invariant: `gross = commission + payable`। Supplier cost B2B response-এ প্রকাশ করা হয় না।
+- B2B supplier-compatible Search/RePrice `totalPrice` ও passenger/component totals published Gross বহন করে; actual Agent Payable আলাদা pricing snapshot-এর `payable` থেকে নিতে হবে। পুরোনো supplier-compatible `discountPrice` field-কে Fare tab-এর Agent Discount ধরে নেওয়া যাবে না।
+- Marked-up supplier fare Gross-এর বেশি হলে negative discount signed অবস্থায় থাকে; silently zero করে দেওয়া হয় না। Wallet debit/payable ইতিবাচক amount হিসেবেই validate হয়।
+
+#### Implementation ও verification status
+
+- [x] Rust Search ও RePrice-এ একই approved formula, resolved markup এবং current tier share প্রয়োগ করা হয়েছে।
+- [x] Immutable quote snapshots ও accepted-payable reconciliation যুক্ত আছে; পুরোনো accepted booking নতুন rule/share দিয়ে পুনরায় হিসাব হয় না।
+- [x] Existing frontend card toggle, Agent fare, Discount column এবং RePrice review সংশোধন করা হয়েছে।
+- [x] Local running backend rebuilt/restarted এবং live Search-এ উপরের Basic 55% ও Enterprise 100% example যাচাই হয়েছে। Professional 85% exact regression-এ verified।
+- [x] Multi-passenger ও mixed ADT/CHD/CNN/INF/INS regression, captured 2 Adult + 1 Child + 1 Infant return/multicity, fixed/percentage markup, per-passenger rounding ও count aggregation পাস। Expanded Search/RePrice integration-এ exact totals এবং rule no-stacking যাচাই হয়েছে।
+- [x] Rust tests, disposable PostgreSQL integration, frontend regressions, TypeScript, targeted ESLint ও strict Clippy পাস। এই pricing correction **local implementation**; production deployment করা হয়নি।
+
+Coverage সীমা: verified return/multicity fares-এ পুরো journey একটি pricing component-এ আসে। Supplier আলাদা multiple pricing components বা অজানা extra-service allocation দিলে support এখনো সীমিত; unsupported coverage error হতে পারে, allocation অনুমান করে ভুল fare বানানো হবে না।
+
+Implementation contract: [B2B tiers](docs/B2B_TIERS.md)। Verification: [final discount correction](docs/evidence/B2B_TIER_DISCOUNT_2026-09-17.md), [multi-passenger/journey review](docs/evidence/B2B_MULTI_PASSENGER_JOURNEY_REVIEW_2026-09-17.md)। B2C-এর supplier-plus-markup projection অপরিবর্তিত। বর্তমান task-এ live Search ছাড়া real Book/Hold, Issue, Cancel বা acceptance করা হয়নি।
 
 ## 1. উদ্দেশ্য ও scope
 
@@ -86,7 +147,7 @@ Requirements baseline-এর পর 2026-09-08-এ ব্যবহারকা�
 
 ### 5.1 মূল নিয়ম
 
-**প্রতি itinerary-এর সব আলাদা class/fare option রাখতে হবে। প্রতিটি সমমানের option-এর জন্য active connections-এর সর্বনিম্ন original Supplier total price (সব যাত্রীর মোট, আমাদের markup ছাড়া) দিয়ে supplier নির্বাচন করতে হবে। এরপর নির্বাচিত offer-এ applicable markup যোগ করে user-facing Selling Fare হবে। পুরো itinerary-এর শুধু একটি cheapest class রেখে অন্য class বাদ দেওয়া যাবে না।**
+**প্রতি itinerary-এর সব আলাদা class/fare option রাখতে হবে। প্রতিটি সমমানের option-এর জন্য active connections-এর সর্বনিম্ন original Supplier total price (সব যাত্রীর মোট, আমাদের markup ছাড়া) দিয়ে supplier নির্বাচন করতে হবে। এরপর applicable markup resolve হবে: B2C-তে supplier + markup Selling Fare; B2B-তে [বর্তমান tier discount rule](#b2b-tier-pricing-current) দিয়ে Agent Payable হবে। পুরো itinerary-এর শুধু একটি cheapest class রেখে অন্য class বাদ দেওয়া যাবে না।**
 
 উদাহরণ — একই flight, একই passenger mix ও currency; নিচের দামগুলো original Supplier total price, আমাদের markup ছাড়া:
 
@@ -120,14 +181,14 @@ Requirements baseline-এর পর 2026-09-08-এ ব্যবহারকা�
 - Base fare, tax ও mandatory fees অন্তর্ভুক্ত থাকবে। Optional ancillary যোগ করলে একই selection-এর দাম তুলনা করতে হবে। কোনো component double-count করা যাবে না।
 - Money calculation exact decimal বা currency minor units দিয়ে করতে হবে; floating-point arithmetic নয়।
 - Cross-currency comparison currency-conversion contract ছাড়া করা যাবে না।
-- User correction — 2026-09-09: comparable offers-এর original Supplier total price দিয়ে lowest supplier নির্বাচন হবে। এরপর নির্বাচিত original offer-এ §5.5–§5.6 অনুযায়ী applicable markup যোগ করে client-facing Selling Fare হবে। Markup বা Selling Fare supplier ranking বদলাবে না। এটি আগের markup-পরবর্তী lowest-selection নিয়ম প্রতিস্থাপন করে। পুরোনো application-এর অন্য pricing বা business rules স্বয়ংক্রিয়ভাবে inherit করা যাবে না।
+- User correction — 2026-09-09: comparable offers-এর original Supplier total price দিয়ে lowest supplier নির্বাচন হবে। এরপর নির্বাচিত original offer-এ §5.5–§5.6 অনুযায়ী markup calculate হবে; B2B final Agent Payable-এর জন্য [বর্তমান tier discount rule](#b2b-tier-pricing-current) অতিরিক্তভাবে প্রযোজ্য। Markup বা Selling Fare supplier ranking বদলাবে না। এটি আগের markup-পরবর্তী lowest-selection নিয়ম প্রতিস্থাপন করে। পুরোনো application-এর অন্য pricing বা business rules স্বয়ংক্রিয়ভাবে inherit করা যাবে না।
 - Equal original Supplier total price হলে documented deterministic connection priority দিয়ে tie resolve করতে হবে; markup দিয়ে tie resolve হবে না। User-approved priority (2026-09-09): Takeoff → Firsttrip → Triplover। অন্য equivalent supplier offers internalভাবে রাখা যাবে।
 - Search price guaranteed নয়। RePrice-এর পর পরিবর্তিত total ও conditions client-কে জানাতে হবে; পরিবর্তিত দাম গ্রহণ ছাড়া Book/issue চালানো যাবে না।
 - RePrice-এর পর silent supplier switching হবে না। অন্য supplier offer বেছে নিলে তার নিজস্ব reference দিয়ে নতুন RePrice ও client acceptance প্রয়োজন।
 
 ### 5.5 Final Markup Business Rules & Fallback — 2026-09-07
 
-এই section ব্যবহারকারীর সর্বশেষ final specification। এটি আগের সব markup rules এবং অন্য project থেকে নেওয়া markup baseline সম্পূর্ণ প্রতিস্থাপন করে। উদ্দেশ্য: applicable Supplier Fare-এর ওপর একটি markup নির্ধারণ করে customer/agent-এর Selling Fare তৈরি করা। Scope Search → RePrice → Book → Issue/Confirmed পর্যন্ত।
+এই section-এর rule selection, priority ও supplier-based markup calculation প্রযোজ্য। তবে B2B final Agent Payable ও tier discount-এর জন্য [বর্তমান 2026-09-17 নিয়ম](#b2b-tier-pricing-current) অনুসরণ করতে হবে। এখানে Supplier + Markup হলো B2B available discount তৈরির intermediate amount; B2C-এর Selling Fare হিসেবে আগের নিয়ম বহাল। Scope Search → RePrice → accepted snapshot; Book/Issue-তে markup আবার যোগ হয় না।
 
 **মূল নিয়ম:** একটি fare-এর জন্য একটিমাত্র applicable markup rule apply হবে। একাধিক matching markup যোগ হবে না। প্রথম applicable priority match-ই final; তারপর অন্য rules বিবেচনা করা হবে না।
 
@@ -213,7 +274,7 @@ S = supplier original per-passenger `totalPrice`; M = winning rule-এর per-pa
 
 ### 5.6 Final Markup Response Shape & Discount Calculation — 2026-09-07
 
-এই section ব্যবহারকারীর final passenger-level pricing ও response projection contract। §5.5-এর audience ও একটিমাত্র winning rule selection অপরিবর্তিত থাকবে। Supplier response contract/shape অপরিবর্তিত থাকবে; commercial `totalPrice` হবে আমাদের Selling Fare।
+এই section মূল supplier-plus-markup/B2C projection contract ও তার historical examples বর্ণনা করে; B2B-এর final `totalPrice`, Agent Discount ও Payable-এর জন্য [বর্তমান নিয়ম](#b2b-tier-pricing-current) প্রযোজ্য। B2B projected `totalPrice` এখন published Gross; actual payable আসে tier snapshot থেকে। §5.5-এর audience ও একটিমাত্র winning rule selection এবং supplier response shape preservation অপরিবর্তিত।
 
 #### Strict response preservation contract
 
@@ -247,7 +308,7 @@ Final top-level totalPrice = sum(U_t × q_t)
 - `ins: null`-এর মতো absent passenger fare shape preserve হবে; count zero হলে total-এ contribution zero। Positive count-এর fare missing/null হলে validation/mapping error, invented zero fare নয়।
 - Supplier precision ও original values preserve করতে হবে। User-approved §5.7 অনুযায়ী individual selling price ২ decimal half-up round করে তারপর count aggregate হবে; supplier original numeric values ও final examples-এর fractional values preserve হবে।
 
-#### Verified 3% example
+#### Verified 3% example — supplier-plus-markup/B2C projection; B2B final payable নয়
 
 | Type | Count | Supplier individual total | Markup | New individual total | Original base | Original taxes | Original AIT | New discount |
 |---|---:|---:|---:|---:|---:|---:|---:|---:|
@@ -411,11 +472,12 @@ Foreign keys, ownership constraints, monetary precision, indexed reference looku
 - Admin supplier toggle restart ছাড়া পরের Search-এ কার্যকর হয় এবং persisted থাকে। Disabled supplier partial failure হিসেবে দেখায় না; stale unbooked offers reject হয় এবং existing bookings নিজস্ব connection/permissions দিয়ে service করা যায়।
 - Different RBD, baggage, refundability বা uncertain brand match ভুলভাবে merge হয় না। Single-supplier option হারায় না।
 - Passenger totals, mandatory fees, currency precision ও deterministic ties সঠিকভাবে কাজ করে।
+- Current B2B acceptance: Gross 5,749, supplier 5,263.48, markup 1% হলে shares 55/85/100 অনুযায়ী Discount 238.09/367.96/432.89 এবং Agent Payable 5,510.91/5,381.04/5,316.11 হতে হবে। Multi-pax/return/multicity-তে per-passenger rounding, count aggregation এবং Search/RePrice snapshot consistency যাচাই হবে।
 - Markup transformation-এ recursive response shape অপরিবর্তিত এবং allowlisted pricing paths ছাড়া সব values identical থাকবে। Unknown fields ও null/absent distinction preserve হবে; নতুন metadata বা pricing field যোগ হবে না।
-- Markup checks: S=30,000 + Fixed 500 → Selling Fare 30,500; S=30,000 at 2% → Selling Fare 30,600। §5.5-এর ABC example-এ চারটি expected markup 100/200/400/500 হতে হবে। No-stacking example-এ 200 হবে, 1,400 নয়।
+- Supplier-plus-markup engine/B2C checks (B2B final payable নয়): S=30,000 + Fixed 500 → Selling Fare 30,500; S=30,000 at 2% → Selling Fare 30,600। §5.5-এর ABC example-এ চারটি expected markup 100/200/400/500 হতে হবে। No-stacking example-এ 200 হবে, 1,400 নয়।
 - Agent All/All rule B2B specific rule-এর আগে জিতবে; unrelated Agent rule B2B fallback বন্ধ করবে না। B2C শুধু নিজের chain ব্যবহার করবে; arbitrary agent identity দিয়ে special pricing পাওয়া যাবে না।
 - Lowest selection original Supplier total price দিয়ে হবে, markup-পরবর্তী Selling Fare দিয়ে নয়। Test-এ supplier-total winner ও selling-total winner ভিন্ন হলে supplier-total winner-ই নির্বাচিত হবে; নির্বাচিত offer-এর markup projection যাচাই হবে। RePrice acceptance/versioning এবং Book/Issue-তে markup পুনরায় যোগ না হওয়ার checks থাকবে। §5.5-এর unresolved edge-case decisions অনুযায়ী additional checks যুক্ত হবে।
-- §5.6 fixture-এ CHD total=27,660.65 ও discount=-805.65; counts 2/1/1/1-এ top-level এবং single-component total=134,745.63, component discount=-3,924.63। Base/taxes/AIT অপরিবর্তিত, AIT double-count নয়; null INS preserve হবে।
+- §5.6 supplier-plus-markup/B2C fixture-এ CHD total=27,660.65 ও discount=-805.65; counts 2/1/1/1-এ top-level এবং single-component total=134,745.63, component discount=-3,924.63। Base/taxes/AIT অপরিবর্তিত, AIT double-count নয়; null INS preserve হবে।
 - Fixed 500 এবং তিনটি individual passenger হলে aggregate markup 1,500 হবে, flight segments যতই থাকুক। Existing supplier discount nonzero থাকলেও formula দিয়ে recompute হবে; negative discount suppress হবে না।
 - One supplier failure-এ valid partial result পাওয়া যায়; all-failed outcome স্পষ্ট থাকে।
 - Selected offer-এর পরের সব operation সঠিক owner ও supplier connection/reference দিয়ে চলে।
@@ -1131,7 +1193,7 @@ Final validation: 60 regular tests passed; the complete disposable-database suit
 
 ### B2B tier commission shares — 2026-09-14
 
-- User approved applying Basic 60%, Professional 80%, Enterprise 100% shares to the existing resolved markup amount. Gross stays identical across tiers; payable is gross minus the tier commission. No independent tier markup rules or stacking.
+- **Historical rule corrected on 2026-09-17:** এই increment-এ markup share ব্যবহার হয়েছিল; সেটি superseded। এখন tier share বসে `Gross − (Supplier Fare + Markup)` available discount-এর ওপর, তারপর Agent Payable = Gross − Agent Discount। [বর্তমান নিয়ম ও example](#b2b-tier-pricing-current) অনুসরণ করুন। Basic/Professional/Enterprise-এর current saved local shares 55/85/100; 60/80/100 শুধু migration defaults। No independent tier markup rules or stacking.
 - Added migration 0021: Basic default client tier and immutable Search/RePrice pricing snapshots. Existing historical records are not backfilled/repriced. B2C has no tier commission.
 - Added Superadmin-only audited tier assignment, human Admin tier lookup, current tier in `/auth/me`, owner-scoped individual and bounded batch pricing APIs. Booking pricing uses its accepted RePrice snapshot through the ticket lifecycle; existing supplier-compatible responses keep gross totals.
 - Frontend integration contract: [B2B tiers](docs/B2B_TIERS.md). Separate ShoponTravels frontend, API Management enablement/sidebar and settlement are not implemented in this increment.
@@ -1140,7 +1202,7 @@ Final validation: 60 regular tests passed; the complete disposable-database suit
 
 ### Admin-configurable tier shares — 2026-09-14
 
-- User clarified that Basic/Professional/Enterprise markup shares must be Admin-controlled. The 60/80/100 values are now database defaults, not fixed runtime percentages.
+- Basic/Professional/Enterprise shares Admin-controlled। **বর্তমান অর্থ available discount share**, markup share নয়; [2026-09-17 correction](#b2b-tier-pricing-current) প্রযোজ্য। 60/80/100 migration defaults; current saved local values 55/85/100, runtime hard-code নয়।
 - Migration 0022 stores an atomic, versioned global policy. Human Admin/Superadmin can GET/PUT `/admin/tier-policy`; client tier assignment remains Superadmin-only. Whole percentages 0–100 with Basic <= Professional <= Enterprise; stale writes return 409, and successful changes record previous/new policy and actor in audit.
 - Search/RePrice capture tier and configured share atomically at authentication. Existing tokens immediately see updates on subsequent requests; `/auth/me` and Admin tier lookup expose current shares. Quote/booking snapshots keep their original amounts. A changed payable requires RePrice acceptance even if tier/gross are unchanged.
 - Local backend only; frontend settings form, working/production migrations, push/deploy remain pending.
@@ -1182,4 +1244,63 @@ Final validation: 60 regular tests passed; the complete disposable-database suit
 - Local working database privately backed up and archive verified before migrations 0021–0023; all three are recorded successful. Production completed the established backup → migrate → grants → restart → readiness workflow.
 - Independent HTTPS checks returned 200 for live/readiness/Swagger/OpenAPI. Production readiness verifies migration checksums through 23. Commercial docs include tier-pricing routes and exclude Admin definitions; new protected Admin and pricing routes reject anonymous requests with 401.
 - Frontend remains local at `7caaf8c`, with no push/deployment or Vercel configuration change. Live Supabase remains untouched; no real supplier Book/Issue/Cancel or private UAT data transfer occurred. Authenticated frontend production integration is deferred, and frontend booking calculations still use the existing engine.
+
+### Local Rust frontend prebooking — 2026-09-14
+
+- User selected Search → RePrice → price acceptance and tier-price display as the next step, with booking/wallet migration afterward. All changes in both repositories remain uncommitted and local; no push, deployment or remote configuration change is authorized for this increment.
+- Added a five-minute, server-only portal session for a freshly authenticated, active Clerk B2B owner linked to an active Rust client with `search:read`. Basic, Professional and Enterprise portal users qualify independently of external API enablement. The session is restricted to prebooking paths and cannot Book, Issue, Cancel or access Admin operations.
+- Added opt-in `SHAPON_FLIGHT_ENGINE=rust-prebooking` rendering and a same-origin Next facade. Search preserves all offers/alternatives and obtains complete owner-scoped tier snapshots in batches of 100. Exact decimal amounts drive payable display/filtering/sorting. RePrice and explicit acceptance use native Rust ownership, expiry and revision checks; no legacy markup or checkout integration is applied.
+- Added migration 0024, exercised only in disposable local PostgreSQL databases. Working/production migrations and live Supabase remain untouched. Existing local frontend environment files retain their prior configuration.
+- Verification: 64 ordinary Rust tests, full disposable PostgreSQL suite (41.53 seconds), formatting, strict Clippy; frontend boundary regressions, TypeScript, full ESLint and production build. Offline actual-React/Next/Rust/PostgreSQL review covers three tiers, authority/isolation, fare rules, changed pricing, stale/mismatched acceptance and desktop/mobile flows with zero bookings. Clerk and supplier fixtures are explicitly simulated. See [portal contract](docs/PORTAL_PREBOOKING.md) and the sibling frontend's `docs/RUST_PREBOOKING.md`.
 - [Release evidence](docs/evidence/API_MANAGEMENT_RELEASE_2026-09-14.md). Prior local-only backend notes are superseded by this release; documentation-only follow-up uses `[skip ci]` and the deployed application stays `44fc47d`.
+
+### Existing frontend design correction — 2026-09-14
+
+- User requested replacing the old flight API within the existing frontend design and deleting the separate test results component. Deleted `RustPrebookingResults`; `/flights` now always renders the original `FlightResults`, `ItineraryCard`, filter sidebar, sorting/date controls and details panels with Rust data.
+- Replaced the old Search, FareRules and RePrice frontend handlers with the owner-scoped Rust facade, added a price-acceptance route and removed the opt-in switch. The initial cards displayed tier payable prominently; the 2026-09-17 UI correction now displays Gross prominently and reveals Agent fare through the arrow. Review/accept uses the exact tier payable snapshot without opening legacy checkout.
+- All changes remain local and uncommitted. No push or deployment of `shapontravels` or the frontend; no working/production migration or live Supabase/supplier mutation. The browser review now mounts the original results components.
+
+### Local correction — administrator fare visibility
+
+- Admin and Super Admin search directly in the original frontend design and see supplier/gross totals and passenger amounts. No B2B account selection or tier commission is applied to staff. Ordinary B2B accounts keep tier pricing and price acceptance.
+- Migration 0025 separates technical staff ownership from B2B membership. Fresh Clerk authority selects a server-only staff session; supplier amounts are read from immutable originals. Staff cannot accept a customer price, book, issue, cancel, or obtain external machine access.
+- Local role/ownership/supplier-disclosure tests, Search/RePrice/fare rules, exact passenger rounding and desktop/mobile checks passed. The actual isolated dashboard API was updated after a local backup, preserving memberships and credentials. Its supplier connections remain disabled; fixture verification on 13002 is explicitly labelled.
+- No commits, pushes, deployments, working/production database changes or live Supabase writes.
+
+### Local dashboard live-search connection — 2026-09-14
+
+- Connected the actual Clerk dashboard on 3002 to FirstTrip and TakeOff Search/FareRules/RePrice through the loopback Rust server on 18081. The two suppliers and fixed BDT 500 local review markup were initialized in the previously empty isolated review configuration after backup. Triplover UAT remains excluded.
+- No-write wrapper explicitly denies supplier booking, ticket issue, cancellation, PNR and reports even if adapter capability flags were changed. Unit check and strict Clippy pass.
+- Actual DAC–SIN 2026-09-30 adult-one request returned 288 selected offers (156 FirstTrip, 132 TakeOff). No supplier write, working/production database mutation, Supabase write, commit, push or deployment.
+
+### Held-ticket issue without PNR — 2026-09-15
+
+- User requested a complete review and explicitly selected Search → RePrice → Book → NewTicket without a PNR call. The existing local price-acceptance step remains. This supersedes the older mandatory fresh-PNR policy for held-ticket issue only.
+- Removed the automatic PNR lookup and 30-second PNR freshness requirement. NewTicket uses the six saved supplier references and locally verified Hold. Optional, previously verified PNR evidence may still block known cancellation/ticketing or supersede the saved deadline; failed/unverified PNR reads cannot block issue.
+- Explicit-offset deadlines retain the timeout-plus-30-second check. Empty, unsupported and offset-free deadlines are retained as supplier-validation-required; no timezone is invented. Supplier rejection/timeout stays unresolved and never triggers a second Issue.
+- Preserved permissions, accepted prices, environment/supplier gates, immutable reservations, Issue/Cancel exclusion and ticket-receipt verification. Explicit PNR, Cancel and uncertain-ticket recovery retain their separate read requirements. The follow-up review below introduces migration 0028; frontend ticketing remains outside this change.
+- Validation: 71 ordinary tests passed; the full disposable PostgreSQL suite passed in 44.11 seconds, including zero-PNR success/replay, unavailable lookups, deadline cases, stored contradictory evidence, concurrency and uncertain outcomes. The task-created database was removed. Final static checks and full review: [evidence](docs/evidence/TICKETING_WITHOUT_PNR_2026-09-15.md).
+- Local, uncommitted change only. No real supplier mutation, working-database migration, restart, push or deployment.
+
+### Held-ticket consistency follow-up review — 2026-09-15
+
+- Reproduced and fixed a verified Ticketed/Cancelled observation being replaced by a later failed PNR check, allowing incorrect issue. Migration 0028 retains append-only observations; issue reads latest verified evidence by request time under the booking lock. Current saved observations are backfilled; earlier overwritten evidence is unrecoverable.
+- Reproduced and fixed surname-only Book passengers failing ticket/report identity verification. Distinct opaque references, exact passenger matching and zero-PNR issue/replay/report now have integration coverage.
+- Aligned `Created` interpretation between the public PNR manual-review header and issue eligibility. Added reverse-completion-order PNR tests, migration backfill and immutable-history checks.
+- Migration 0028 must precede serving this build. It is exercised only in disposable databases; working/production databases and running servers are unchanged. Final checks are recorded in the [review evidence](docs/evidence/TICKETING_WITHOUT_PNR_2026-09-15.md).
+- Final verification: 72 ordinary tests passed; full PostgreSQL suite including migration upgrade/backfill and reversed PNR completion order passed in 44.90 seconds. Strict Clippy, formatting and diff checks passed. All task-created databases were removed; supplier responses were simulated.
+
+### Explicit portal status/deadline refresh — 2026-09-15
+
+- Connected the existing receipt Quick Action through the same-origin, freshly authenticated Next bridge to Rust's existing PNR reconciliation helper. The existing receipt route accepts optional `refresh:true`; no new Rust endpoint or automatic PNR dependency was added.
+- B2B ownership, Super Admin authority, active client linkage and supplier servicing are checked before lookup. Saved references stay in Rust; browser receives only verified status/deadline/check time/manual-review fields.
+- Fixed missing latest PNR deadlines falling back to obsolete Book values. Reads select latest verified immutable history, retain previous evidence/timestamps on failure, and never invent a supplier timezone.
+- Ordinary tests, full disposable PostgreSQL suite (44.38 seconds), actual Next/Rust/PostgreSQL refresh integration, TypeScript, ESLint, production frontend build, strict Clippy and formatting passed. Both disposable databases were removed. [Evidence](docs/evidence/PORTAL_PNR_REFRESH_2026-09-15.md).
+- Migration 0028 remains required before serving the build. No working/production migration, running-server restart, live supplier action, commit, push or deployment was performed.
+
+### Local portal startup recovery — 2026-09-16 (Bangladesh time)
+
+- Diagnosed a stopped Rust server: frontend ran on 3000 and targeted 18081, while PostgreSQL was available on 55439. Existing bridge credentials matched.
+- Added `node scripts/portal-dev.mjs` to resume this workspace's saved portal setup, start PostgreSQL if needed, back up before pending migrations, build the backend and serve it on 18081. It preserves supplier controls, credentials and existing records.
+- Backed up the existing local portal database and applied migration 0028; both retained held bookings remain. Backend readiness and bridge login returned 200. No production database or deployment was touched.
+- Live Triplover UAT read verification: direct Rust DAC–SIN 30 September Search returned 38 offers; a subsequent real signed-in frontend Search rendered 102 schedule options with fares and supplier labels. No Book/Issue/Cancel was sent. [Run commands](docs/LOCAL_PORTAL.md).

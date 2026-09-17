@@ -7,7 +7,7 @@ use crate::{
     supplier::ReadOperation,
 };
 use axum::{
-    Json, Router,
+    Extension, Json, Router,
     extract::State,
     http::{HeaderMap, HeaderValue, StatusCode},
     routing::post,
@@ -54,7 +54,7 @@ struct Offer {
     tier_pricing: Option<Value>,
 }
 #[utoipa::path(post,path="/api/Reprice",tag="Flights",security(("machine_token"=[])),request_body=RepriceRequest,responses((status=200,body=Object,description="Versioned selling response. X-Pricing-Version identifies the revision; explicitly accept its priceCodeRef before future booking."),(status=404,description="Unknown or foreign offer"),(status=409,description="FARE_UNAVAILABLE: choose another offer; NEW_SEARCH_REQUIRED: search again"),(status=410,description="Expired offer or supplier session: search again"),(status=422,description="Invalid references or unsupported pricing"),(status=502,description="Supplier failure"),(status=504,description="Supplier timeout")))]
-async fn reprice(
+pub(crate) async fn reprice(
     machine: Machine,
     State(state): State<AppState>,
     Json(request): Json<RepriceRequest>,
@@ -141,7 +141,10 @@ async fn reprice(
     {
         return Err(error("SUPPLIER_ITINERARY_MISMATCH"));
     }
-    if fare["isPriceChanged"].as_bool().is_none() {
+    if ["isPriceChanged", "bookable", "refundable"]
+        .iter()
+        .any(|key| fare[*key].as_bool().is_none())
+    {
         return Err(error("SUPPLIER_RESPONSE_INVALID"));
     }
     if fare["currency"].as_str() != Some(row.currency.as_str()) {
@@ -179,8 +182,12 @@ async fn reprice(
         .iter()
         .find(|r| r.id.to_string() == rule.id)
         .ok_or(error("PRICING_CONFIGURATION_ERROR"))?;
-    let selling_fare = crate::projection::single_component(fare, &rule.markup)
-        .map_err(|_| error("SUPPLIER_PRICING_COVERAGE_UNSUPPORTED"))?;
+    let selling_fare = if machine.tier.is_some() {
+        crate::projection::published_gross(fare)
+    } else {
+        crate::projection::single_component(fare, &rule.markup)
+    }
+    .map_err(|_| error("SUPPLIER_PRICING_COVERAGE_UNSUPPORTED"))?;
     if decimal(&fare["taxes"])? != decimal(&fare["bookingComponents"][0]["taxes"])? {
         return Err(error("SUPPLIER_PRICING_COVERAGE_UNSUPPORTED"));
     }
@@ -190,6 +197,7 @@ async fn reprice(
         machine.tier,
         machine.commission_share_percent,
         &row.currency,
+        &rule.markup,
     )?;
     let revision = Uuid::new_v4();
     let mut references = row
@@ -229,7 +237,7 @@ async fn reprice(
         return Err(ApiError(StatusCode::CONFLICT, "NEW_SEARCH_REQUIRED"));
     }
     let (valid,): (bool,) =
-        sqlx::query_as("SELECT expires_at>clock_timestamp() FROM flight_offers WHERE id=$1")
+        sqlx::query_as("SELECT o.expires_at>clock_timestamp() AND s.expires_at>clock_timestamp() FROM flight_offers o JOIN flight_searches s ON s.id=o.search_id WHERE o.id=$1")
             .bind(id)
             .fetch_one(&mut *tx)
             .await?;
@@ -241,7 +249,7 @@ async fn reprice(
             .bind(id)
             .fetch_one(&mut *tx)
             .await?;
-    sqlx::query("INSERT INTO flight_reprices(id,offer_id,client_id,version,original,selling,reference_map,rule_id,rule_version,audience,agent_id,currency,selected_directions,tier_pricing,expires_at) SELECT $1,id,client_id,$2,$3,$4,$5,$6,$7,$8,$9,$10,$12,$13,expires_at FROM flight_offers WHERE id=$11")
+    sqlx::query("INSERT INTO flight_reprices(id,offer_id,client_id,version,original,selling,reference_map,rule_id,rule_version,audience,agent_id,currency,selected_directions,tier_pricing,expires_at) SELECT $1,o.id,o.client_id,$2,$3,$4,$5,$6,$7,$8,$9,$10,$12,$13,LEAST(o.expires_at,s.expires_at) FROM flight_offers o JOIN flight_searches s ON s.id=o.search_id WHERE o.id=$11")
  .bind(revision).bind(version).bind(original).bind(&selling).bind(json!(references)).bind(record.id).bind(record.version).bind(&machine.audience).bind(machine.agent_id).bind(&row.currency).bind(id).bind(selection).bind(tier_pricing).execute(&mut *tx).await?;
     sqlx::query("UPDATE flight_offers SET reprice_required=FALSE WHERE id=$1")
         .bind(id)
@@ -259,14 +267,26 @@ async fn reprice(
     );
     Ok((headers, Json(selling)))
 }
+async fn accept_http(
+    machine: Machine,
+    guard: Option<Extension<crate::identity::business::SearchAuthority>>,
+    State(state): State<AppState>,
+    Json(request): Json<AcceptanceRequest>,
+) -> Result<Json<Value>, ApiError> {
+    if let Some(Extension(guard)) = guard {
+        crate::identity::business::accept_search(guard, machine, state, request).await
+    } else {
+        accept(machine, State(state), Json(request)).await
+    }
+}
 #[utoipa::path(post,path="/api/Reprice/accept",tag="Flights",security(("machine_token"=[])),request_body=AcceptanceRequest,responses((status=200,body=Object),(status=404,description="Unknown or foreign price"),(status=409,description="Superseded price, rejected revalidation (REPRICE_REQUIRED), or new Search required"),(status=410,description="Expired price")))]
-async fn accept(
+pub(crate) async fn accept(
     machine: Machine,
     State(state): State<AppState>,
     Json(request): Json<AcceptanceRequest>,
 ) -> Result<Json<Value>, ApiError> {
     machine.require("search:read")?;
-    let mut tx = state.pool.begin().await?;
+    let mut tx = crate::identity::business::begin(&state.pool).await?;
     let offer: Option<(Uuid,)> =
         sqlx::query_as("SELECT offer_id FROM flight_reprices WHERE id=$1 AND client_id=$2")
             .bind(request.price_code_ref)
@@ -303,7 +323,7 @@ async fn accept(
     if !context_valid {
         return Err(ApiError(StatusCode::CONFLICT, "PRICE_CONTEXT_CHANGED"));
     }
-    let (valid,latest,version):(bool,bool,i64)=sqlx::query_as("SELECT expires_at>clock_timestamp(),version=(SELECT max(version) FROM flight_reprices WHERE offer_id=$2),version FROM flight_reprices WHERE id=$1").bind(request.price_code_ref).bind(offer).fetch_one(&mut *tx).await?;
+    let (valid,latest,version):(bool,bool,i64)=sqlx::query_as("SELECT r.expires_at>clock_timestamp() AND o.expires_at>clock_timestamp() AND s.expires_at>clock_timestamp(),r.version=(SELECT max(version) FROM flight_reprices WHERE offer_id=$2),r.version FROM flight_reprices r JOIN flight_offers o ON o.id=r.offer_id JOIN flight_searches s ON s.id=o.search_id WHERE r.id=$1").bind(request.price_code_ref).bind(offer).fetch_one(&mut *tx).await?;
     if !valid {
         return Err(ApiError(StatusCode::GONE, "PRICE_EXPIRED"));
     }
@@ -372,7 +392,7 @@ pub struct RepriceDoc;
 pub fn routes() -> Router<AppState> {
     Router::new()
         .route("/api/Reprice", post(reprice))
-        .route("/api/Reprice/accept", post(accept))
+        .route("/api/Reprice/accept", post(accept_http))
 }
 
 #[cfg(test)]

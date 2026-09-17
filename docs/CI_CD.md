@@ -67,6 +67,10 @@ systemctl enable shapontravels
 
 Helper নিজের argument হিসেবে শুধু পূর্ণ 40-character commit SHA গ্রহণ করে। এটি binary-কে root হিসেবে চালায় না; migration/API চলে `shapontravels` user হিসেবে। তবে deployment access মানে trusted application code ও schema migrations চালানোর ক্ষমতা—repository write access ও SSH key শুধু trusted maintainers রাখবে।
 
+### Helper পরিবর্তন হলে release-এর আগে update
+
+`scripts/deploy/activate.sh` বদলালে VPS-এর root-owned helper-টিও update করতে হবে; Git push এটি নিজে install করে না। Migration 0029 থেকে wallet posting-এর execute permission ও ledger/balance write restrictions এই helper প্রয়োগ করে। Updated file SCP দিয়ে পাঠিয়ে root হিসেবে উপরের `install` command চালাও। `send.sh` এখন release-এর helper checksum-এর সঙ্গে installed helper মেলায়; mismatch হলে binary upload বা service stop-এর আগেই deployment বন্ধ হয়। Existing runtime `.env` বদলাবে না।
+
 Section 10 অনুযায়ী backup helper চালিয়ে যাচাই করো। প্রথম deployment-এর আগে empty database-এর backup নেওয়াও স্বাভাবিক। Sudo validation, config, backup বা service unit-এ error থাকলে আগে ঠিক করো।
 
 ## 2. GitHub Actions → VPS SSH key

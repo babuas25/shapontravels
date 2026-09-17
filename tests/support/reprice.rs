@@ -122,6 +122,7 @@ pub async fn verify(pool: &PgPool, token: &str, raw: &Value, offer: &Value) {
     assert_eq!(status, 200);
     assert_eq!(pricing["tier"], "basic");
     assert_eq!(pricing["commissionSharePercent"], 50);
+    assert_eq!(pricing["commission"], "-92.03");
     assert_eq!(
         first["item1"]["isPriceChanged"], true,
         "share-only policy change requires new acceptance"
@@ -130,7 +131,17 @@ pub async fn verify(pool: &PgPool, token: &str, raw: &Value, offer: &Value) {
         .execute(pool)
         .await
         .unwrap();
-    assert_eq!(pricing["gross"], first["item1"]["totalPrice"].to_string());
+    assert_eq!(
+        pricing["gross"]
+            .as_str()
+            .unwrap()
+            .parse::<bigdecimal::BigDecimal>()
+            .unwrap(),
+        first["item1"]["totalPrice"]
+            .to_string()
+            .parse::<bigdecimal::BigDecimal>()
+            .unwrap()
+    );
 
     let acceptance = json!({"priceCodeRef":price});
     assert_eq!(
@@ -180,6 +191,7 @@ pub async fn verify(pool: &PgPool, token: &str, raw: &Value, offer: &Value) {
     .await;
     assert_eq!(enterprise["tier"], "enterprise");
     assert_eq!(enterprise["commissionSharePercent"], 90);
+    assert_eq!(enterprise["commission"], "-165.65");
     sqlx::query("UPDATE b2b_tier_policy SET enterprise=100")
         .execute(pool)
         .await

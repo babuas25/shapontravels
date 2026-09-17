@@ -6,7 +6,11 @@ pub mod booking;
 pub mod cleanup;
 pub mod config;
 pub mod connections;
+pub mod identity;
 pub mod markup;
+pub mod passengers;
+pub mod portal;
+pub mod portal_holds;
 pub mod pricing;
 pub mod projection;
 pub mod reprice;
@@ -15,6 +19,7 @@ pub mod search_admission;
 mod selection;
 pub mod supplier;
 pub mod tier;
+pub mod wallet;
 
 use axum::{
     Json, Router,
@@ -105,18 +110,20 @@ pub async fn schema_ready(pool: &PgPool) -> bool {
 )]
 struct ApiDoc;
 
-pub fn router(state: AppState) -> Router {
-    router_with_search_limits(state, search_admission::SearchLimits::default())
-}
-
-pub fn router_with_search_limits(
-    state: AppState,
-    limits: search_admission::SearchLimits,
-) -> Router {
+pub(crate) fn openapi_document(environment: &str) -> utoipa::openapi::OpenApi {
     let mut doc = ApiDoc::openapi();
     doc.merge(auth::AuthDoc::openapi());
+    doc.merge(identity::api::IdentityDoc::openapi());
     doc.merge(api_management::ManagementDoc::openapi());
     doc.merge(tier::TierDoc::openapi());
+    doc.merge(portal::PortalDoc::openapi());
+    doc.merge(portal_holds::PortalHoldDoc::openapi());
+    doc.merge(portal_holds::PortalTicketDoc::openapi());
+    doc.merge(passengers::PassengerDoc::openapi());
+    doc.merge(wallet::WalletDoc::openapi());
+    doc.merge(wallet::PortalWalletDoc::openapi());
+    doc.merge(wallet::NotificationDoc::openapi());
+    doc.merge(wallet::NonissuanceDoc::openapi());
     doc.merge(connections::ConnectionDoc::openapi());
     doc.merge(markup::MarkupDoc::openapi());
     doc.merge(search::SearchDoc::openapi());
@@ -133,16 +140,44 @@ pub fn router_with_search_limits(
             "machine_token",
             SecurityScheme::Http(Http::new(HttpAuthScheme::Bearer)),
         );
+        for name in [
+            "identity_bridge",
+            "identity_operator",
+            "identity_events",
+            "identity_mail",
+        ] {
+            components.add_security_scheme(
+                name,
+                SecurityScheme::Http(Http::new(HttpAuthScheme::Bearer)),
+            );
+        }
         components.add_security_scheme(
             "admin_session",
             SecurityScheme::Http(Http::new(HttpAuthScheme::Bearer)),
         );
     }
-    doc.info.title = format!("Shapon Travels API — {}", state.environment);
+    doc.info.title = format!("Shapon Travels API — {}", environment);
+    doc
+}
+
+pub fn router(state: AppState) -> Router {
+    router_with_search_limits(state, search_admission::SearchLimits::default())
+}
+
+pub fn router_with_search_limits(
+    state: AppState,
+    limits: search_admission::SearchLimits,
+) -> Router {
+    let doc = openapi_document(&state.environment);
     Router::new()
         .merge(auth::routes())
+        .merge(identity::api::routes(state.clone()))
         .merge(api_management::routes())
         .merge(tier::routes())
+        .merge(portal::routes())
+        .merge(portal_holds::routes())
+        .merge(passengers::routes())
+        .merge(wallet::routes())
         .merge(connections::routes())
         .merge(markup::routes())
         .merge(search::routes())
@@ -160,6 +195,11 @@ pub fn router_with_search_limits(
         .layer(middleware::from_fn(search_admission::retain_response))
         .layer(axum::Extension(search_admission::Admission::new(limits)))
         .layer(middleware::from_fn(correlation))
+        .layer(middleware::from_fn(identity::maintenance::gate))
+        .layer(middleware::from_fn_with_state(
+            state.clone(),
+            identity::rollout::gate,
+        ))
         .with_state(state)
 }
 

@@ -1,0 +1,186 @@
+{
+  "recorded_at": "2026-09-17T03:50:13.771366+00:00",
+  "phase9_complete": false,
+  "activation_performed": false,
+  "live_environment_modified": false,
+  "ordinary_rust_tests_passed": 88,
+  "preflight_matrix_database": "identity_preflight_03_identity_test",
+  "business_regression_database": "identity_preflight_business_01_identity_test",
+  "checks_passed": [
+    "select_only_http_preflight_and_readiness",
+    "maintenance_http_and_worker",
+    "mapping_and_queue_review",
+    "cli_private_output_validation_drift",
+    "actual_binary_http_rehearsal",
+    "retained_booking_effective_outcome_review",
+    "next_authority_and_maintenance",
+    "next_typecheck",
+    "targeted_eslint",
+    "rustfmt",
+    "strict_clippy",
+    "rust_binary_build"
+  ],
+  "rehearsals": [
+    {
+      "database": "identity_preflight_03_identity_test",
+      "source_unchanged": true,
+      "public_tables_verified": 77,
+      "actual_binary_maintenance_verified": true,
+      "actual_http_cli_verified": true,
+      "backlog": {
+        "assets": {
+          "pending": 1,
+          "uncertain": 1
+        },
+        "bookings": {
+          "pending": 0,
+          "uncertain": 0
+        },
+        "cancellations": {
+          "pending": 0,
+          "uncertain": 0
+        },
+        "creates": {
+          "pending": 0,
+          "uncertain": 0
+        },
+        "deletions": {
+          "pending": 0,
+          "uncertain": 0
+        },
+        "effects": {
+          "pending": 0,
+          "uncertain": 0
+        },
+        "events": {
+          "pending": 1,
+          "uncertain": 1
+        },
+        "invitations": {
+          "pending": 0,
+          "uncertain": 0
+        },
+        "mail": {
+          "pending": 1,
+          "uncertain": 1
+        },
+        "ticket_issues": {
+          "pending": 0,
+          "uncertain": 0
+        },
+        "wallet_deliveries": {
+          "pending": 0,
+          "uncertain": 0
+        },
+        "wallet_notifications": {
+          "pending": 0,
+          "uncertain": 0
+        },
+        "wallet_requests": {
+          "pending": 0,
+          "uncertain": 0
+        },
+        "wallet_reservations": {
+          "pending": 0,
+          "uncertain": 0
+        }
+      },
+      "activation_performed": false,
+      "provider_writes_enabled": false
+    },
+    {
+      "database": "identity_bookings_exit_03_identity_test",
+      "source_unchanged": true,
+      "public_tables_verified": 77,
+      "actual_binary_maintenance_verified": true,
+      "actual_http_cli_verified": true,
+      "backlog": {
+        "assets": {
+          "pending": 0,
+          "uncertain": 0
+        },
+        "bookings": {
+          "pending": 15,
+          "uncertain": 15
+        },
+        "cancellations": {
+          "pending": 4,
+          "uncertain": 4
+        },
+        "creates": {
+          "pending": 0,
+          "uncertain": 0
+        },
+        "deletions": {
+          "pending": 0,
+          "uncertain": 0
+        },
+        "effects": {
+          "pending": 7,
+          "uncertain": 0
+        },
+        "events": {
+          "pending": 0,
+          "uncertain": 0
+        },
+        "invitations": {
+          "pending": 0,
+          "uncertain": 0
+        },
+        "mail": {
+          "pending": 0,
+          "uncertain": 0
+        },
+        "ticket_issues": {
+          "pending": 11,
+          "uncertain": 11
+        },
+        "wallet_deliveries": {
+          "pending": 0,
+          "uncertain": 0
+        },
+        "wallet_notifications": {
+          "pending": 0,
+          "uncertain": 0
+        },
+        "wallet_requests": {
+          "pending": 0,
+          "uncertain": 0
+        },
+        "wallet_reservations": {
+          "pending": 5,
+          "uncertain": 5
+        }
+      },
+      "activation_performed": false,
+      "provider_writes_enabled": false
+    }
+  ],
+  "source_sha256": {
+    "/Users/ashifbabu/Projects/shapontravels/.env.example": "bc8ad6ed7c8fe8f318f7db60fe7b4cfeaaf68c37e589e5846ba380add5920ec7",
+    "/Users/ashifbabu/Projects/shapontravels/src/identity.rs": "dbab7ba28c4fecea21d44d97f7889eb8329b53ecbd10dfaa1e7d6e9a08cc877a",
+    "/Users/ashifbabu/Projects/shapontravels/src/identity/api.rs": "988076e2ebbd0e410c543cdeb5e87127b1eef9072d3925d5f6b53ccf968bd135",
+    "/Users/ashifbabu/Projects/shapontravels/src/identity/rollout.rs": "886f94e76457d89137e1a0f4b6e71296b0ca1b787cfc688f7c773e1505b6cd59",
+    "/Users/ashifbabu/Projects/shapontravels/src/identity/preflight.rs": "f519b396c8a8522049e8e4c99ad114362002eb59fe78f1aefbf985fcd0ceb612",
+    "/Users/ashifbabu/Projects/shapontravels/src/identity/readiness.rs": "3c636006cc16f14b8b72375345e6f528bcc5092caa45c9c93298a56cdd66a5de",
+    "/Users/ashifbabu/Projects/shapontravels/src/identity/maintenance.rs": "056ecfd3bd9ceb2a74710892694bb5844782d9eee12b0f6fb1b571d88fdccc15",
+    "/Users/ashifbabu/Projects/shapontravels/src/identity/recovery.rs": "7858b5b87357ff202cd7e7663dc0445d952b35ebaa3f051a31bb69951fd81f20",
+    "/Users/ashifbabu/Projects/shapontravels/src/lib.rs": "e6b499955578bc0433f516d9e0c743d9111d6df4b1e65bd23694c716a642d3b2",
+    "/Users/ashifbabu/Projects/shapontravels/src/main.rs": "fc3c1b52619d45420c245d50826a605fb84fc6d5a2fbe6bee7b97e1ce631aee6",
+    "/Users/ashifbabu/Projects/shapontravels/scripts/identity-preflight.mjs": "0120647d28dfc1b73f4183ed67bf02f012964bae5d076b0ee4f62bb5bbca090a",
+    "/Users/ashifbabu/Projects/shapontravels/scripts/test-identity-preflight.mjs": "b15edbd8cee80e5c5c7c47a154014fc658d6052ac19817fb7d780efeb411aa21",
+    "/Users/ashifbabu/Projects/shapontravels/scripts/test-identity-preflight-runtime.py": "a4b8168654d9949227f423b31b9f1dbbb6095b10c0795f3c6f52728be4d4110e",
+    "/Users/ashifbabu/Projects/shapontravels/tests/identity_preflight.rs": "0c489c2098aa0bd50e4edffaee36f8a66b3a866ef67d59b67e73c9d8fb311d33",
+    "/Users/ashifbabu/Projects/shopontravels/.env.example": "f78e6a2cba5012a597c49f7494feaa320902941c1c7318656e3191fa04a9a391",
+    "/Users/ashifbabu/Projects/shopontravels/lib/identity/mode.ts": "30901eb13cf21252a5973da89306eba17a31336f7738e7d34c6cb2380c3be900",
+    "/Users/ashifbabu/Projects/shopontravels/proxy.ts": "bf1286e03f24a0721abd8f700c0df6142292a83ac46002fe0633b0edc01e048e",
+    "/Users/ashifbabu/Projects/shopontravels/scripts/verify-rust-identity-authority.mjs": "42bba5c97b1c9d1eedd0d52687d05553277366ca28340d9ff3327819356888f8"
+  },
+  "remaining": [
+    "selected_target_and_operator_review",
+    "canonical_external_activation_configuration",
+    "actual_target_backup_restore",
+    "external_provider_and_deployment_configuration",
+    "authorized_cutover_smoke_monitoring"
+  ]
+}

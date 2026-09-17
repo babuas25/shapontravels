@@ -1,0 +1,180 @@
+{
+  "date": "2026-09-17T03:20:25.391274+00:00",
+  "scope": "isolated staged implementation; not production activation",
+  "rust_base_head": "e65463c",
+  "next_base_head": "7caaf8c",
+  "ordinary_rust_tests_passed": 88,
+  "prior_database_matrices": [
+    {
+      "test": "identity_business",
+      "exit": 0
+    },
+    {
+      "test": "identity_phase5",
+      "exit": 0
+    },
+    {
+      "test": "identity_runtime",
+      "exit": 0
+    },
+    {
+      "test": "identity_deletions",
+      "exit": 0
+    },
+    {
+      "test": "identity_invitations",
+      "exit": 0
+    },
+    {
+      "test": "identity_creates",
+      "exit": 0
+    },
+    {
+      "test": "identity_agencies",
+      "exit": 0
+    },
+    {
+      "test": "identity_profiles",
+      "exit": 0
+    },
+    {
+      "test": "identity_operations",
+      "exit": 0
+    },
+    {
+      "test": "identity_api",
+      "exit": 0
+    },
+    {
+      "test": "identity",
+      "exit": 0
+    },
+    {
+      "test": "wallet",
+      "exit": 0
+    },
+    {
+      "test": "wallet_notifications",
+      "exit": 0
+    },
+    {
+      "test": "database",
+      "exit": 0
+    }
+  ],
+  "final_business_database": "identity_business_exit_04_identity_test",
+  "final_booking_database": "identity_bookings_exit_03_identity_test",
+  "additive_upgrade": {
+    "database": "identity_business_upgrade_01_identity_test",
+    "versions": [
+      44,
+      45
+    ],
+    "existing_table_hashes_unchanged": 75
+  },
+  "restore": {
+    "date": "2026-09-17T03:04:45.730925+00:00",
+    "source_database": "identity_business_upgrade_01_identity_test",
+    "restored_database": "identity_restore_phase6_01_identity_test",
+    "source_unchanged": true,
+    "all_table_and_sequence_fingerprints_match": true,
+    "tables": 77,
+    "schema_version": "45",
+    "backup_path": "/Users/ashifbabu/Projects/shapontravels/.local/identity-rehearsal/identity_restore_phase6_01_identity_test.dump",
+    "activation_performed": false
+  },
+  "restored_http_readiness": {
+    "ready": true,
+    "mode": "staged",
+    "schemaReady": true,
+    "bootstrapReady": true,
+    "pendingEffects": 0,
+    "uncertainOperations": 0,
+    "providerWritesEnabled": false,
+    "mailEnabled": false,
+    "eventInboxEnabled": false,
+    "liveActivationAvailable": false
+  },
+  "frontend_suites": [
+    {
+      "script": "verify-rust-identity",
+      "exit": 0
+    },
+    {
+      "script": "verify-rust-identity-authority",
+      "exit": 0
+    },
+    {
+      "script": "verify-rust-identity-runtime",
+      "exit": 0
+    },
+    {
+      "script": "verify-rust-identity-profiles",
+      "exit": 0
+    },
+    {
+      "script": "verify-rust-identity-phase5",
+      "exit": 0
+    },
+    {
+      "script": "verify-rust-identity-business",
+      "exit": 0
+    },
+    {
+      "script": "verify-rust-identity-roster",
+      "exit": 0
+    },
+    {
+      "script": "verify-rust-identity-auth-email",
+      "exit": 0
+    },
+    {
+      "script": "verify-rust-wallet",
+      "exit": 0
+    },
+    {
+      "script": "verify-rust-holds",
+      "exit": 0
+    },
+    {
+      "script": "verify-rust-prebooking",
+      "exit": 0
+    },
+    {
+      "script": "verify-wallet-notification-providers",
+      "exit": 0
+    },
+    {
+      "script": "verify-b2c-disabled",
+      "exit": 0
+    },
+    {
+      "script": "verify-application-profile",
+      "exit": 0
+    },
+    {
+      "script": "verify-rust-identity-accounts-ui",
+      "exit": 0
+    },
+    {
+      "script": "verify-rust-identity-phase5-ui",
+      "exit": 0
+    },
+    {
+      "script": "verify-rust-identity-recovery-ui",
+      "exit": 0
+    }
+  ],
+  "static_checks": {
+    "rustfmt": "passed",
+    "strict_clippy": "passed",
+    "typescript": "passed",
+    "targeted_eslint": "passed",
+    "diff_whitespace": "passed",
+    "isolated_next_production_build": "passed"
+  },
+  "live_cutover": false,
+  "real_provider_or_supplier_writes": false,
+  "runtime_env_files_changed": false,
+  "phase9": "pending selected-target configuration/activation mechanism and authorized rollout"
+}

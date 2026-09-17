@@ -1,6 +1,6 @@
 //! Exact projection and borrowed validation for evidenced single-component coverage.
-use crate::pricing::{Markup, OriginalPassengerFare, price};
-use bigdecimal::BigDecimal;
+use crate::pricing::{Markup, OriginalPassengerFare, SellingPassengerFare, price};
+use bigdecimal::{BigDecimal, RoundingMode};
 use serde_json::Value;
 use std::str::FromStr;
 
@@ -60,7 +60,7 @@ impl Changes {
 /// Borrowed callers retain an immutable original snapshot. Pricing changes are
 /// calculated and validated before the separate selling tree is allocated.
 pub fn single_component(original: &Value, markup: &Markup) -> Result<Value, ProjectionError> {
-    let changes = project(original, coverage(original)?, markup)?;
+    let changes = project(original, coverage(original)?, Some(markup))?;
     Ok(changes.apply(original.clone()))
 }
 /// Search has already encoded the original snapshot for persistence. Reuse its
@@ -69,11 +69,27 @@ pub(crate) fn single_component_owned(
     original: Value,
     markup: &Markup,
 ) -> Result<Value, ProjectionError> {
-    let changes = project(&original, coverage(&original)?, markup)?;
+    let changes = project(&original, coverage(&original)?, Some(markup))?;
     Ok(changes.apply(original))
 }
 pub(crate) fn validate_single_component(original: &Value) -> Result<(), ProjectionError> {
-    project(original, coverage(original)?, &Markup::Fixed(0.into())).map(|_| ())
+    project(
+        original,
+        coverage(original)?,
+        Some(&Markup::Fixed(0.into())),
+    )
+    .map(|_| ())
+}
+
+/// B2B published gross: original base fare + taxes, without markup or AIT.
+/// Use the same coverage checks and keep every supplier reference intact.
+pub fn published_gross(original: &Value) -> Result<Value, ProjectionError> {
+    let changes = project(original, coverage(original)?, None)?;
+    Ok(changes.apply(original.clone()))
+}
+pub(crate) fn published_gross_owned(original: Value) -> Result<Value, ProjectionError> {
+    let changes = project(&original, coverage(&original)?, None)?;
+    Ok(changes.apply(original))
 }
 
 struct Coverage<'a> {
@@ -109,7 +125,7 @@ fn coverage(original: &Value) -> Result<Coverage<'_>, ProjectionError> {
 fn project(
     original: &Value,
     coverage: Coverage<'_>,
-    markup: &Markup,
+    markup: Option<&Markup>,
 ) -> Result<Changes, ProjectionError> {
     let Coverage {
         component,
@@ -141,7 +157,22 @@ fn project(
         if fare.get("serviceCharge").is_some() && number(fare, "serviceCharge")? != 0 {
             return Err(ProjectionError::UnverifiedCoverage);
         }
-        let selling = price(&fare_data, markup);
+        let selling = match markup {
+            Some(markup) => price(&fare_data, markup),
+            None => {
+                if fare_data.base < 0 || fare_data.taxes < 0 || fare_data.supplier_total < 0 {
+                    return Err(ProjectionError::MissingOrInvalidPrice);
+                }
+                let total = (fare_data.base.with_scale_round(2, RoundingMode::HalfUp)
+                    + fare_data.taxes.with_scale_round(2, RoundingMode::HalfUp))
+                .with_scale(2);
+                SellingPassengerFare {
+                    discount: &fare_data.base + &fare_data.taxes - (&total - &fare_data.ait),
+                    total,
+                    count: fare_data.count,
+                }
+            }
+        };
         let count = BigDecimal::from(count);
         supplier_total += &fare_data.supplier_total * &count;
         selling_total += &selling.total * &count;

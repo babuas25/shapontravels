@@ -1,0 +1,20 @@
+{
+  "date": "2026-09-17",
+  "algorithm": "sha256",
+  "scope": "Pinned rollout marker, preflight and maintenance slice; uncommitted source files",
+  "files": {
+    "migrations/0046_portal_identity_rollout.sql": "6514b60c2eaaa5de2415ae375097933343d1136bd1cc2bacff72cf2cf1105b8a",
+    "src/identity/rollout.rs": "886f94e76457d89137e1a0f4b6e71296b0ca1b787cfc688f7c773e1505b6cd59",
+    "src/identity/preflight.rs": "f519b396c8a8522049e8e4c99ad114362002eb59fe78f1aefbf985fcd0ceb612",
+    "src/identity/readiness.rs": "3c636006cc16f14b8b72375345e6f528bcc5092caa45c9c93298a56cdd66a5de",
+    "src/identity/api.rs": "988076e2ebbd0e410c543cdeb5e87127b1eef9072d3925d5f6b53ccf968bd135",
+    "src/identity/maintenance.rs": "056ecfd3bd9ceb2a74710892694bb5844782d9eee12b0f6fb1b571d88fdccc15",
+    "src/main.rs": "fc3c1b52619d45420c245d50826a605fb84fc6d5a2fbe6bee7b97e1ce631aee6",
+    "src/lib.rs": "e6b499955578bc0433f516d9e0c743d9111d6df4b1e65bd23694c716a642d3b2",
+    "scripts/identity-rollout.mjs": "1b696ff56b774bca7035ea193d064862ceb8fcddee4ac07d33f2d2b7ef0ddd0b",
+    "scripts/identity-preflight.mjs": "0120647d28dfc1b73f4183ed67bf02f012964bae5d076b0ee4f62bb5bbca090a",
+    "tests/identity_rollout.rs": "6f2fe14e70e7136447a7d1cdefe946801fd73b260af96a1423d5659407081fc7",
+    "tests/identity_preflight.rs": "0c489c2098aa0bd50e4edffaee36f8a66b3a866ef67d59b67e73c9d8fb311d33"
+  },
+  "live_activation_performed": false
+}

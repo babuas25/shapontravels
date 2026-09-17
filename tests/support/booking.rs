@@ -32,10 +32,14 @@ struct Mock {
     calls: AtomicUsize,
     pnr_calls: AtomicUsize,
     pnr_mode: AtomicUsize,
+    pnr_entered: tokio::sync::Notify,
+    pnr_release: tokio::sync::Notify,
     entered: tokio::sync::Notify,
     release: tokio::sync::Notify,
     enabled: AtomicBool,
     mode: AtomicUsize,
+    echo_quote_refs: AtomicBool,
+    book_deadline: Mutex<Value>,
     payload: Mutex<Value>,
     fare: Mutex<Value>,
 }
@@ -108,7 +112,8 @@ impl ReadSupplier for Mock {
         Box<dyn std::future::Future<Output = Result<Value, SupplierError>> + Send + 'a>,
     > {
         Box::pin(async move {
-            let direct = self.direct_calls.load(Ordering::SeqCst) > 0;
+            let direct = self.direct_calls.load(Ordering::SeqCst) > 0
+                || self.echo_quote_refs.load(Ordering::SeqCst);
             let saved = self.payload.lock().unwrap().clone();
             assert_eq!(
                 transaction,
@@ -174,7 +179,29 @@ impl ReadSupplier for Mock {
     > {
         Box::pin(async move {
             self.issue_calls.fetch_add(1, Ordering::SeqCst);
+            let saved = self.payload.lock().unwrap().clone();
+            let reference = |key: &str| {
+                if self.echo_quote_refs.load(Ordering::SeqCst) {
+                    saved[key].clone()
+                } else {
+                    json!("shared-ref")
+                }
+            };
+            assert_eq!(
+                payload,
+                &json!({
+                    "PNR":"TESTPN", "BookingRefNumber":"TESTPN",
+                    "UniqueTransID":reference("uniqueTransID"), "PriceCodeRef":reference("priceCodeRef"),
+                    "ItemCodeRef":reference("itemCodeRef"), "BookingCodeRef":"shared-ref",
+                }),
+                "Issue must send only the six saved supplier references"
+            );
             tokio::time::sleep(Duration::from_millis(80)).await;
+            if self.issue_mode.load(Ordering::SeqCst) == 7 {
+                self.entered.notify_one();
+                self.release.notified().await;
+                return Err(SupplierError::Timeout);
+            }
             if self.issue_mode.load(Ordering::SeqCst) == 1 {
                 return Err(SupplierError::Timeout);
             }
@@ -215,8 +242,15 @@ impl ReadSupplier for Mock {
                 "Book must not use read retries"
             );
             self.pnr_calls.fetch_add(1, Ordering::SeqCst);
+            let mode = self.pnr_mode.load(Ordering::SeqCst);
+            match mode {
+                12 => return Err(SupplierError::Transport),
+                13 => return Err(SupplierError::Timeout),
+                14 => return Err(SupplierError::Response),
+                _ => {}
+            }
             let mut response = json!({"item1":{"pnr":payload["PNR"],"bookingRef":payload["PNR"],"status":"Booked","lastTicketTime":"09/29/2026 10:00:00","bookingCodeRef":payload["BookingCodeRef"],"priceCodeRef":payload["PriceCodeRef"],"itemCodeRef":payload["ItemCodeRef"],"uniqueTransID":null},"item2":{"isSuccess":true,"uniqueTransID":payload["UniqueTransID"]}});
-            match self.pnr_mode.load(Ordering::SeqCst) {
+            match mode {
                 1 => response["item1"]["pnr"] = json!("WRONG"),
                 2 => response["item1"]["lastTicketTime"] = Value::Null,
                 3 => response["item1"]["priceCodeRef"] = json!("foreign-ref"),
@@ -225,7 +259,7 @@ impl ReadSupplier for Mock {
                 6 => response["item1"]["lastTicketTime"] = json!("01/01/2000 00:00:00"),
                 7 => response["item1"]["status"] = json!("Created"),
                 8 => response["item1"]["ticketNumbers"] = json!(["7792411762343"]),
-                11 => {
+                11 | 16 => {
                     response["item1"]["status"] = json!("Cancelled");
                     response["item1"]["uniqueTransID"] = payload["UniqueTransID"].clone();
                 }
@@ -235,6 +269,10 @@ impl ReadSupplier for Mock {
                     response["item1"]["ticketNumbers"] = json!(["9999999999999"]);
                 }
                 _ => {}
+            }
+            if [15, 16].contains(&mode) {
+                self.pnr_entered.notify_one();
+                self.pnr_release.notified().await;
             }
             Ok(response)
         })
@@ -260,6 +298,13 @@ impl ReadSupplier for Mock {
                 ),
                 mode => {
                     let mut body = json!({"item1":{"pnr":"TESTPN","airlinesPNR":["AIRPNR"],"bookingStatus":"Created","bookingCodeRef":"shared-ref","priceCodeRef":"shared-ref","itemCodeRef":"shared-ref","uniqueTransID":"shared-ref","ticketingTimeLimit":"2026-09-29 10:00:00","flightInfo":self.fare.lock().unwrap().clone()},"item2":{"isSuccess":true}});
+                    body["item1"]["ticketingTimeLimit"] =
+                        self.book_deadline.lock().unwrap().clone();
+                    if self.echo_quote_refs.load(Ordering::SeqCst) {
+                        for key in ["uniqueTransID", "priceCodeRef", "itemCodeRef"] {
+                            body["item1"][key] = payload[key].clone();
+                        }
+                    }
                     if mode == 3 {
                         body["item1"]["ticketInfoes"] =
                             json!([{"ticketNumbers":["TEST-NOT-A-REAL-TICKET"]}]);
@@ -350,10 +395,14 @@ pub async fn verify(pool: &PgPool, token: &str, admin: &str) {
         calls: AtomicUsize::new(0),
         pnr_calls: AtomicUsize::new(0),
         pnr_mode: AtomicUsize::new(0),
+        pnr_entered: tokio::sync::Notify::new(),
+        pnr_release: tokio::sync::Notify::new(),
         entered: tokio::sync::Notify::new(),
         release: tokio::sync::Notify::new(),
         enabled: AtomicBool::new(true),
         mode: AtomicUsize::new(0),
+        echo_quote_refs: AtomicBool::new(false),
+        book_deadline: Mutex::new(json!("2026-09-29 10:00:00")),
         payload: Mutex::new(Value::Null),
         fare: Mutex::new(fare.clone()),
     });
@@ -439,8 +488,11 @@ pub async fn verify(pool: &PgPool, token: &str, admin: &str) {
     assert_eq!(result["item1"]["itemCodeRef"], request["itemCodeRef"]);
     assert_eq!(result["item1"]["uniqueTransID"], request["uniqueTransID"]);
     assert_eq!(
-        result["item1"]["flightInfo"]["totalPrice"].to_string(),
-        "4533.05"
+        result["item1"]["flightInfo"]["totalPrice"]
+            .to_string()
+            .parse::<bigdecimal::BigDecimal>()
+            .unwrap(),
+        bigdecimal::BigDecimal::from(4349)
     );
     assert_eq!(
         mock.payload.lock().unwrap()["priceCodeRef"],
@@ -768,12 +820,18 @@ pub async fn verify(pool: &PgPool, token: &str, admin: &str) {
                 assert!(flight.get(key).is_none(), "must not invent {key}");
             }
             assert_eq!(
-                flight["bookingComponents"][0]["totalPrice"].to_string(),
-                "4533.05"
+                flight["bookingComponents"][0]["totalPrice"]
+                    .to_string()
+                    .parse::<bigdecimal::BigDecimal>()
+                    .unwrap(),
+                bigdecimal::BigDecimal::from(4349)
             );
             assert_eq!(
-                flight["passengerFares"]["adt"]["totalPrice"].to_string(),
-                "4533.05"
+                flight["passengerFares"]["adt"]["totalPrice"]
+                    .to_string()
+                    .parse::<bigdecimal::BigDecimal>()
+                    .unwrap(),
+                bigdecimal::BigDecimal::from(4349)
             );
         }
         assert_eq!(call(&app, token, &key, request).await, (status, response));
@@ -1168,13 +1226,69 @@ async fn verify_ticketing(app: &Router, pool: &PgPool, token: &str, admin: &str,
         .0,
         404
     );
-    for mode in 1..=8 {
-        mock.pnr_mode.store(mode, Ordering::SeqCst);
-        let (code, body) = issue_call(app, token, "issue", input.clone()).await;
-        assert!([409, 502].contains(&code), "{mode}: {code} {body}");
-        assert_eq!(mock.issue_calls.load(Ordering::SeqCst), 0);
-    }
-    mock.pnr_mode.store(0, Ordering::SeqCst);
+    // The supplier PNR endpoint is unavailable. Neither initial issue nor replay
+    // may call it, including concurrent requests with different keys.
+    assert_eq!(
+        issue_call(app, token, "issue", input.clone()).await.1["error"],
+        "WALLET_NOT_CONFIGURED"
+    );
+    let client: Uuid = sqlx::query_scalar("SELECT client_id FROM flight_bookings WHERE id=$1")
+        .bind(id)
+        .fetch_one(pool)
+        .await
+        .unwrap();
+    let mut wallet_tx = pool.begin().await.unwrap();
+    let account = shapontravels_api::wallet::core::provision(
+        &mut wallet_tx,
+        &shapontravels_api::wallet::core::Owner {
+            owner_type: "agency".into(),
+            owner_key: "SYNTHETIC-TICKETING".into(),
+        },
+        "BDT",
+        &json!({}),
+    )
+    .await
+    .unwrap();
+    shapontravels_api::wallet::core::link_client(&mut wallet_tx, client, account)
+        .await
+        .unwrap();
+    wallet_tx.commit().await.unwrap();
+    assert_eq!(
+        issue_call(app, token, "issue", input.clone()).await.1["error"],
+        "INSUFFICIENT_FUNDS"
+    );
+    assert_eq!(mock.issue_calls.load(Ordering::SeqCst), 0);
+    let pending: i64 =
+        sqlx::query_scalar("SELECT count(*) FROM flight_ticket_issues WHERE booking_id=$1")
+            .bind(id)
+            .fetch_one(pool)
+            .await
+            .unwrap();
+    assert_eq!(
+        pending, 0,
+        "failed reservation must roll back durable supplier dispatch too"
+    );
+    let mut wallet_tx = pool.begin().await.unwrap();
+    shapontravels_api::wallet::core::post(
+        &mut wallet_tx,
+        shapontravels_api::wallet::core::Posting {
+            account,
+            kind: "deposit",
+            amount: 100_000_000,
+            operation: None,
+            booking: None,
+            key: "synthetic-ticket-test",
+            actor: "test-checker",
+            role: "system",
+            remarks: "Disposable test funding",
+            metadata: json!({}),
+        },
+    )
+    .await
+    .unwrap();
+    wallet_tx.commit().await.unwrap();
+    mock.pnr_mode.store(12, Ordering::SeqCst);
+    let pnr_before = mock.pnr_calls.load(Ordering::SeqCst);
     // Expired Search quotes do not expire an already held booking.
     sqlx::query("UPDATE flight_reprices SET expires_at=now()-INTERVAL '1 hour' WHERE id=$1")
         .bind(Uuid::parse_str(request["priceCodeRef"].as_str().unwrap()).unwrap())
@@ -1190,13 +1304,31 @@ async fn verify_ticketing(app: &Router, pool: &PgPool, token: &str, admin: &str,
     assert_eq!(mock.issue_calls.load(Ordering::SeqCst), 1);
     let final_reply = issue_call(app, token, "issue", input.clone()).await;
     assert_eq!(final_reply.0, 200, "{final_reply:?}");
+    assert_eq!(final_reply.1["payment"]["state"], "captured");
+    let (charged,expected):(i64,i64)=sqlx::query_as("SELECT w.amount,((r.tier_pricing->>'payable')::numeric*100)::bigint FROM wallet_operations w JOIN flight_bookings b ON b.id=w.booking_id JOIN flight_reprices r ON r.id=b.price_id WHERE b.id=$1 AND w.subject_kind='ticket_issue'").bind(id).fetch_one(pool).await.unwrap();
+    assert_eq!(charged, expected);
+    let entries: i64 =
+        sqlx::query_scalar("SELECT count(*) FROM wallet_ledger_entries WHERE booking_id=$1")
+            .bind(id)
+            .fetch_one(pool)
+            .await
+            .unwrap();
+    assert_eq!(
+        entries, 2,
+        "one reserve and one capture across concurrent issue/replay"
+    );
+    assert_eq!(mock.pnr_calls.load(Ordering::SeqCst), pnr_before);
+    mock.pnr_mode.store(0, Ordering::SeqCst);
     assert_eq!(
         final_reply.1["item1"]["ticketInfoes"][0]["ticketNumbers"][0],
         "7792411762343"
     );
     assert_eq!(
-        final_reply.1["item1"]["flightInfo"]["passengerFares"]["adt"]["totalPrice"].to_string(),
-        "4533.05"
+        final_reply.1["item1"]["flightInfo"]["passengerFares"]["adt"]["totalPrice"]
+            .to_string()
+            .parse::<bigdecimal::BigDecimal>()
+            .unwrap(),
+        bigdecimal::BigDecimal::from(4349)
     );
     assert!(!final_reply.1.to_string().contains("private-ticket-ref"));
     assert_eq!(
@@ -1243,16 +1375,21 @@ async fn verify_ticketing(app: &Router, pool: &PgPool, token: &str, admin: &str,
             "IDEMPOTENCY_KEY_REUSED"
         );
         mock.issue_mode.store(mode, Ordering::SeqCst);
+        mock.pnr_mode.store(13, Ordering::SeqCst);
+        let pnr_before = mock.pnr_calls.load(Ordering::SeqCst);
         let key = format!("issue-bad-{mode}");
         let result = issue_call(app, token, &key, input.clone()).await;
         assert_eq!(result.0, 202);
         assert_eq!(result.1["state"], "outcome_unknown");
+        assert_eq!(result.1["payment"]["state"], "reconciliation");
         let count = mock.issue_calls.load(Ordering::SeqCst);
         assert_eq!(
             issue_call(app, token, "new-key-no-retry", input).await,
             result
         );
         assert_eq!(mock.issue_calls.load(Ordering::SeqCst), count);
+        assert_eq!(mock.pnr_calls.load(Ordering::SeqCst), pnr_before);
+        mock.pnr_mode.store(0, Ordering::SeqCst);
         if mode == 1 {
             verify_recovery(
                 app,
@@ -1333,10 +1470,577 @@ async fn verify_ticketing(app: &Router, pool: &PgPool, token: &str, admin: &str,
         assert!(sqlx::query(statement).execute(pool).await.is_err());
     }
     mock.issue_mode.store(0, Ordering::SeqCst);
+    // Persist ticket evidence even if the later financial transaction fails.
+    let (crash_request, crash_fare, _) = quote(pool).await;
+    *mock.fare.lock().unwrap() = crash_fare;
+    let (code, crash_hold) = call(app, token, "capture-crash-hold", crash_request.clone()).await;
+    assert_eq!(code, 200);
+    let crash_id =
+        Uuid::parse_str(crash_hold["item1"]["bookingCodeRef"].as_str().unwrap()).unwrap();
+    let crash_input = json!({"PNR":crash_hold["item1"]["pnr"],"BookingRefNumber":crash_hold["item1"]["pnr"],"BookingCodeRef":crash_id,"UniqueTransID":crash_request["uniqueTransID"],"PriceCodeRef":crash_request["priceCodeRef"],"ItemCodeRef":crash_request["itemCodeRef"]});
+    sqlx::query("CREATE FUNCTION test_capture_failure() RETURNS trigger LANGUAGE plpgsql AS $$ BEGIN IF NEW.transaction_type='booking_confirm' THEN RAISE EXCEPTION 'synthetic capture outage'; END IF; RETURN NEW; END $$").execute(pool).await.unwrap();
+    sqlx::query("CREATE TRIGGER test_capture_failure BEFORE INSERT ON wallet_ledger_entries FOR EACH ROW EXECUTE FUNCTION test_capture_failure()").execute(pool).await.unwrap();
+    let failed_capture = issue_call(app, token, "capture-crash", crash_input.clone()).await;
+    assert_eq!(failed_capture.0, 202, "{failed_capture:?}");
+    assert_eq!(
+        failed_capture.1["item2"]["isSuccess"], true,
+        "ticket proof survives failed capture"
+    );
+    assert_eq!(failed_capture.1["payment"]["state"], "reserved");
+    assert_eq!(failed_capture.1["requiresReconciliation"], true);
+    let dispatches = mock.issue_calls.load(Ordering::SeqCst);
+    assert_eq!(
+        issue_call(app, token, "capture-crash-replay", crash_input).await,
+        failed_capture
+    );
+    assert_eq!(mock.issue_calls.load(Ordering::SeqCst), dispatches);
+    sqlx::query("DROP TRIGGER test_capture_failure ON wallet_ledger_entries")
+        .execute(pool)
+        .await
+        .unwrap();
+    sqlx::query("DROP FUNCTION test_capture_failure()")
+        .execute(pool)
+        .await
+        .unwrap();
+    let recovered = super::call(
+        app,
+        "POST",
+        &format!("/api/bookings/{crash_id}/ticket/verify"),
+        Some(token),
+        json!({}),
+    )
+    .await;
+    assert_eq!(recovered.0, 200, "{recovered:?}");
+    assert_eq!(recovered.1["payment"]["state"], "captured");
+    assert_eq!(mock.issue_calls.load(Ordering::SeqCst), dispatches);
+    verify_issue_without_pnr(app, pool, token, mock).await;
+    verify_single_name_and_distinct_references(app, pool, token, mock).await;
+    verify_pnr_observation_order(app, pool, token, mock).await;
+    verify_nonissuance(app, pool, token, admin, mock).await;
     sqlx::query("UPDATE supplier_connections SET ticketing_enabled=false")
         .execute(pool)
         .await
         .unwrap();
+}
+
+async fn verify_nonissuance(
+    app: &Router,
+    pool: &PgPool,
+    token: &str,
+    admin: &str,
+    mock: &Arc<Mock>,
+) {
+    async fn review(app: &Router, admin: &str, who: &str, command: Value) -> (u16, Value) {
+        super::call(app,"POST","/admin/portal-wallet/nonissuance",Some(admin),json!({"actor":{"external_user_id":who,"role":"staff_account","owner":null},"command":command})).await
+    }
+    let (request, fare, _) = quote(pool).await;
+    *mock.fare.lock().unwrap() = fare;
+    mock.mode.store(0, Ordering::SeqCst);
+    mock.issue_mode.store(7, Ordering::SeqCst);
+    let held = call(app, token, "nonissuance-hold", request.clone()).await;
+    assert_eq!(held.0, 200, "{held:?}");
+    let booking = Uuid::parse_str(held.1["item1"]["bookingCodeRef"].as_str().unwrap()).unwrap();
+    let input = json!({"PNR":held.1["item1"]["pnr"],"BookingRefNumber":held.1["item1"]["pnr"],"BookingCodeRef":booking,"UniqueTransID":request["uniqueTransID"],"PriceCodeRef":request["priceCodeRef"],"ItemCodeRef":request["itemCodeRef"]});
+    let pending_app = app.clone();
+    let pending_token = token.to_owned();
+    let pending_input = input.clone();
+    let pending = tokio::spawn(async move {
+        issue_call(
+            &pending_app,
+            &pending_token,
+            "nonissuance-issue",
+            pending_input,
+        )
+        .await
+    });
+    mock.entered.notified().await;
+    let pending_id: Uuid =
+        sqlx::query_scalar("SELECT id FROM flight_ticket_issues WHERE booking_id=$1")
+            .bind(booking)
+            .fetch_one(pool)
+            .await
+            .unwrap();
+    let pending_view = review(
+        app,
+        admin,
+        "user_maker",
+        json!({"action":"inspect","issue_id":pending_id}),
+    )
+    .await;
+    assert_eq!(pending_view.0, 200);
+    assert_eq!(pending_view.1["canPropose"], false);
+    assert_eq!(pending_view.1["blockedReason"], "TICKET_WORKER_UNRESOLVED");
+    mock.release.notify_one();
+    let outcome = pending.await.unwrap();
+    assert_eq!(outcome.0, 202, "{outcome:?}");
+    let issue = Uuid::parse_str(outcome.1["issueId"].as_str().unwrap()).unwrap();
+    let op = Uuid::parse_str(outcome.1["payment"]["operationId"].as_str().unwrap()).unwrap();
+    let reads = mock.pnr_calls.load(Ordering::SeqCst);
+    let writes = mock.issue_calls.load(Ordering::SeqCst);
+    let inspect = json!({"action":"inspect","issue_id":issue});
+    let view = review(app, admin, "user_maker", inspect.clone()).await;
+    assert_eq!(view.0, 200, "{view:?}");
+    assert_eq!(view.1["canPropose"], true, "{view:?}");
+    let id = Uuid::new_v4();
+    let proof = "a".repeat(64);
+    let proposed = json!({"action":"propose","id":id,"issue_id":issue,"snapshot_hash":view.1["snapshotHash"],"evidence":{"confirmation_reference":"SYNTHETIC-CASE","evidence_url":"https://supplier.example.invalid/case/synthetic","sha256":proof,"confirmed_at":chrono::Utc::now(),"supplier_confirmed_no_ticket_and_processing_complete":true}});
+    let proposal = review(app, admin, "user_maker", proposed.clone()).await;
+    assert_eq!(proposal.0, 200, "{proposal:?}");
+    assert_eq!(
+        review(app, admin, "user_maker", proposed.clone()).await,
+        proposal
+    );
+    assert_eq!(
+        review(app, admin, "user_other", proposed.clone()).await.1["error"],
+        "IDEMPOTENCY_KEY_REUSED"
+    );
+    let approve = json!({"action":"decide","proposal_id":id,"decision":"approved","evidence_sha256":proof,"remarks":"Independently checked synthetic supplier case"});
+    assert_eq!(
+        review(app, admin, "user_maker", approve.clone()).await.1["error"],
+        "WALLET_SELF_APPROVAL_FORBIDDEN"
+    );
+    let mut wrong = approve.clone();
+    wrong["evidence_sha256"] = json!("b".repeat(64));
+    assert_eq!(
+        review(app, admin, "user_checker", wrong).await.1["error"],
+        "NONISSUANCE_CONFIRMATION_MISMATCH"
+    );
+    // A PNR observation changes the exact review snapshot; Booked is not proof.
+    sqlx::query("INSERT INTO flight_booking_pnr_observations(booking_id,response,verified,requested_at) VALUES($1,'{\"item1\":{\"status\":\"Booked\"},\"item2\":{\"isSuccess\":true}}',false,clock_timestamp())").bind(booking).execute(pool).await.unwrap();
+    assert_eq!(
+        review(app, admin, "user_checker", approve.clone()).await.1["error"],
+        "NONISSUANCE_EVIDENCE_CHANGED"
+    );
+    let mut reject = approve.clone();
+    reject["decision"] = json!("rejected");
+    assert_eq!(review(app, admin, "user_checker", reject).await.0, 200);
+    let current = review(app, admin, "user_maker", inspect.clone()).await.1;
+    let mut fresh = proposed.clone();
+    let new_id = Uuid::new_v4();
+    fresh["id"] = json!(new_id);
+    fresh["snapshot_hash"] = current["snapshotHash"].clone();
+    assert_eq!(review(app, admin, "user_maker", fresh).await.0, 200);
+    let mut release = approve.clone();
+    release["proposal_id"] = json!(new_id);
+    // The generic kernel cannot release ticket funds without the review decision.
+    let mut tx = pool.begin().await.unwrap();
+    shapontravels_api::wallet::core::settle(&mut tx, op, false, "user_checker", "staff_account")
+        .await
+        .unwrap();
+    assert!(tx.commit().await.is_err());
+    let before:(i64,i64,i64)=sqlx::query_as("SELECT a.available_balance,a.hold_balance,w.amount FROM wallet_operations w JOIN wallet_accounts a ON a.id=w.wallet_account_id WHERE w.id=$1").bind(op).fetch_one(pool).await.unwrap();
+    sqlx::query("UPDATE wallet_owners SET status='frozen' WHERE id=(SELECT a.owner_id FROM wallet_accounts a JOIN wallet_operations w ON w.wallet_account_id=a.id WHERE w.id=$1)").bind(op).execute(pool).await.unwrap();
+    let (a, b) = tokio::join!(
+        review(app, admin, "user_checker", release.clone()),
+        review(app, admin, "user_checker", release.clone())
+    );
+    assert_eq!(a.0, 200, "{a:?}");
+    assert_eq!(a, b);
+    let after:(i64,i64)=sqlx::query_as("SELECT a.available_balance,a.hold_balance FROM wallet_operations w JOIN wallet_accounts a ON a.id=w.wallet_account_id WHERE w.id=$1").bind(op).fetch_one(pool).await.unwrap();
+    assert_eq!(after, (before.0 + before.2, before.1 - before.2));
+    let result = super::call(
+        app,
+        "GET",
+        &format!("/api/bookings/{booking}/ticket"),
+        Some(token),
+        Value::Null,
+    )
+    .await;
+    assert_eq!(result.0, 200);
+    assert_eq!(result.1["state"], "not_issued");
+    assert_eq!(result.1["requiresReconciliation"], false);
+    assert_eq!(
+        issue_call(app, token, "different-after-release", input).await,
+        result
+    );
+    assert_eq!(mock.pnr_calls.load(Ordering::SeqCst), reads);
+    assert_eq!(mock.issue_calls.load(Ordering::SeqCst), writes);
+    // If supplier confirmation was wrong, preserve valid late ticket evidence,
+    // expose issued + released, re-open review, and never silently debit again.
+    mock.recovery_report.store(true, Ordering::SeqCst);
+    mock.report_mode.store(0, Ordering::SeqCst);
+    mock.pnr_mode.store(9, Ordering::SeqCst);
+    let path = format!("/api/bookings/{booking}/ticket/reconcile");
+    let late = super::call(app, "POST", &path, Some(token), json!({})).await;
+    assert_eq!(late.0, 202, "{late:?}");
+    assert_eq!(late.1["payment"]["state"], "released");
+    assert_eq!(late.1["requiresReconciliation"], true);
+    assert!(late.1["item1"]["ticketInfoes"].is_array());
+    assert_eq!(
+        super::call(app, "POST", &path, Some(token), json!({})).await,
+        late
+    );
+    let counts:(i64,i64)=sqlx::query_as("SELECT count(*) FILTER(WHERE transaction_type='hold_release'),count(*) FILTER(WHERE transaction_type='booking_confirm') FROM wallet_ledger_entries WHERE operation_id=$1").bind(op).fetch_one(pool).await.unwrap();
+    assert_eq!(counts, (1, 0));
+    let audit:i64=sqlx::query_scalar("SELECT count(*) FROM audit_events WHERE action='wallet.nonissuance.contradicted' AND resource_id=$1").bind(issue.to_string()).fetch_one(pool).await.unwrap();
+    assert_eq!(audit, 1);
+    assert_eq!(
+        review(app, admin, "user_checker", inspect).await.1["blockedReason"],
+        "POSITIVE_TICKET_EVIDENCE"
+    );
+    // A release racing positive verification has one financial winner. Both
+    // paths retain the ticket proof; capture and release cannot both post.
+    sqlx::query("UPDATE wallet_owners SET status='active'")
+        .execute(pool)
+        .await
+        .unwrap();
+    mock.issue_mode.store(1, Ordering::SeqCst);
+    let (race_request, race_fare, _) = quote(pool).await;
+    *mock.fare.lock().unwrap() = race_fare;
+    let race_held = call(app, token, "nonissuance-race-hold", race_request.clone()).await;
+    assert_eq!(race_held.0, 200);
+    let race_booking =
+        Uuid::parse_str(race_held.1["item1"]["bookingCodeRef"].as_str().unwrap()).unwrap();
+    let race_input = json!({"PNR":race_held.1["item1"]["pnr"],"BookingRefNumber":race_held.1["item1"]["pnr"],"BookingCodeRef":race_booking,"UniqueTransID":race_request["uniqueTransID"],"PriceCodeRef":race_request["priceCodeRef"],"ItemCodeRef":race_request["itemCodeRef"]});
+    let race_unknown = issue_call(app, token, "nonissuance-race-issue", race_input).await;
+    assert_eq!(race_unknown.0, 202);
+    let race_issue = race_unknown.1["issueId"].clone();
+    let race_view = review(
+        app,
+        admin,
+        "user_maker",
+        json!({"action":"inspect","issue_id":race_issue}),
+    )
+    .await
+    .1;
+    let race_proposal = Uuid::new_v4();
+    let mut race_proposed = proposed.clone();
+    race_proposed["id"] = json!(race_proposal);
+    race_proposed["issue_id"] = race_issue;
+    race_proposed["snapshot_hash"] = race_view["snapshotHash"].clone();
+    race_proposed["evidence"]["confirmed_at"] = json!(chrono::Utc::now());
+    assert_eq!(review(app, admin, "user_maker", race_proposed).await.0, 200);
+    let mut race_approval = approve.clone();
+    race_approval["proposal_id"] = json!(race_proposal);
+    let race_path = format!("/api/bookings/{race_booking}/ticket/reconcile");
+    let (release_reply, verification_reply) = tokio::join!(
+        review(app, admin, "user_checker", race_approval),
+        super::call(app, "POST", &race_path, Some(token), json!({}))
+    );
+    assert!([200, 409].contains(&release_reply.0), "{release_reply:?}");
+    assert!(
+        [200, 202].contains(&verification_reply.0),
+        "{verification_reply:?}"
+    );
+    let race_op =
+        Uuid::parse_str(race_unknown.1["payment"]["operationId"].as_str().unwrap()).unwrap();
+    let settlements:i64=sqlx::query_scalar("SELECT count(*) FROM wallet_ledger_entries WHERE operation_id=$1 AND transaction_type IN ('booking_confirm','hold_release')").bind(race_op).fetch_one(pool).await.unwrap();
+    assert_eq!(settlements, 1);
+    let expected = if release_reply.0 == 200 {
+        "released"
+    } else {
+        "captured"
+    };
+    assert_eq!(verification_reply.1["payment"]["state"], expected);
+    assert_eq!(
+        verification_reply.1["requiresReconciliation"],
+        expected == "released"
+    );
+    for table in [
+        "ticket_nonissuance_proposals",
+        "ticket_nonissuance_decisions",
+    ] {
+        for verb in ["DELETE FROM", "TRUNCATE"] {
+            assert!(
+                sqlx::query(&format!("{verb} {table}"))
+                    .execute(pool)
+                    .await
+                    .is_err()
+            );
+        }
+    }
+    sqlx::query("UPDATE wallet_owners SET status='active'")
+        .execute(pool)
+        .await
+        .unwrap();
+    mock.issue_mode.store(0, Ordering::SeqCst);
+    mock.pnr_mode.store(0, Ordering::SeqCst);
+    mock.recovery_report.store(false, Ordering::SeqCst);
+}
+
+async fn verify_issue_without_pnr(app: &Router, pool: &PgPool, token: &str, mock: &Arc<Mock>) {
+    let future = (chrono::Utc::now() + chrono::Duration::hours(2)).to_rfc3339();
+    // All cases make PNR unavailable when NewTicket runs. Explicit lookup cases
+    // below establish optional prior evidence through the separate read endpoint.
+    for (label, deadline, lookup, unavailable, expected) in [
+        ("empty", json!(""), None, 12, 200),
+        ("null", Value::Null, None, 13, 200),
+        ("malformed", json!("not-a-date"), None, 14, 200),
+        (
+            "book-local-date",
+            json!("15/09/2026 12:30:00"),
+            None,
+            12,
+            200,
+        ),
+        ("future", json!(future), None, 13, 200),
+        ("expired", json!("2000-01-01T00:00:00Z"), None, 14, 409),
+        ("failed-lookup", json!(""), Some(4), 12, 200),
+        ("mismatched-lookup", json!(""), Some(1), 13, 200),
+        ("created-lookup", json!(""), Some(7), 14, 200),
+        ("missing-pnr-deadline", json!(""), Some(2), 12, 200),
+        ("bad-pnr-deadline", json!(""), Some(5), 13, 200),
+        ("already-ticketed", json!(""), Some(9), 14, 409),
+        ("ticket-evidence", json!(""), Some(8), 12, 409),
+        ("cancelled", json!(""), Some(11), 13, 409),
+    ] {
+        let (request, fare, _) = quote(pool).await;
+        *mock.fare.lock().unwrap() = fare;
+        *mock.book_deadline.lock().unwrap() = deadline;
+        let (code, held) = call(app, token, &format!("no-pnr-hold-{label}"), request.clone()).await;
+        assert_eq!(code, 200, "{label}: {held}");
+        let id = Uuid::parse_str(held["item1"]["bookingCodeRef"].as_str().unwrap()).unwrap();
+        let input = json!({"PNR":held["item1"]["pnr"],"BookingRefNumber":held["item1"]["pnr"],"BookingCodeRef":id,"UniqueTransID":request["uniqueTransID"],"PriceCodeRef":request["priceCodeRef"],"ItemCodeRef":request["itemCodeRef"]});
+        if let Some(mode) = lookup {
+            mock.pnr_mode.store(mode, Ordering::SeqCst);
+            let result = super::call(app, "POST", "/api/pnr", Some(token), input.clone()).await;
+            assert_eq!(
+                result.0,
+                if [1, 4].contains(&mode) { 502 } else { 200 },
+                "{result:?}"
+            );
+            if mode == 7 {
+                let response = app
+                    .clone()
+                    .oneshot(
+                        Request::builder()
+                            .method("POST")
+                            .uri("/api/pnr")
+                            .header("authorization", format!("Bearer {token}"))
+                            .header("content-type", "application/json")
+                            .body(Body::from(input.to_string()))
+                            .unwrap(),
+                    )
+                    .await
+                    .unwrap();
+                assert_eq!(response.status(), 200);
+                assert_eq!(
+                    response.headers()["x-manual-resolution-required"],
+                    "false",
+                    "Created must agree with held-ticket eligibility"
+                );
+            }
+            sqlx::query("UPDATE flight_bookings SET reconciled_at=clock_timestamp()-INTERVAL '1 hour' WHERE id=$1").bind(id).execute(pool).await.unwrap();
+            // A later failed check must not erase already verified evidence of
+            // cancellation/ticketing and make the same Hold issuable again.
+            if [8, 9, 11].contains(&mode) {
+                mock.pnr_mode.store(4, Ordering::SeqCst);
+                let failed = super::call(app, "POST", "/api/pnr", Some(token), input.clone()).await;
+                assert_eq!(failed.0, 502);
+            }
+        }
+        mock.pnr_mode.store(unavailable, Ordering::SeqCst);
+        let reads = mock.pnr_calls.load(Ordering::SeqCst);
+        let issues = mock.issue_calls.load(Ordering::SeqCst);
+        let reply = issue_call(app, token, &format!("no-pnr-issue-{label}"), input.clone()).await;
+        assert_eq!(reply.0, expected, "{label}: {reply:?}");
+        assert_eq!(
+            mock.pnr_calls.load(Ordering::SeqCst),
+            reads,
+            "{label}: issue called PNR"
+        );
+        if expected == 200 {
+            assert_eq!(mock.issue_calls.load(Ordering::SeqCst), issues + 1);
+            assert_eq!(
+                issue_call(app, token, &format!("no-pnr-replay-{label}"), input).await,
+                reply
+            );
+            assert_eq!(mock.pnr_calls.load(Ordering::SeqCst), reads);
+            assert_eq!(mock.issue_calls.load(Ordering::SeqCst), issues + 1);
+            let (evidence, request, observation): (Value, Value, Option<Value>) = sqlx::query_as("SELECT t.preflight,t.request,b.last_reconciliation FROM flight_ticket_issues t JOIN flight_bookings b ON b.id=t.booking_id WHERE t.booking_id=$1").bind(id).fetch_one(pool).await.unwrap();
+            assert_eq!(evidence["source"], "saved_booking");
+            assert_eq!(evidence["booking"]["item1"]["bookingStatus"], "Created");
+            assert_eq!(request.as_object().unwrap().len(), 6);
+            assert_eq!(
+                evidence["deadlineCheck"],
+                if label == "future" {
+                    "explicit_offset_checked"
+                } else {
+                    "supplier_validation_required"
+                }
+            );
+            assert_eq!(
+                evidence["deadlineSource"],
+                if lookup.is_some_and(|m| ![1, 4].contains(&m)) {
+                    "saved_pnr"
+                } else {
+                    "booking"
+                }
+            );
+            if lookup.is_none() {
+                assert!(observation.is_none(), "issue fabricated PNR evidence");
+                assert!(evidence["verifiedPnrObservation"].is_null());
+            }
+        } else {
+            assert_eq!(mock.issue_calls.load(Ordering::SeqCst), issues);
+            let (reserved,): (bool,) = sqlx::query_as(
+                "SELECT EXISTS(SELECT 1 FROM flight_ticket_issues WHERE booking_id=$1)",
+            )
+            .bind(id)
+            .fetch_one(pool)
+            .await
+            .unwrap();
+            assert!(!reserved);
+            assert_eq!(
+                reply.1["error"],
+                if label == "expired" {
+                    "TICKETING_DEADLINE_UNSAFE"
+                } else {
+                    "ISSUE_READINESS_NOT_VERIFIED"
+                }
+            );
+        }
+    }
+    *mock.book_deadline.lock().unwrap() = json!("2026-09-29 10:00:00");
+    mock.pnr_mode.store(0, Ordering::SeqCst);
+    for statement in [
+        "DELETE FROM flight_booking_pnr_observations",
+        "UPDATE flight_booking_pnr_observations SET verified=true",
+        "TRUNCATE flight_booking_pnr_observations",
+    ] {
+        assert!(sqlx::query(statement).execute(pool).await.is_err());
+    }
+    // Simulate the pre-0028 schema inside a rollback-only transaction using the
+    // real migration SQL and existing saved attempts, including failed ones.
+    let mut upgrade = pool.begin().await.unwrap();
+    // Later read projections depend on this evidence table. Remove only those
+    // projections in the rollback-only simulation of the historical schema.
+    sqlx::raw_sql(
+        "DROP VIEW flight_ticket_outcomes; DROP VIEW ticket_nonissuance_positive_observations;",
+    )
+    .execute(&mut *upgrade)
+    .await
+    .unwrap();
+    sqlx::query("DROP TABLE flight_booking_pnr_observations")
+        .execute(&mut *upgrade)
+        .await
+        .unwrap();
+    sqlx::raw_sql(include_str!(
+        "../../migrations/0028_booking_pnr_observations.sql"
+    ))
+    .execute(&mut *upgrade)
+    .await
+    .unwrap();
+    let (verified, failed, missing): (i64, i64, i64) = sqlx::query_as("SELECT count(*) FILTER(WHERE p.verified),count(*) FILTER(WHERE NOT p.verified),count(*) FILTER(WHERE p.id IS NULL OR p.response IS DISTINCT FROM b.last_reconciliation OR p.verified IS DISTINCT FROM b.last_reconciliation_verified) FROM flight_bookings b LEFT JOIN flight_booking_pnr_observations p ON p.booking_id=b.id WHERE b.last_reconciliation IS NOT NULL").fetch_one(&mut *upgrade).await.unwrap();
+    assert!(verified > 0 && failed > 0);
+    assert_eq!(
+        missing, 0,
+        "upgrade must preserve all currently available observations"
+    );
+    upgrade.rollback().await.unwrap();
+}
+
+async fn verify_single_name_and_distinct_references(
+    app: &Router,
+    pool: &PgPool,
+    token: &str,
+    mock: &Arc<Mock>,
+) {
+    let (mut request, fare, _) = quote(pool).await;
+    request["passengerInfoes"][0]["nameElement"]["firstName"] = json!("");
+    request["passengerInfoes"][0]["nameElement"]["lastName"] = json!("Rahman");
+    *mock.fare.lock().unwrap() = fare;
+    mock.echo_quote_refs.store(true, Ordering::SeqCst);
+    mock.pnr_mode.store(13, Ordering::SeqCst);
+    let reads = mock.pnr_calls.load(Ordering::SeqCst);
+    let issues = mock.issue_calls.load(Ordering::SeqCst);
+    let (code, held) = call(app, token, "single-name-hold", request.clone()).await;
+    assert_eq!(code, 200, "{held}");
+    let id = Uuid::parse_str(held["item1"]["bookingCodeRef"].as_str().unwrap()).unwrap();
+    let input = json!({"PNR":held["item1"]["pnr"],"BookingRefNumber":held["item1"]["pnr"],"BookingCodeRef":id,"UniqueTransID":request["uniqueTransID"],"PriceCodeRef":request["priceCodeRef"],"ItemCodeRef":request["itemCodeRef"]});
+    let reply = issue_call(app, token, "single-name-issue", input.clone()).await;
+    assert_eq!(reply.0, 200, "{reply:?}");
+    assert_eq!(
+        reply.1["item1"]["ticketInfoes"][0]["passengerInfo"]["nameElement"]["firstName"],
+        ""
+    );
+    assert_eq!(
+        issue_call(app, token, "single-name-replay", input).await,
+        reply
+    );
+    assert_eq!(mock.pnr_calls.load(Ordering::SeqCst), reads);
+    assert_eq!(mock.issue_calls.load(Ordering::SeqCst), issues + 1);
+    let (payload,): (Value,) =
+        sqlx::query_as("SELECT request FROM flight_ticket_issues WHERE booking_id=$1")
+            .bind(id)
+            .fetch_one(pool)
+            .await
+            .unwrap();
+    let refs = [
+        "UniqueTransID",
+        "ItemCodeRef",
+        "PriceCodeRef",
+        "BookingCodeRef",
+    ]
+    .map(|key| payload[key].as_str().unwrap());
+    assert_eq!(
+        refs.into_iter()
+            .collect::<std::collections::HashSet<_>>()
+            .len(),
+        4,
+        "distinct opaque fields must not be swapped/collapsed"
+    );
+    let report = super::call(
+        app,
+        "GET",
+        &format!("/api/bookings/{id}/ticket/report"),
+        Some(token),
+        Value::Null,
+    )
+    .await;
+    assert_eq!(report.0, 200, "{report:?}");
+    assert_eq!(report.1["passengerInfo"][0]["first"], "");
+    assert_eq!(report.1["passengerInfo"][0]["last"], "Rahman");
+    assert_eq!(mock.pnr_calls.load(Ordering::SeqCst), reads);
+    mock.echo_quote_refs.store(false, Ordering::SeqCst);
+    mock.pnr_mode.store(0, Ordering::SeqCst);
+}
+
+async fn verify_pnr_observation_order(app: &Router, pool: &PgPool, token: &str, mock: &Arc<Mock>) {
+    for (older, newer, status, expected) in [(15, 11, "Cancelled", 409), (16, 0, "Booked", 200)] {
+        let (request, fare, _) = quote(pool).await;
+        *mock.fare.lock().unwrap() = fare;
+        let (code, held) = call(
+            app,
+            token,
+            &format!("ordered-pnr-hold-{older}"),
+            request.clone(),
+        )
+        .await;
+        assert_eq!(code, 200);
+        let id = Uuid::parse_str(held["item1"]["bookingCodeRef"].as_str().unwrap()).unwrap();
+        let input = json!({"PNR":held["item1"]["pnr"],"BookingRefNumber":held["item1"]["pnr"],"BookingCodeRef":id,"UniqueTransID":request["uniqueTransID"],"PriceCodeRef":request["priceCodeRef"],"ItemCodeRef":request["itemCodeRef"]});
+        mock.pnr_mode.store(older, Ordering::SeqCst);
+        let delayed = {
+            let app = app.clone();
+            let token = token.to_owned();
+            let input = input.clone();
+            tokio::spawn(
+                async move { super::call(&app, "POST", "/api/pnr", Some(&token), input).await },
+            )
+        };
+        tokio::time::timeout(Duration::from_secs(2), mock.pnr_entered.notified())
+            .await
+            .unwrap();
+        mock.pnr_mode.store(newer, Ordering::SeqCst);
+        let fresh = super::call(app, "POST", "/api/pnr", Some(token), input.clone()).await;
+        assert_eq!(fresh.0, 200);
+        mock.pnr_release.notify_one();
+        assert_eq!(delayed.await.unwrap().0, 200);
+        let (latest,): (String,) = sqlx::query_as("SELECT response#>>'{item1,status}' FROM flight_booking_pnr_observations WHERE booking_id=$1 AND verified ORDER BY requested_at DESC,id DESC LIMIT 1").bind(id).fetch_one(pool).await.unwrap();
+        assert_eq!(latest, status);
+        mock.pnr_mode.store(13, Ordering::SeqCst);
+        let reads = mock.pnr_calls.load(Ordering::SeqCst);
+        let issues = mock.issue_calls.load(Ordering::SeqCst);
+        let result = issue_call(app, token, &format!("ordered-pnr-issue-{older}"), input).await;
+        assert_eq!(result.0, expected, "{result:?}");
+        assert_eq!(mock.pnr_calls.load(Ordering::SeqCst), reads);
+        assert_eq!(
+            mock.issue_calls.load(Ordering::SeqCst),
+            issues + usize::from(expected == 200)
+        );
+    }
+    mock.pnr_mode.store(0, Ordering::SeqCst);
 }
 
 async fn verify_reports(
@@ -1379,12 +2083,18 @@ async fn verify_reports(
     let result = super::call(app, "GET", &path, Some(token), Value::Null).await;
     assert_eq!(result.0, 200, "{result:?}");
     assert_eq!(
-        result.1["ticketInfo"]["ticketingPrice"].to_string(),
-        "4533.05"
+        result.1["ticketInfo"]["ticketingPrice"]
+            .to_string()
+            .parse::<bigdecimal::BigDecimal>()
+            .unwrap(),
+        bigdecimal::BigDecimal::from(4349)
     );
     assert_eq!(
-        result.1["passengerInfo"][0]["totalPrice"].to_string(),
-        "4533.05"
+        result.1["passengerInfo"][0]["totalPrice"]
+            .to_string()
+            .parse::<bigdecimal::BigDecimal>()
+            .unwrap(),
+        bigdecimal::BigDecimal::from(4349)
     );
     assert_eq!(result.1["ticketInfo"]["bookingId"], json!(id));
     assert!(!result.1.to_string().contains("private-supplier-data"));

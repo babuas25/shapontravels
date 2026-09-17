@@ -78,6 +78,8 @@ To call POST `/api/FareRules`, take the selected returned offer's `uniqueTransID
 
 The server checks ownership, expiry and an exact complete-direction match, then uses the stored original references on the original supplier. Foreign offers return 404; expired references 410; tampered reference sets 422. An admin token cannot call these commercial routes. FareRules references returned by suppliers are rebound to the client's platform context. FareRules does not book, accept a price or issue a ticket.
 
+Both the offer and its parent Search must remain unexpired, including after the supplier responds. FareRules requires the saved supplier to remain enabled with the same availability epoch and configured currency. An availability change returns `409 NEW_SEARCH_REQUIRED`; currency mismatch returns `422 SUPPLIER_CURRENCY_MISMATCH`. The configured supplier timeout applies, and both adapter timeouts and elapsed deadlines return `504 SUPPLIER_TIMEOUT`. A success envelope must include a valid `fareRuleDetails` array; malformed rules return `502 UPSTREAM_FARE_RULES_ERROR`, without invalidating an otherwise usable price.
+
 Platform auth/configuration/validation errors currently retain the established platform error format `{"error":"CODE"}`; success pipeline responses use supplier item1/item2 envelopes. Full flight error/OpenAPI schema compatibility remains part of final contract work.
 
 ## Limits and validation

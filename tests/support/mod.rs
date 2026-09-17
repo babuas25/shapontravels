@@ -2,7 +2,11 @@ mod api_management;
 mod booking;
 pub mod cleanup;
 mod markup;
+mod passengers;
+mod portal;
+pub mod portal_holds;
 mod prebooking;
+mod prebooking_contract;
 mod reprice;
 mod return_markup;
 mod search;
@@ -217,6 +221,9 @@ pub async fn authentication(pool: &PgPool) {
     return_markup::verify(pool, admin, token).await;
     tier::verify(&app, admin, token, pool).await;
     api_management::verify(&app, admin, token, pool).await;
+    portal::verify(&app, admin, token, pool).await;
+    passengers::verify(&app, admin, token, pool).await;
+    portal_holds::verify(pool, admin, token, &app).await;
     let (lifetime,):(i64,)=sqlx::query_as("SELECT EXTRACT(EPOCH FROM (expires_at-created_at))::bigint FROM machine_tokens WHERE client_id=$1").bind(client_uuid).fetch_one(pool).await.unwrap();
     assert_eq!(lifetime, 1800);
     assert_eq!(
@@ -257,6 +264,7 @@ pub async fn authentication(pool: &PgPool) {
         .await
         .unwrap();
     let machine = Machine {
+        portal_staff: false,
         commission_share_percent: 60,
         tier: Some(shapontravels_api::tier::Tier::Basic),
         client_id: client_uuid,

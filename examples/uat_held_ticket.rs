@@ -44,7 +44,7 @@ async fn call(app: &axum::Router, token: &str, path: &str, body: Value) -> (u16,
 }
 #[tokio::main]
 async fn main() {
-    let phase = std::env::args().nth(1).expect("check or issue");
+    let phase = std::env::args().nth(1).expect("check, issue or verify");
     assert!(["check", "issue", "verify"].contains(&phase.as_str()));
     assert_eq!(
         std::env::var("AUTHORIZED_UAT_HELD_TICKET").as_deref(),
@@ -154,11 +154,16 @@ async fn main() {
         call(&app, &token, "/api/ticket/NewTicket", input).await
     };
     save(&dir, "public-response", &body);
-    let (original,preflight):(Option<Value>,Option<Value>)=sqlx::query_as("SELECT t.original_response,b.last_reconciliation FROM flight_bookings b LEFT JOIN flight_ticket_issues t ON t.booking_id=b.id WHERE b.id=$1").bind(id).fetch_one(&pool).await.unwrap();
+    let (original,preflight,pnr_observation):(Option<Value>,Option<Value>,Option<Value>)=sqlx::query_as("SELECT t.original_response,t.preflight,b.last_reconciliation FROM flight_bookings b LEFT JOIN flight_ticket_issues t ON t.booking_id=b.id WHERE b.id=$1").bind(id).fetch_one(&pool).await.unwrap();
     save(&dir, "supplier-response", &original.unwrap_or(Value::Null));
     save(&dir, "preflight", &preflight.clone().unwrap_or(Value::Null));
+    save(
+        &dir,
+        "saved-pnr-observation",
+        &pnr_observation.unwrap_or(Value::Null),
+    );
     let preflight = preflight.unwrap_or(Value::Null);
-    let summary = json!({"phase":phase,"httpStatus":status,"error":body["error"],"state":body["state"],"pnrStatus":preflight["item1"]["status"],"deadline":preflight["item1"]["lastTicketTime"],"ticketPassengerCount":body["item1"]["ticketInfoes"].as_array().map(Vec::len)});
+    let summary = json!({"phase":phase,"httpStatus":status,"error":body["error"],"state":body["state"],"preflightSource":preflight["source"],"deadline":preflight["deadline"],"deadlineCheck":preflight["deadlineCheck"],"ticketPassengerCount":body["item1"]["ticketInfoes"].as_array().map(Vec::len)});
     save(&dir, "summary", &summary);
     if ["issue", "verify"].contains(&phase.as_str()) && [200, 202].contains(&status) {
         let retrieved = call(
@@ -170,18 +175,7 @@ async fn main() {
         .await;
         save(&dir, "ticket-retrieval", &retrieved.1);
         assert_eq!(retrieved, (status, body));
-        let (pnr_code, pnr) = call(
-            &app,
-            &token,
-            &format!("/api/bookings/{id}/reconcile"),
-            json!({}),
-        )
-        .await;
-        save(&dir, "after-issue-pnr", &pnr);
-        println!(
-            "After-issue PNR HTTP {pnr_code}; status={}",
-            pnr["item1"]["status"]
-        );
+        // PNR is a separate explicit `check` phase, never part of issue/verify.
     }
     sqlx::query("DELETE FROM machine_tokens WHERE token_hash=$1")
         .bind(digest(&token))

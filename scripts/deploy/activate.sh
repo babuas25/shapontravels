@@ -50,6 +50,10 @@ GRANT SELECT, INSERT, UPDATE, DELETE ON ALL TABLES IN SCHEMA public TO shapon_ap
 GRANT USAGE, SELECT ON ALL SEQUENCES IN SCHEMA public TO shapon_app;
 REVOKE INSERT, UPDATE, DELETE ON TABLE _sqlx_migrations FROM shapon_app;
 REVOKE UPDATE, DELETE ON TABLE audit_events, markup_rule_versions FROM shapon_app;
+REVOKE INSERT, UPDATE, DELETE ON TABLE wallet_ledger_entries FROM shapon_app;
+REVOKE UPDATE, DELETE ON TABLE wallet_accounts FROM shapon_app;
+GRANT UPDATE(currency) ON TABLE wallet_accounts TO shapon_app;
+GRANT EXECUTE ON FUNCTION wallet_apply_posting(UUID,UUID,TEXT,BIGINT,UUID,UUID,TEXT,BYTEA,TEXT,TEXT,TEXT,JSONB) TO shapon_app;
 SQL
 ln -sfn "$release/shapontravels-api" /opt/shapontravels/shapontravels-api.next
 mv -Tf /opt/shapontravels/shapontravels-api.next /opt/shapontravels/shapontravels-api

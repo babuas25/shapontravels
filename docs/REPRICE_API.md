@@ -2,6 +2,8 @@
 
 `POST /api/Reprice` uses a machine token with `search:read`. It reprices one owned, unexpired Search offer through its saved supplier connection. No booking, cancellation or ticketing operation is called.
 
+The offer and its parent Search are checked before and after the supplier call. A stored revision expires at the earlier of those two lifetimes; acceptance checks the revision, offer and Search again. Successful supplier responses must provide boolean `isPriceChanged`, `bookable` and `refundable` fields. Missing or malformed conditions return `422 SUPPLIER_RESPONSE_INVALID` without creating a revision. Valid `false` conditions and null/missing refreshed segment references are preserved.
+
 ## Request
 
 ```json

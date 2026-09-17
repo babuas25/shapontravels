@@ -43,7 +43,7 @@ fn missing() -> ApiError {
 pub fn digest(value: &str) -> Vec<u8> {
     Sha256::digest(value.as_bytes()).to_vec()
 }
-fn random_secret(prefix: &str) -> String {
+pub(crate) fn random_secret(prefix: &str) -> String {
     let mut bytes = [0u8; 32];
     OsRng.fill_bytes(&mut bytes);
     format!("{prefix}{}", URL_SAFE_NO_PAD.encode(bytes))
@@ -102,7 +102,7 @@ fn bearer(parts: &Parts, prefix: &str) -> Result<String, ApiError> {
     Ok(value.into())
 }
 
-async fn rate_limit(pool: &PgPool, key: &str, limit: i32) -> Result<(), ApiError> {
+pub(crate) async fn rate_limit(pool: &PgPool, key: &str, limit: i32) -> Result<(), ApiError> {
     let (count,): (i32,) = sqlx::query_as("INSERT INTO rate_buckets(bucket_key) VALUES($1) ON CONFLICT(bucket_key) DO UPDATE SET requests = CASE WHEN rate_buckets.window_start <= now() - INTERVAL '60 seconds' THEN 1 ELSE rate_buckets.requests + 1 END, window_start = CASE WHEN rate_buckets.window_start <= now() - INTERVAL '60 seconds' THEN now() ELSE rate_buckets.window_start END RETURNING requests")
         .bind(digest(key)).fetch_one(pool).await?;
     if count > limit {
@@ -127,6 +127,8 @@ pub async fn audit(
 
 #[derive(Serialize, ToSchema)]
 pub struct Machine {
+    #[serde(skip)]
+    pub portal_staff: bool,
     #[schema(value_type = String)]
     pub client_id: Uuid,
     pub audience: String,
@@ -156,7 +158,7 @@ impl Machine {
         if exists.0 { Ok(()) } else { Err(missing()) }
     }
 }
-type MachineRow = (
+pub(crate) type MachineRow = (
     Uuid,
     String,
     Option<Uuid>,
@@ -172,13 +174,29 @@ impl FromRequestParts<AppState> for Machine {
         parts: &mut Parts,
         state: &AppState,
     ) -> Result<Self, Self::Rejection> {
-        let token = bearer(parts, "stm_")?;
-        let row: Option<MachineRow> = sqlx::query_as("SELECT c.id,c.audience,c.agent_id,c.permissions,c.rate_limit_per_minute,CASE WHEN c.audience='b2b' THEN c.tier END,CASE WHEN c.audience='b2c' THEN 0 WHEN c.tier='basic' THEN p.basic WHEN c.tier='professional' THEN p.professional ELSE p.enterprise END FROM machine_tokens t JOIN api_clients c ON c.id=t.client_id JOIN client_credentials k ON k.id=t.credential_id AND k.client_id=c.id CROSS JOIN b2b_tier_policy p WHERE p.singleton AND t.token_hash=$1 AND t.expires_at>now() AND c.active AND k.active AND (c.external_user_id IS NULL OR (c.api_management_enabled AND c.tier='enterprise'))")
-            .bind(digest(&token)).fetch_optional(&state.pool).await?;
+        let token = bearer(parts, "stm_")
+            .or_else(|_| bearer(parts, "stp_"))
+            .or_else(|_| bearer(parts, "sti_"))?;
+        let (row, portal_staff): (Option<MachineRow>, bool) = if token.starts_with("sti_") {
+            crate::identity::business::authenticate_search(state, parts, &token).await?
+        } else if token.starts_with("stp_") {
+            crate::portal::authenticate(state, parts, &token).await?
+        } else {
+            (sqlx::query_as("SELECT c.id,c.audience,c.agent_id,c.permissions,c.rate_limit_per_minute,CASE WHEN c.audience='b2b' THEN c.tier END,CASE WHEN c.audience='b2c' THEN 0 WHEN c.tier='basic' THEN p.basic WHEN c.tier='professional' THEN p.professional ELSE p.enterprise END FROM machine_tokens t JOIN api_clients c ON c.id=t.client_id JOIN client_credentials k ON k.id=t.credential_id AND k.client_id=c.id CROSS JOIN b2b_tier_policy p WHERE p.singleton AND t.token_hash=$1 AND t.expires_at>now() AND c.active AND k.active AND c.id NOT IN (SELECT client_id FROM portal_staff_clients) AND (c.external_user_id IS NULL OR (c.api_management_enabled AND c.tier='enterprise'))")
+                .bind(digest(&token)).fetch_optional(&state.pool).await?, false)
+        };
         let (client_id, audience, agent_id, permissions, limit, tier, commission_share_percent) =
             row.ok_or_else(unauthorized)?;
+        // Managed portal clients need a stable pricing identity even when no
+        // legacy agent UUID was assigned. Preserve explicit IDs and staff views.
+        let agent_id = if audience == "b2b" && !portal_staff {
+            Some(agent_id.unwrap_or(client_id))
+        } else {
+            agent_id
+        };
         rate_limit(&state.pool, &format!("client:{client_id}"), limit).await?;
         Ok(Self {
+            portal_staff,
             client_id,
             audience,
             agent_id,
@@ -194,6 +212,13 @@ pub struct Admin {
     token_hash: Vec<u8>,
 }
 impl Admin {
+    pub(crate) fn portal_bridge(&self) -> Result<(), ApiError> {
+        if crate::identity::business::in_context() {
+            Ok(())
+        } else {
+            self.super_admin()
+        }
+    }
     pub(crate) fn super_admin(&self) -> Result<(), ApiError> {
         if self.role == "super_admin" {
             Ok(())
@@ -208,6 +233,13 @@ impl FromRequestParts<AppState> for Admin {
         parts: &mut Parts,
         state: &AppState,
     ) -> Result<Self, Self::Rejection> {
+        if let Some((id, role)) = crate::identity::business::admin_identity() {
+            return Ok(Self {
+                id,
+                role,
+                token_hash: vec![],
+            });
+        }
         let token_hash = digest(&bearer(parts, "sta_")?);
         let row: Option<(Uuid, String)> = sqlx::query_as("SELECT a.id,a.role FROM admin_sessions s JOIN administrators a ON a.id=s.administrator_id WHERE s.token_hash=$1 AND NOT s.revoked AND s.expires_at>now() AND a.active").bind(&token_hash).fetch_optional(&state.pool).await?;
         let (id, role) = row.ok_or_else(unauthorized)?;
@@ -241,13 +273,13 @@ async fn token(
     if request.client_secret.len() > 256 {
         return Err(unauthorized());
     }
-    let row: Option<(Uuid,String)> = sqlx::query_as("SELECT k.id,k.secret_hash FROM client_credentials k JOIN api_clients c ON c.id=k.client_id WHERE c.id=$1 AND c.active AND k.active AND (c.external_user_id IS NULL OR (c.api_management_enabled AND c.tier='enterprise'))").bind(request.client_id).fetch_optional(&state.pool).await?;
+    let row: Option<(Uuid,String)> = sqlx::query_as("SELECT k.id,k.secret_hash FROM client_credentials k JOIN api_clients c ON c.id=k.client_id WHERE c.id=$1 AND c.active AND k.active AND c.id NOT IN (SELECT client_id FROM portal_staff_clients) AND (c.external_user_id IS NULL OR (c.api_management_enabled AND c.tier='enterprise'))").bind(request.client_id).fetch_optional(&state.pool).await?;
     if !verify(request.client_secret, row.as_ref().map(|r| r.1.clone())).await? {
         return Err(unauthorized());
     }
     let credential = row.ok_or_else(unauthorized)?.0;
     let mut tx = state.pool.begin().await?;
-    let still_active: Option<(Uuid,)> = sqlx::query_as("SELECT k.id FROM client_credentials k JOIN api_clients c ON c.id=k.client_id WHERE k.id=$1 AND c.active AND k.active AND (c.external_user_id IS NULL OR (c.api_management_enabled AND c.tier='enterprise')) FOR SHARE OF k,c").bind(credential).fetch_optional(&mut *tx).await?;
+    let still_active: Option<(Uuid,)> = sqlx::query_as("SELECT k.id FROM client_credentials k JOIN api_clients c ON c.id=k.client_id WHERE k.id=$1 AND c.active AND k.active AND c.id NOT IN (SELECT client_id FROM portal_staff_clients) AND (c.external_user_id IS NULL OR (c.api_management_enabled AND c.tier='enterprise')) FOR SHARE OF k,c").bind(credential).fetch_optional(&mut *tx).await?;
     if still_active.is_none() {
         return Err(unauthorized());
     }
@@ -345,7 +377,14 @@ impl ClientInput {
             || (self.audience == "b2c" && self.agent_id.is_some())
             || !(1..=10000).contains(&self.rate_limit_per_minute)
             || self.permissions.iter().any(|p| {
-                !["search:read", "booking", "cancellation", "ticketing"].contains(&p.as_str())
+                ![
+                    "search:read",
+                    "booking",
+                    "cancellation",
+                    "ticketing",
+                    "wallet:read",
+                ]
+                .contains(&p.as_str())
             })
         {
             return Err(invalid());
@@ -418,7 +457,7 @@ async fn reset_secret(
 ) -> Result<Json<IssuedCredential>, ApiError> {
     let secret = random_secret("stc_");
     let hash = hash_secret(secret.clone()).await?;
-    let mut tx = state.pool.begin().await?;
+    let mut tx = crate::identity::business::begin(&state.pool).await?;
     let exists: Option<(Uuid,)> =
         sqlx::query_as("SELECT id FROM api_clients WHERE id=$1 FOR UPDATE")
             .bind(id)
@@ -450,7 +489,7 @@ async fn revoke_secret(
     State(state): State<AppState>,
     Path(id): Path<Uuid>,
 ) -> Result<StatusCode, ApiError> {
-    let mut tx = state.pool.begin().await?;
+    let mut tx = crate::identity::business::begin(&state.pool).await?;
     let exists: Option<(Uuid,)> =
         sqlx::query_as("SELECT id FROM api_clients WHERE id=$1 FOR UPDATE")
             .bind(id)

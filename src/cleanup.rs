@@ -40,6 +40,7 @@ pub async fn cleanup_batch(pool: &PgPool) -> Result<CleanupStats, sqlx::Error> {
               AND o.expires_at <= now() AND s.expires_at <= now()
               AND NOT EXISTS (SELECT 1 FROM flight_reprices r WHERE r.offer_id=o.id)
               AND NOT EXISTS (SELECT 1 FROM flight_bookings b WHERE b.offer_id=o.id)
+              AND NOT EXISTS (SELECT 1 FROM portal_hold_drafts d WHERE d.offer_id=o.id OR d.source_offer_id=o.id)
             ORDER BY o.created_at,o.id LIMIT 512 FOR UPDATE OF o SKIP LOCKED
         ), removed AS (
             DELETE FROM flight_offers o USING eligible e WHERE o.id=e.id RETURNING o.id,o.client_id

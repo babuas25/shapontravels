@@ -47,6 +47,7 @@ jobs:
           bash -n scripts/deploy/activate.sh
           bash -n scripts/deploy/send.sh
           python3 scripts/deploy/test_activate.py
+          python3 scripts/deploy/test_send.py
   build:
     name: Build Ubuntu 24.04 release
     needs: check

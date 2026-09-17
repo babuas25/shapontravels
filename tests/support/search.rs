@@ -159,10 +159,10 @@ pub async fn verify(original_app: &Router, admin: &str, machine: &str, pool: &Pg
         assert_eq!(filters.len(), 1, "only the retained BS airline remains");
         assert_eq!(filters[0]["airlineCode"], "BS");
         assert_eq!(filters[0]["totalFlights"], 3);
-        assert_eq!(filters[0]["minNetPrice"].to_string(), "4533.05");
+        assert_eq!(filters[0]["minNetPrice"].to_string(), "4349");
         assert_eq!(
             response["item1"]["minMaxPrice"]["minNetPrice"].to_string(),
-            "4533.05"
+            "4349"
         );
         for offer in response["item1"]["airSearchResponses"].as_array().unwrap() {
             assert_eq!(
@@ -197,8 +197,23 @@ pub async fn verify(original_app: &Router, admin: &str, machine: &str, pool: &Pg
             .await;
             assert_eq!(status, 200);
             assert_eq!(pricing["tier"], "basic");
-            assert_eq!(pricing["gross"], returned["totalPrice"].to_string());
+            assert_eq!(
+                pricing["gross"]
+                    .as_str()
+                    .unwrap()
+                    .parse::<bigdecimal::BigDecimal>()
+                    .unwrap(),
+                returned["totalPrice"]
+                    .to_string()
+                    .parse::<bigdecimal::BigDecimal>()
+                    .unwrap()
+            );
             assert_eq!(pricing["commissionSharePercent"], share);
+            assert_eq!(
+                pricing["commission"],
+                if share == 50 { "-92.03" } else { "-110.43" },
+                "Discount shares use gross 4349 minus (supplier 4033.05 plus markup 500), preserving the signed adjustment"
+            );
         }
         let search_id = Uuid::parse_str(
             response["item1"]["airSearchResponses"][0]["uniqueTransID"]
@@ -224,7 +239,7 @@ pub async fn verify(original_app: &Router, admin: &str, machine: &str, pool: &Pg
         }
         latest = response;
     }
-    // A cheaper source overrides the tie priority, then receives markup exactly once.
+    // A cheaper source overrides the tie priority, without changing published gross.
     let saved = mocks[0].response.lock().unwrap().clone();
     {
         let mut response = mocks[0].response.lock().unwrap();
@@ -257,7 +272,7 @@ pub async fn verify(original_app: &Router, admin: &str, machine: &str, pool: &Pg
                 .to_string()
                 .parse::<bigdecimal::BigDecimal>()
                 .unwrap(),
-            bigdecimal::BigDecimal::from(4500)
+            bigdecimal::BigDecimal::from(4349)
         );
         let id = Uuid::parse_str(offer["itemCodeRef"].as_str().unwrap()).unwrap();
         let (source, original): (String, Value) =
@@ -278,7 +293,7 @@ pub async fn verify(original_app: &Router, admin: &str, machine: &str, pool: &Pg
     *mocks[0].response.lock().unwrap() = saved.clone();
     *mocks[2].response.lock().unwrap() = saved;
     let offer = &latest["item1"]["airSearchResponses"][0];
-    assert_eq!(offer["totalPrice"].to_string(), "4533.05");
+    assert_eq!(offer["totalPrice"].to_string(), "4349");
     let id = Uuid::parse_str(offer["itemCodeRef"].as_str().unwrap()).unwrap();
     let (raw,): (Value,) = sqlx::query_as("SELECT original FROM flight_offers WHERE id=$1")
         .bind(id)
@@ -289,6 +304,7 @@ pub async fn verify(original_app: &Router, admin: &str, machine: &str, pool: &Pg
     assert_ne!(refs(&raw), refs(offer));
     super::reprice::verify(pool, machine, &raw, offer).await;
     super::prebooking::verify(pool, machine, &raw, offer).await;
+    super::prebooking_contract::verify(pool, machine, &raw, offer).await;
     let follow = json!({"uniqueTransID":offer["uniqueTransID"],"itemCodeRef":offer["itemCodeRef"],"segmentCodeRefs":refs(offer),"brandedFareRefs":""});
     let (status, rules) = call(
         &app,
@@ -409,7 +425,7 @@ pub async fn verify(original_app: &Router, admin: &str, machine: &str, pool: &Pg
             map[original["itemCodeRef"].as_str().unwrap()],
             id.to_string()
         );
-        assert_eq!(selling["totalPrice"].to_string(), "4533.05");
+        assert_eq!(selling["totalPrice"].to_string(), "4349");
     }
     // A database failure in a later batch rolls back earlier batches and the search header.
     sqlx::query("CREATE FUNCTION fail_bulk_test() RETURNS trigger LANGUAGE plpgsql AS $$ BEGIN IF NEW.original->>'bulkRow'='64' THEN RAISE EXCEPTION 'deliberate batch failure'; END IF; RETURN NEW; END $$").execute(pool).await.unwrap();

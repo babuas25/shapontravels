@@ -15,7 +15,7 @@ use axum::{
     http::{HeaderMap, HeaderValue, StatusCode},
     routing::{get, post},
 };
-use chrono::NaiveDate;
+use chrono::{Datelike, Days, Months, NaiveDate};
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
 use utoipa::{OpenApi, ToSchema};
@@ -155,7 +155,71 @@ fn country(s: &str) -> bool {
 fn text(s: &str, max: usize) -> bool {
     !s.trim().is_empty() && s.len() <= max && !s.chars().any(char::is_control)
 }
-fn validate(request: &BookRequest, q: &Quote) -> Result<(), ApiError> {
+// Same airport-country catalog as the portal. Every selected segment, including
+// connections, must resolve to one country before passport fields are optional.
+fn passport_required(directions: &Value) -> bool {
+    static COUNTRIES: std::sync::LazyLock<std::collections::HashMap<String, String>> =
+        std::sync::LazyLock::new(|| {
+            serde_json::from_str(include_str!("airport_countries.json")).unwrap_or_default()
+        });
+    let Some(routes) = directions.as_array() else {
+        return true;
+    };
+    if routes.is_empty() {
+        return true;
+    }
+    let mut country = None;
+    for route in routes {
+        let Some(options) = route.as_array() else {
+            return true;
+        };
+        if options.is_empty() {
+            return true;
+        }
+        for option in options {
+            let Some(segments) = option["segments"].as_array() else {
+                return true;
+            };
+            if segments.is_empty() {
+                return true;
+            }
+            for segment in segments {
+                for key in ["from", "to"] {
+                    let Some(code) = segment[key].as_str() else {
+                        return true;
+                    };
+                    let Some(found) = COUNTRIES.get(&code.trim().to_uppercase()) else {
+                        return true;
+                    };
+                    if country.is_some_and(|previous| previous != found) {
+                        return true;
+                    }
+                    country = Some(found);
+                }
+            }
+        }
+    }
+    country.is_none()
+}
+fn valid_given_name(name: &str) -> bool {
+    name.len() <= 100 && !name.chars().any(char::is_control)
+}
+fn portal_passport_bounds(
+    first: NaiveDate,
+    last: NaiveDate,
+) -> Result<(NaiveDate, NaiveDate), ApiError> {
+    // Match the portal calendar's month rollover and twelve-year ceiling.
+    let min = first
+        .with_day(1)
+        .and_then(|d| d.checked_add_months(Months::new(3)))
+        .and_then(|d| d.checked_add_days(Days::new(u64::from(first.day() - 1))))
+        .ok_or(error("INVALID_SAVED_REQUEST"))?;
+    let max = first
+        .checked_add_months(Months::new(144))
+        .ok_or(error("INVALID_SAVED_REQUEST"))?;
+    Ok((min.max(last), max))
+}
+fn validate(request: &BookRequest, q: &Quote, portal_checkout: bool) -> Result<(), ApiError> {
     let routes = q.request["routes"]
         .as_array()
         .ok_or(error("INVALID_SAVED_REQUEST"))?;
@@ -181,6 +245,13 @@ fn validate(request: &BookRequest, q: &Quote) -> Result<(), ApiError> {
     }
     for p in &request.passenger_infoes {
         let birth = date(&p.date_of_birth)?;
+        if portal_checkout
+            && ((p.passenger_type == "ADT" && birth < NaiveDate::from_ymd_opt(1900, 1, 1).unwrap())
+                || (["INF", "INS"].contains(&p.passenger_type.as_str())
+                    && birth > chrono::Utc::now().date_naive()))
+        {
+            return Err(error("INVALID_PASSENGER_AGE"));
+        }
         let age = first
             .years_since(birth)
             .ok_or(error("INVALID_PASSENGER_AGE"))?;
@@ -197,9 +268,14 @@ fn validate(request: &BookRequest, q: &Quote) -> Result<(), ApiError> {
             ages.push(age);
         }
         *observed.entry(kind.to_ascii_lowercase()).or_default() += 1;
-        if !["Mr", "Mrs", "Ms", "Mstr"].contains(&p.name_element.title.as_str())
-            || !["Male", "Female"].contains(&p.gender.as_str())
-            || !text(&p.name_element.first_name, 100)
+        if !match (kind, p.gender.as_str()) {
+            ("ADT", "Male") => p.name_element.title == "Mr",
+            ("ADT", "Female") => ["Mrs", "Ms"].contains(&p.name_element.title.as_str()),
+            (_, "Male") => p.name_element.title == "Mstr",
+            (_, "Female") => p.name_element.title == "Miss",
+            _ => false,
+        } || !["Male", "Female"].contains(&p.gender.as_str())
+            || !valid_given_name(&p.name_element.first_name)
             || !text(&p.name_element.last_name, 100)
             || p.name_element
                 .middle_name
@@ -210,9 +286,27 @@ fn validate(request: &BookRequest, q: &Quote) -> Result<(), ApiError> {
         }
         let d = &p.document_info;
         let c = &p.contact_info;
-        if !text(&d.document_number, 50)
-            || date(&d.expire_date)? < last
-            || !country(&d.issuing_country)
+        let no_document = d.document_number.is_empty() && d.expire_date.is_empty();
+        let document_required = passport_required(&q.original["item1"]["directions"]);
+        if portal_checkout && document_required {
+            let (min, max) = portal_passport_bounds(first, last)?;
+            let expiry = date(&d.expire_date)?;
+            if expiry < min
+                || expiry > max
+                || !(5..=20).contains(&d.document_number.len())
+                || !d
+                    .document_number
+                    .bytes()
+                    .all(|b| b.is_ascii_uppercase() || b.is_ascii_digit())
+            {
+                return Err(error("INVALID_TRAVEL_DOCUMENT"));
+            }
+        }
+        if ((document_required || !no_document)
+            && (!text(&d.document_number, 50)
+                || date(&d.expire_date)? < last
+                || !country(&d.issuing_country)))
+            || (!d.issuing_country.is_empty() && !country(&d.issuing_country))
             || !country(&d.nationality)
             || d.document_type.as_ref().is_some_and(|s| !s.is_empty())
         {
@@ -272,7 +366,20 @@ async fn book(
     headers: HeaderMap,
     Json(request): Json<BookRequest>,
 ) -> Result<BookingReply, ApiError> {
+    book_owned(machine, State(state), headers, Json(request), None).await
+}
+
+pub(crate) async fn book_owned(
+    machine: Machine,
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    Json(request): Json<BookRequest>,
+    creator: Option<(Uuid, String, Value)>,
+) -> Result<BookingReply, ApiError> {
     machine.require("booking")?;
+    if creator.is_some() && request.direct_issue_intent {
+        return Err(error("HOLD_ONLY"));
+    }
     if request.direct_issue_intent {
         machine.require("ticketing")?;
     }
@@ -282,18 +389,31 @@ async fn book(
         .filter(|s| !s.is_empty() && s.len() <= 128 && s.bytes().all(|b| b.is_ascii_graphic()))
         .ok_or(error("IDEMPOTENCY_KEY_REQUIRED"))?;
     let canonical = serde_json::to_value(&request).map_err(|_| error("INVALID_BOOK_REQUEST"))?;
+    let canonical = match &creator {
+        Some((draft, actor, contact)) => {
+            json!({"request":canonical,"draft":draft,"creator":actor,"contact":contact})
+        }
+        None => canonical,
+    };
     let hash = crate::auth::digest(&canonical.to_string());
-    let mut tx = state.pool.begin().await?;
+    let mut tx = crate::identity::business::begin(&state.pool).await?;
     // Serialize reservations per client; release locks before sending to supplier.
     sqlx::query("SELECT id FROM api_clients WHERE id=$1 FOR UPDATE")
         .bind(machine.client_id)
         .execute(&mut *tx)
         .await?;
-    if let Some(previous)=sqlx::query_as::<_,Booking>("SELECT id,public_ref,request_hash,state,public_response,(SELECT CASE WHEN EXISTS(SELECT 1 FROM flight_ticket_verifications v WHERE v.issue_id=t.id) THEN 'issued' ELSE t.state END FROM flight_ticket_issues t WHERE booking_id=flight_bookings.id) AS ticket_state,(SELECT state FROM flight_cancellations c WHERE c.booking_id=flight_bookings.id) AS cancellation_state FROM flight_bookings WHERE client_id=$1 AND idempotency_key=$2").bind(machine.client_id).bind(key).fetch_optional(&mut *tx).await? {
+    if let Some(previous)=sqlx::query_as::<_,Booking>("SELECT id,public_ref,request_hash,state,public_response,(SELECT (SELECT state FROM flight_ticket_outcomes s WHERE s.id=t.id) FROM flight_ticket_issues t WHERE booking_id=flight_bookings.id) AS ticket_state,(SELECT state FROM flight_cancellations c WHERE c.booking_id=flight_bookings.id) AS cancellation_state FROM flight_bookings WHERE client_id=$1 AND idempotency_key=$2").bind(machine.client_id).bind(key).fetch_optional(&mut *tx).await? {
   if previous.request_hash!=hash{return Err(ApiError(StatusCode::CONFLICT,"IDEMPOTENCY_KEY_REUSED"));}
   return Ok(reply(previous));
  }
-    let q:Quote=sqlx::query_as("SELECT r.id AS price_id,r.offer_id,o.search_id,o.supplier_id,o.availability_epoch,o.reprice_required,r.original,r.selling,r.reference_map,o.original AS search_original,s.request,(r.expires_at>clock_timestamp() AND o.expires_at>clock_timestamp()) AS valid,(r.accepted_at IS NOT NULL) AS accepted,r.version=(SELECT max(version) FROM flight_reprices WHERE offer_id=r.offer_id) AS latest,r.audience,r.agent_id FROM flight_reprices r JOIN flight_offers o ON o.id=r.offer_id JOIN flight_searches s ON s.id=o.search_id WHERE r.id=$1 AND r.client_id=$2 FOR UPDATE OF o")
+    if let Some((draft, actor, _)) = &creator {
+        let (valid,): (bool,) = sqlx::query_as("SELECT c.active AND c.audience='b2b' AND 'search:read'=ANY(c.permissions) AND c.external_user_id=d.owner_external_user_id AND c.tier=$4 AND c.agent_id IS NOT DISTINCT FROM $6 AND CASE c.tier WHEN 'basic' THEN p.basic WHEN 'professional' THEN p.professional ELSE p.enterprise END=$5 FROM api_clients c JOIN portal_hold_drafts d ON d.client_id=c.id CROSS JOIN b2b_tier_policy p WHERE p.singleton AND c.id=$1 AND d.id=$2 AND d.creator_external_user_id=$3 FOR SHARE OF p")
+            .bind(machine.client_id).bind(draft).bind(actor).bind(machine.tier.map(|t|t.name())).bind(machine.commission_share_percent).bind(machine.agent_id).fetch_optional(&mut *tx).await?.ok_or(ApiError(StatusCode::NOT_FOUND,"NOT_FOUND"))?;
+        if !valid {
+            return Err(ApiError(StatusCode::CONFLICT, "PRICE_CONTEXT_CHANGED"));
+        }
+    }
+    let q:Quote=sqlx::query_as("SELECT r.id AS price_id,r.offer_id,o.search_id,o.supplier_id,o.availability_epoch,o.reprice_required,r.original,r.selling,r.reference_map,o.original AS search_original,s.request,(r.expires_at>clock_timestamp() AND o.expires_at>clock_timestamp() AND s.expires_at>clock_timestamp()) AS valid,(r.accepted_at IS NOT NULL) AS accepted,r.version=(SELECT max(version) FROM flight_reprices WHERE offer_id=r.offer_id) AS latest,r.audience,r.agent_id FROM flight_reprices r JOIN flight_offers o ON o.id=r.offer_id JOIN flight_searches s ON s.id=o.search_id WHERE r.id=$1 AND r.client_id=$2 FOR UPDATE OF o")
  .bind(request.price_code_ref).bind(machine.client_id).fetch_optional(&mut *tx).await?.ok_or(ApiError(StatusCode::NOT_FOUND,"NOT_FOUND"))?;
     if request.unique_trans_id != q.search_id.to_string()
         || request.item_code_ref != q.offer_id.to_string()
@@ -331,7 +451,7 @@ async fn book(
     if !request.commission_on_taxes.is_empty() && json!(request.commission_on_taxes) != commission {
         return Err(error("COMMISSION_REFERENCE_MISMATCH"));
     }
-    validate(&request, &q)?;
+    validate(&request, &q, creator.is_some())?;
     let (search_enabled,booking_enabled,epoch,timeout):(bool,bool,i64,i32)=sqlx::query_as("SELECT search_enabled,booking_enabled,availability_epoch,timeout_seconds FROM supplier_connections WHERE id=$1 FOR SHARE").bind(&q.supplier_id).fetch_one(&mut *tx).await?;
     if !search_enabled || epoch != q.availability_epoch {
         return Err(ApiError(StatusCode::CONFLICT, "NEW_SEARCH_REQUIRED"));
@@ -373,7 +493,7 @@ async fn book(
     }
     // The first SELECT may have waited on another RePrice/acceptance transaction.
     // Re-evaluate version/expiry under the now-held offer lock before dispatch.
-    let (fresh,):(bool,)=sqlx::query_as("SELECT r.expires_at>clock_timestamp() AND o.expires_at>clock_timestamp() AND r.accepted_at IS NOT NULL AND r.version=(SELECT max(version) FROM flight_reprices WHERE offer_id=$2) FROM flight_reprices r JOIN flight_offers o ON o.id=r.offer_id WHERE r.id=$1").bind(q.price_id).bind(q.offer_id).fetch_one(&mut *tx).await?;
+    let (fresh,):(bool,)=sqlx::query_as("SELECT r.expires_at>clock_timestamp() AND o.expires_at>clock_timestamp() AND s.expires_at>clock_timestamp() AND r.accepted_at IS NOT NULL AND r.version=(SELECT max(version) FROM flight_reprices WHERE offer_id=$2) FROM flight_reprices r JOIN flight_offers o ON o.id=r.offer_id JOIN flight_searches s ON s.id=o.search_id WHERE r.id=$1").bind(q.price_id).bind(q.offer_id).fetch_one(&mut *tx).await?;
     if !fresh {
         return Err(ApiError(
             StatusCode::CONFLICT,
@@ -383,6 +503,12 @@ async fn book(
     let booking_id = Uuid::new_v4();
     let payload = json!({"uniqueTransID":q.original["item1"]["uniqueTransID"],"itemCodeRef":q.original["item1"]["itemCodeRef"],"priceCodeRef":q.original["item1"]["priceCodeRef"],"passengerInfoes":request.passenger_infoes,"taxRedemptions":[],"commissionOnTaxes":commission});
     sqlx::query("INSERT INTO flight_bookings(id,client_id,offer_id,price_id,supplier_id,idempotency_key,request_hash,request,state,execution_mode) VALUES($1,$2,$3,$4,$5,$6,$7,$8,'pending',$9)").bind(booking_id).bind(machine.client_id).bind(q.offer_id).bind(request.price_code_ref).bind(&q.supplier_id).bind(key).bind(hash).bind(&payload).bind(if request.direct_issue_intent {"direct"} else {"hold"}).execute(&mut *tx).await?;
+    if let Some((draft, actor, contact)) = creator {
+        sqlx::query("UPDATE flight_bookings SET portal_hold_draft_id=$2,created_by_external_user_id=$3,portal_customer_contact=$4 WHERE id=$1")
+            .bind(booking_id).bind(draft).bind(&actor).bind(contact).execute(&mut *tx).await?;
+        sqlx::query("INSERT INTO audit_events(actor_kind,actor_id,action,resource_kind,resource_id) VALUES('admin',$1,'portal.hold.dispatch_reserved','booking',$2)")
+            .bind(actor).bind(booking_id.to_string()).execute(&mut *tx).await?;
+    }
     sqlx::query("INSERT INTO audit_events(actor_kind,actor_id,action,resource_kind,resource_id) VALUES('client',$1,'booking.dispatch_reserved','booking',$2)").bind(machine.client_id.to_string()).bind(booking_id.to_string()).execute(&mut *tx).await?;
     tx.commit().await?;
     if request.direct_issue_intent {
@@ -415,12 +541,12 @@ async fn book(
    sqlx::query("INSERT INTO booking_late_outcomes(booking_id,response) VALUES($1,$2)").bind(booking_id).bind(&original).execute(&mut *tx).await?;
    sqlx::query("UPDATE flight_bookings SET state='outcome_unknown',public_response=NULL,original_response=COALESCE($2,original_response),pnr=COALESCE($3,pnr),supplier_booking_ref=COALESCE($4,supplier_booking_ref),error_code='LATE_BOOKING_OUTCOME',updated_at=clock_timestamp() WHERE id=$1").bind(booking_id).bind(&original).bind(&pnr).bind(&supplier_ref).execute(&mut *tx).await?;
    sqlx::query("INSERT INTO audit_events(actor_kind,action,resource_kind,resource_id) VALUES('system','booking.late_outcome','booking',$1)").bind(booking_id.to_string()).execute(&mut *tx).await?;
-   let saved=sqlx::query_as::<_,Booking>("SELECT id,public_ref,request_hash,state,public_response,(SELECT CASE WHEN EXISTS(SELECT 1 FROM flight_ticket_verifications v WHERE v.issue_id=t.id) THEN 'issued' ELSE t.state END FROM flight_ticket_issues t WHERE booking_id=flight_bookings.id) AS ticket_state,(SELECT state FROM flight_cancellations c WHERE c.booking_id=flight_bookings.id) AS cancellation_state FROM flight_bookings WHERE id=$1").bind(booking_id).fetch_one(&mut *tx).await?;
+   let saved=sqlx::query_as::<_,Booking>("SELECT id,public_ref,request_hash,state,public_response,(SELECT (SELECT state FROM flight_ticket_outcomes s WHERE s.id=t.id) FROM flight_ticket_issues t WHERE booking_id=flight_bookings.id) AS ticket_state,(SELECT state FROM flight_cancellations c WHERE c.booking_id=flight_bookings.id) AS cancellation_state FROM flight_bookings WHERE id=$1").bind(booking_id).fetch_one(&mut *tx).await?;
    tx.commit().await?;
    return Ok::<_,sqlx::Error>(saved);
   }
   sqlx::query("INSERT INTO audit_events(actor_kind,action,resource_kind,resource_id,metadata) VALUES('system','booking.outcome','booking',$1,$2)").bind(booking_id.to_string()).bind(json!({"state":status})).execute(&mut *tx).await?;
-  let saved = sqlx::query_as::<_,Booking>("SELECT id,public_ref,request_hash,state,public_response,(SELECT CASE WHEN EXISTS(SELECT 1 FROM flight_ticket_verifications v WHERE v.issue_id=t.id) THEN 'issued' ELSE t.state END FROM flight_ticket_issues t WHERE booking_id=flight_bookings.id) AS ticket_state,(SELECT state FROM flight_cancellations c WHERE c.booking_id=flight_bookings.id) AS cancellation_state FROM flight_bookings WHERE id=$1").bind(booking_id).fetch_one(&mut *tx).await?;
+  let saved = sqlx::query_as::<_,Booking>("SELECT id,public_ref,request_hash,state,public_response,(SELECT (SELECT state FROM flight_ticket_outcomes s WHERE s.id=t.id) FROM flight_ticket_issues t WHERE booking_id=flight_bookings.id) AS ticket_state,(SELECT state FROM flight_cancellations c WHERE c.booking_id=flight_bookings.id) AS cancellation_state FROM flight_bookings WHERE id=$1").bind(booking_id).fetch_one(&mut *tx).await?;
   tx.commit().await?;
   Ok::<_,sqlx::Error>(saved)
  }).await.map_err(|_|ApiError(StatusCode::SERVICE_UNAVAILABLE,"BOOKING_OUTCOME_UNKNOWN"))?.map(reply).map_err(ApiError::from)
@@ -659,7 +785,7 @@ async fn status(
     Path(id): Path<Uuid>,
 ) -> Result<BookingReply, ApiError> {
     machine.require("booking")?;
-    let row=sqlx::query_as::<_,Booking>("SELECT id,public_ref,request_hash,state,public_response,(SELECT CASE WHEN EXISTS(SELECT 1 FROM flight_ticket_verifications v WHERE v.issue_id=t.id) THEN 'issued' ELSE t.state END FROM flight_ticket_issues t WHERE booking_id=flight_bookings.id) AS ticket_state,(SELECT state FROM flight_cancellations c WHERE c.booking_id=flight_bookings.id) AS cancellation_state FROM flight_bookings WHERE id=$1 AND client_id=$2").bind(id).bind(machine.client_id).fetch_optional(&state.pool).await?.ok_or(ApiError(StatusCode::NOT_FOUND,"NOT_FOUND"))?;
+    let row=sqlx::query_as::<_,Booking>("SELECT id,public_ref,request_hash,state,public_response,(SELECT (SELECT state FROM flight_ticket_outcomes s WHERE s.id=t.id) FROM flight_ticket_issues t WHERE booking_id=flight_bookings.id) AS ticket_state,(SELECT state FROM flight_cancellations c WHERE c.booking_id=flight_bookings.id) AS cancellation_state FROM flight_bookings WHERE id=$1 AND client_id=$2").bind(id).bind(machine.client_id).fetch_optional(&state.pool).await?.ok_or(ApiError(StatusCode::NOT_FOUND,"NOT_FOUND"))?;
     Ok(reply(row))
 }
 #[utoipa::path(get,path="/api/bookings/by-reference/{reference}",operation_id="booking_status_by_reference",tag="Flights",security(("machine_token"=[])),params(("reference"=String,Path,description="Platform public booking reference, e.g. STR8FE94RKECOCE")),responses((status=200,body=Object,description="Saved booking response; X-Booking-Reference carries the stable public reference"),(status=202,body=Object,description="Unresolved booking; X-Booking-Reference remains stable"),(status=404,description="Malformed, unknown or foreign reference"),(status=409,description="Reference matches multiple bookings; use booking UUID")))]
@@ -677,7 +803,7 @@ async fn status_by_reference(
     {
         return Err(ApiError(StatusCode::NOT_FOUND, "NOT_FOUND"));
     }
-    let mut rows = sqlx::query_as::<_, Booking>("SELECT id,public_ref,request_hash,state,public_response,(SELECT CASE WHEN EXISTS(SELECT 1 FROM flight_ticket_verifications v WHERE v.issue_id=t.id) THEN 'issued' ELSE t.state END FROM flight_ticket_issues t WHERE booking_id=flight_bookings.id) AS ticket_state,(SELECT state FROM flight_cancellations c WHERE c.booking_id=flight_bookings.id) AS cancellation_state FROM flight_bookings WHERE public_ref=$1 AND client_id=$2 LIMIT 2")
+    let mut rows = sqlx::query_as::<_, Booking>("SELECT id,public_ref,request_hash,state,public_response,(SELECT (SELECT state FROM flight_ticket_outcomes s WHERE s.id=t.id) FROM flight_ticket_issues t WHERE booking_id=flight_bookings.id) AS ticket_state,(SELECT state FROM flight_cancellations c WHERE c.booking_id=flight_bookings.id) AS cancellation_state FROM flight_bookings WHERE public_ref=$1 AND client_id=$2 LIMIT 2")
         .bind(reference).bind(machine.client_id).fetch_all(&state.pool).await?;
     if rows.len() > 1 {
         return Err(ApiError(
@@ -744,6 +870,51 @@ async fn reconcile(
     machine.require("booking")?;
     reconcile_owned(&state, machine.client_id, id, "client", machine.client_id).await
 }
+fn held_pnr_status(info: &Value) -> bool {
+    matches!(info["status"].as_str(), Some("Booked" | "Created"))
+}
+fn pnr_deadline(body: &Value) -> Option<&str> {
+    body["item1"]["lastTicketTime"]
+        .as_str()
+        .filter(|s| chrono::NaiveDateTime::parse_from_str(s, "%m/%d/%Y %H:%M:%S").is_ok())
+}
+pub(crate) fn pnr_summary(
+    booking_state: &str,
+    body: &Value,
+    checked_at: chrono::DateTime<chrono::Utc>,
+) -> Value {
+    json!({
+        "status": body["item1"]["status"],
+        "lastTicketTime": pnr_deadline(body),
+        "checkedAt": checked_at,
+        "manualResolutionRequired": booking_state != "held" || !held_pnr_status(&body["item1"]) || contains_ticket(body),
+    })
+}
+pub(crate) fn saved_pnr_payload(original: &Value, request: &Value) -> Option<Value> {
+    let info = &original["item1"];
+    let mut payload = json!({});
+    for (target, source) in [
+        ("PNR", "pnr"),
+        ("BookingRefNumber", "pnr"),
+        ("BookingCodeRef", "bookingCodeRef"),
+    ] {
+        payload[target] = json!(info[source].as_str().filter(|s| !s.is_empty())?);
+    }
+    for (target, source) in [
+        ("UniqueTransID", "uniqueTransID"),
+        ("PriceCodeRef", "priceCodeRef"),
+        ("ItemCodeRef", "itemCodeRef"),
+    ] {
+        payload[target] = json!(
+            info[source]
+                .as_str()
+                .filter(|s| !s.is_empty())
+                .or_else(|| request[source].as_str().filter(|s| !s.is_empty()))?
+        );
+    }
+    Some(payload)
+}
+
 pub(crate) async fn reconcile_owned(
     state: &AppState,
     client_id: Uuid,
@@ -761,37 +932,10 @@ pub(crate) async fn reconcile_owned(
         StatusCode::CONFLICT,
         "MANUAL_RECONCILIATION_REQUIRED",
     ))?;
-    let info = &original["item1"];
-    let mut payload = json!({});
-    for (target, source) in [
-        ("PNR", "pnr"),
-        ("BookingRefNumber", "pnr"),
-        ("BookingCodeRef", "bookingCodeRef"),
-    ] {
-        let value = info[source]
-            .as_str()
-            .filter(|s| !s.is_empty())
-            .ok_or(ApiError(
-                StatusCode::CONFLICT,
-                "MANUAL_RECONCILIATION_REQUIRED",
-            ))?;
-        payload[target] = json!(value);
-    }
-    for (target, source) in [
-        ("UniqueTransID", "uniqueTransID"),
-        ("PriceCodeRef", "priceCodeRef"),
-        ("ItemCodeRef", "itemCodeRef"),
-    ] {
-        let value = info[source]
-            .as_str()
-            .filter(|s| !s.is_empty())
-            .or_else(|| request[source].as_str().filter(|s| !s.is_empty()))
-            .ok_or(ApiError(
-                StatusCode::CONFLICT,
-                "MANUAL_RECONCILIATION_REQUIRED",
-            ))?;
-        payload[target] = json!(value);
-    }
+    let payload = saved_pnr_payload(&original, &request).ok_or(ApiError(
+        StatusCode::CONFLICT,
+        "MANUAL_RECONCILIATION_REQUIRED",
+    ))?;
     let (enabled, timeout): (bool, i32) = sqlx::query_as(
         "SELECT servicing_enabled,timeout_seconds FROM supplier_connections WHERE id=$1",
     )
@@ -837,10 +981,16 @@ pub(crate) async fn reconcile_owned(
             value.is_null() || value == &json!("") || value == &payload[source]
         });
     // Missing/invalid latest deadlines clear old authority; never invent a timezone.
-    let deadline = body["item1"]["lastTicketTime"]
-        .as_str()
-        .filter(|s| chrono::NaiveDateTime::parse_from_str(s, "%m/%d/%Y %H:%M:%S").is_ok());
+    let deadline = pnr_deadline(&body);
     let mut tx = state.pool.begin().await?;
+    // Serialize observation persistence with Issue/Cancel reservation, including
+    // older lookups which must not replace the latest-attempt display columns.
+    sqlx::query("SELECT id FROM flight_bookings WHERE id=$1 FOR UPDATE")
+        .bind(id)
+        .execute(&mut *tx)
+        .await?;
+    sqlx::query("INSERT INTO flight_booking_pnr_observations(booking_id,response,verified,requested_at) VALUES($1,$2,$3,$4)")
+        .bind(id).bind(&body).bind(valid).bind(started).execute(&mut *tx).await?;
     let changed = sqlx::query("UPDATE flight_bookings SET last_reconciliation=$2,last_reconciliation_verified=$4,reconciled_at=$3,ticketing_time_limit=CASE WHEN $4 THEN $5 ELSE ticketing_time_limit END,updated_at=clock_timestamp() WHERE id=$1 AND (reconciled_at IS NULL OR reconciled_at <= $3)")
         .bind(id).bind(&body).bind(started).bind(valid).bind(deadline)
         .execute(&mut *tx).await?.rows_affected();
@@ -858,8 +1008,9 @@ pub(crate) async fn reconcile_owned(
         ));
     }
     let booking_ref = body["item1"].get("bookingRef").cloned();
-    let requires_manual =
-        booking_state != "held" || body["item1"]["status"] != "Booked" || contains_ticket(&body);
+    let requires_manual = pnr_summary(&booking_state, &body, started)["manualResolutionRequired"]
+        .as_bool()
+        .unwrap();
     let mut public = body;
     let mut refs = reference_map
         .as_object()
@@ -906,4 +1057,116 @@ pub fn routes() -> Router<AppState> {
             get(status_by_reference),
         )
         .route("/api/bookings/{id}/reconcile", post(reconcile))
+}
+
+#[cfg(test)]
+mod portal_form_compatibility_tests {
+    use super::*;
+    fn directions(stops: &[&str]) -> Value {
+        json!([[{"segments":stops.windows(2).map(|pair|json!({"from":pair[0],"to":pair[1]})).collect::<Vec<_>>()}]])
+    }
+    #[test]
+    fn passport_exemption_requires_all_stops_in_one_known_country() {
+        assert!(!passport_required(&directions(&["DAC", "CXB"])));
+        assert!(passport_required(&directions(&["DAC", "SIN"])));
+        assert!(passport_required(&directions(&["DAC", "SIN", "CXB"])));
+        assert!(passport_required(&directions(&["DAC", "ZZZ"])));
+        assert!(passport_required(&json!([])));
+    }
+    #[test]
+    fn single_name_is_preserved_without_inventing_given_names() {
+        assert!(valid_given_name(""));
+        assert!(valid_given_name("Arif"));
+        assert!(!valid_given_name("Arif\n"));
+    }
+    fn validation_fixture() -> (BookRequest, Quote) {
+        let request = serde_json::from_value(json!({
+            "uniqueTransID":"local-search","itemCodeRef":"local-offer","priceCodeRef":Uuid::nil(),
+            "passengerInfoes":[{
+                "nameElement":{"title":"Mr","firstName":"Arif","lastName":"Hasan"},
+                "gender":"Male","passengerType":"ADT","dateOfBirth":"1985-01-01",
+                "documentInfo":{"documentNumber":"BG9812345","expireDate":"2026-12-30","issuingCountry":"BD","nationality":"BD"},
+                "contactInfo":{"phone":"1700000000","phoneCountryCode":"+880","email":"arif.hasan@example.com","countryCode":"BD"}
+            }]
+        })).unwrap();
+        let quote = Quote {
+            offer_id: Uuid::nil(),
+            price_id: Uuid::nil(),
+            search_id: Uuid::nil(),
+            supplier_id: "triplover".into(),
+            availability_epoch: 1,
+            original: json!({"item1":{"passengerCounts":{"adt":1,"chd":0,"cnn":0,"inf":0,"ins":0},"directions":directions(&["DAC","SIN"])}}),
+            selling: json!({}),
+            reference_map: json!({}),
+            search_original: json!({}),
+            request: json!({"routes":[{"departureDate":"2026-09-30"}],"childrenAges":[]}),
+            valid: true,
+            accepted: true,
+            reprice_required: false,
+            latest: true,
+            audience: "b2b".into(),
+            agent_id: None,
+        };
+        (request, quote)
+    }
+    #[test]
+    fn portal_enforces_expiry_bounds_from_its_stored_route() {
+        let (mut request, mut quote) = validation_fixture();
+        assert!(validate(&request, &quote, true).is_ok());
+        for expiry in ["2026-12-29", "2038-10-01", "2030-02-30"] {
+            request.passenger_infoes[0].document_info.expire_date = expiry.into();
+            assert!(validate(&request, &quote, true).is_err());
+        }
+        request.passenger_infoes[0].document_info.expire_date = "2026-12-29".into();
+        assert!(validate(&request, &quote, false).is_ok());
+        request.passenger_infoes[0].document_info.expire_date = "2038-09-30".into();
+        assert!(validate(&request, &quote, true).is_ok());
+        quote.request["routes"] =
+            json!([{"departureDate":"2026-09-30"},{"departureDate":"2027-02-01"}]);
+        request.passenger_infoes[0].document_info.expire_date = "2027-01-31".into();
+        assert!(validate(&request, &quote, true).is_err());
+        request.passenger_infoes[0].document_info.expire_date = "2027-02-01".into();
+        assert!(validate(&request, &quote, true).is_ok());
+    }
+    #[test]
+    fn portal_domestic_documents_remain_optional() {
+        let (mut request, mut quote) = validation_fixture();
+        quote.original["item1"]["directions"] = directions(&["DAC", "CXB"]);
+        request.passenger_infoes[0]
+            .document_info
+            .document_number
+            .clear();
+        request.passenger_infoes[0]
+            .document_info
+            .expire_date
+            .clear();
+        request.passenger_infoes[0]
+            .document_info
+            .issuing_country
+            .clear();
+        assert!(validate(&request, &quote, true).is_ok());
+        quote.original["item1"]["directions"] = directions(&["DAC", "SIN", "CXB"]);
+        assert!(validate(&request, &quote, true).is_err());
+    }
+    #[test]
+    fn portal_date_bounds_match_calendar_rollover_and_age_cutoffs() {
+        let first = date("2026-11-30").unwrap();
+        assert_eq!(
+            portal_passport_bounds(first, first).unwrap(),
+            (date("2027-03-02").unwrap(), date("2038-11-30").unwrap())
+        );
+        let (mut request, mut quote) = validation_fixture();
+        quote.request["routes"] = json!([{"departureDate":"2028-02-29"}]);
+        quote.request["childrenAges"] = json!([2]);
+        quote.original["item1"]["passengerCounts"] =
+            json!({"adt":0,"chd":0,"cnn":1,"inf":0,"ins":0});
+        let passenger = &mut request.passenger_infoes[0];
+        passenger.passenger_type = "CNN".into();
+        passenger.name_element.title = "Mstr".into();
+        passenger.document_info.expire_date = "2030-01-01".into();
+        passenger.date_of_birth = "2026-02-28".into();
+        assert!(validate(&request, &quote, true).is_ok());
+        request.passenger_infoes[0].date_of_birth = "2026-03-01".into();
+        assert!(validate(&request, &quote, true).is_err());
+    }
 }

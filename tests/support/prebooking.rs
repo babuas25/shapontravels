@@ -36,7 +36,7 @@ impl ReadSupplier for Mock {
                 if let Some(message) = self.failure.lock().unwrap().clone() {
                     return Ok(json!({"item1":null,"item2":{"isSuccess":false,"message":message}}));
                 }
-                return Ok(json!({"item1":{},"item2":{"isSuccess":true}}));
+                return Ok(json!({"item1":{"fareRuleDetails":[]},"item2":{"isSuccess":true}}));
             }
             if let Some(message) = self.failure.lock().unwrap().clone() {
                 return Ok(json!({"item1":null,"item2":{"isSuccess":false,"message":message}}));

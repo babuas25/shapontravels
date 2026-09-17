@@ -80,7 +80,7 @@ async fn reconcile_owned(
 ) -> Result<(), ApiError> {
     let row:PendingIssue=sqlx::query_as("SELECT t.id AS issue_id,t.client_id,b.supplier_id,b.state AS booking_state,b.request,t.request AS payload,t.original_response,t.state,t.created_at<clock_timestamp()-INTERVAL '5 minutes' AS old_enough,(t.state='issued' OR EXISTS(SELECT 1 FROM flight_ticket_verifications v WHERE v.issue_id=t.id)) AS resolved FROM flight_ticket_issues t JOIN flight_bookings b ON b.id=t.booking_id WHERE t.booking_id=$1 AND t.client_id=$2").bind(id).bind(client).fetch_optional(&state.pool).await?.ok_or(ApiError(StatusCode::NOT_FOUND,"NOT_FOUND"))?;
     if row.resolved {
-        return Ok(());
+        return crate::wallet::ticket::finalize(&state.pool, row.issue_id).await;
     }
     if row.state == "pending" && !row.old_enough {
         return Err(conflict("TICKET_ISSUE_IN_PROGRESS"));
@@ -205,6 +205,7 @@ async fn reconcile_owned(
     }
     sqlx::query("INSERT INTO audit_events(actor_kind,actor_id,action,resource_kind,resource_id,metadata) VALUES($1,$2,'ticket.reconciled','booking',$3,$4)").bind(actor_kind).bind(actor_id.to_string()).bind(id.to_string()).bind(json!({"result":result,"errorCode":code})).execute(&mut *tx).await?;
     tx.commit().await?;
+    crate::wallet::ticket::finalize(&state.pool, row.issue_id).await?;
     Ok(())
 }
 #[utoipa::path(post,path="/api/bookings/{id}/ticket/reconcile",operation_id="reconcile_ticket_issue",tag="Flights",security(("machine_token"=[])),params(("id"=String,Path)),responses((status=200,body=Object,description="Ticket verified from saved receipt or live PNR + report; no Issue sent"),(status=202,body=Object,description="Evidence insufficient; dispatch stays blocked"),(status=403),(status=404),(status=409,description="Issue in progress or missing references")))]
@@ -220,7 +221,7 @@ async fn reconcile(
 }
 #[utoipa::path(get,path="/admin/ticket-issues",operation_id="unresolved_ticket_issues",tag="Booking reconciliation",security(("admin_session"=[])),responses((status=200,body=Object,description="Oldest 100 unresolved ticket issues; raw evidence is not exposed")))]
 async fn queue(_admin: Admin, State(state): State<AppState>) -> Result<Json<Value>, ApiError> {
-    let rows:Vec<(Value,)>=sqlx::query_as("SELECT jsonb_build_object('bookingId',b.id,'publicRef',b.public_ref,'clientName',c.name,'supplier',b.supplier_id,'state',t.state,'createdAt',t.created_at,'canReconcile',t.state<>'pending' OR t.created_at<clock_timestamp()-INTERVAL '5 minutes','lastCheck',(SELECT jsonb_build_object('result',r.result,'errorCode',r.error_code,'at',r.completed_at) FROM flight_ticket_reconciliations r WHERE r.issue_id=t.id ORDER BY r.requested_at DESC LIMIT 1)) FROM flight_ticket_issues t JOIN flight_bookings b ON b.id=t.booking_id JOIN api_clients c ON c.id=t.client_id WHERE t.state<>'issued' AND NOT EXISTS(SELECT 1 FROM flight_ticket_verifications v WHERE v.issue_id=t.id) ORDER BY t.created_at,t.id LIMIT 100").fetch_all(&state.pool).await?;
+    let rows:Vec<(Value,)>=sqlx::query_as("SELECT jsonb_build_object('bookingId',b.id,'publicRef',b.public_ref,'clientName',c.name,'supplier',b.supplier_id,'state',(SELECT state FROM flight_ticket_outcomes s WHERE s.id=t.id),'paymentState',(SELECT state FROM wallet_operations w WHERE w.subject_kind='ticket_issue' AND w.subject_id=t.id),'walletRequired',t.wallet_required,'createdAt',t.created_at,'canReconcile',t.state<>'pending' OR t.created_at<clock_timestamp()-INTERVAL '5 minutes','lastCheck',(SELECT jsonb_build_object('result',r.result,'errorCode',r.error_code,'at',r.completed_at) FROM flight_ticket_reconciliations r WHERE r.issue_id=t.id ORDER BY r.requested_at DESC LIMIT 1)) FROM flight_ticket_issues t JOIN flight_bookings b ON b.id=t.booking_id JOIN api_clients c ON c.id=t.client_id WHERE (SELECT state FROM flight_ticket_outcomes s WHERE s.id=t.id)<>'not_issued' AND ((t.state<>'issued' AND NOT EXISTS(SELECT 1 FROM flight_ticket_verifications v WHERE v.issue_id=t.id)) OR (t.wallet_required AND NOT EXISTS(SELECT 1 FROM wallet_operations w WHERE w.subject_kind='ticket_issue' AND w.subject_id=t.id AND w.state='captured'))) ORDER BY t.created_at,t.id LIMIT 100").fetch_all(&state.pool).await?;
     Ok(Json(
         json!({"items":rows.into_iter().map(|r|r.0).collect::<Vec<_>>()}),
     ))
@@ -237,15 +238,17 @@ async fn admin_reconcile(
         .await?
         .ok_or(ApiError(StatusCode::NOT_FOUND, "NOT_FOUND"))?;
     reconcile_owned(&state, client, id, "admin", admin.id).await?;
-    let (issued,):(bool,)=sqlx::query_as("SELECT state='issued' OR EXISTS(SELECT 1 FROM flight_ticket_verifications WHERE issue_id=t.id) FROM flight_ticket_issues t WHERE booking_id=$1").bind(id).fetch_one(&state.pool).await?;
+    let (outcome, payment, required):(String,Option<String>,bool)=sqlx::query_as("SELECT s.state,w.state,t.wallet_required FROM flight_ticket_issues t JOIN flight_ticket_outcomes s ON s.id=t.id LEFT JOIN wallet_operations w ON w.subject_kind='ticket_issue' AND w.subject_id=t.id WHERE t.booking_id=$1").bind(id).fetch_one(&state.pool).await?;
+    let resolved = outcome == "not_issued"
+        || (outcome == "issued" && (!required || payment.as_deref() == Some("captured")));
     Ok((
-        if issued {
+        if resolved {
             StatusCode::OK
         } else {
             StatusCode::ACCEPTED
         },
         Json(
-            json!({"bookingId":id,"state":if issued{"issued"}else{"unresolved"},"requiresReconciliation":!issued}),
+            json!({"bookingId":id,"state":outcome,"paymentState":payment,"requiresReconciliation":!resolved}),
         ),
     ))
 }

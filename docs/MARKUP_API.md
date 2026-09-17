@@ -56,4 +56,4 @@ Local PostgreSQL integration tests cover draft creation, listing/reading, exact 
 
 ## B2B tier commission shares
 
-The resolved markup also supplies the commission pool for Basic (default 60%), Professional (default 80%) and Enterprise (default 100%). Admin/Superadmin can change these shares using the versioned `GET/PUT /admin/tier-policy` API. Existing rule priority and gross projections stay unchanged. The separate [tier pricing API](B2B_TIERS.md) returns commission and payable snapshots; use it for frontend net payable display. Tier assignment is Superadmin-only and does not edit markup rules.
+The resolved rule first calculates supplier fare plus markup. For B2B, **available discount = published gross (base + taxes) − marked-up supplier fare**. Tier shares apply to that available discount; agent payable = gross − agent discount. Admin/Superadmin can configure shares through `GET/PUT /admin/tier-policy`. See [B2B tiers](B2B_TIERS.md) for exact rounding, examples and the legacy `commission` wire-field meaning. Tier assignment remains Superadmin-only and does not edit markup rules.

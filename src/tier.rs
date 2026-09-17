@@ -1,4 +1,4 @@
-//! B2B commission shares of the existing markup, separate from supplier wire fares.
+//! B2B tier shares of the discount remaining after supplier fare plus markup.
 use crate::{
     AppState,
     auth::{Admin, ApiError, Machine},
@@ -55,7 +55,7 @@ fn decimal(value: &BigDecimal) -> String {
     format!("{value:.2}")
 }
 
-/// Snapshot at quote creation. Gross stays in the existing response; amounts here
+/// Snapshot at quote creation. Gross matches the projected response; amounts here
 /// are decimal strings. Round per passenger, then multiply by passenger counts.
 pub fn snapshot(
     original: &Value,
@@ -63,8 +63,15 @@ pub fn snapshot(
     tier: Option<Tier>,
     share: i32,
     currency: &str,
+    markup: &crate::pricing::Markup,
 ) -> Result<Value, ApiError> {
     if !(0..=100).contains(&share) || (tier.is_none() && share != 0) {
+        return Err(invalid());
+    }
+    let markup_value = match markup {
+        crate::pricing::Markup::Fixed(value) | crate::pricing::Markup::Percentage(value) => value,
+    };
+    if markup_value < &BigDecimal::from(0) {
         return Err(invalid());
     }
     let counts = original["passengerCounts"]
@@ -78,14 +85,32 @@ pub fn snapshot(
         if count == 0 {
             continue;
         }
-        let supplier = rounded(money(&original["passengerFares"][kind]["totalPrice"])?);
+        let fare = &original["passengerFares"][kind];
+        let supplier = money(&fare["totalPrice"])?;
         let gross = money(&gross["passengerFares"][kind]["totalPrice"])?;
-        let pool = &gross - supplier;
-        if pool < 0 {
+        // First add the resolved markup to supplier cost. Tier shares apply to
+        // the remaining discount, never to the markup itself. The historical
+        // wire field `commission` carries this gross-to-payable discount.
+        let pool = if tier.is_some() {
+            let source = crate::pricing::OriginalPassengerFare {
+                supplier_total: supplier.clone(),
+                base: money(&fare["basePrice"])?,
+                taxes: money(&fare["taxes"])?,
+                ait: money(&fare["ait"])?,
+                count: 1,
+            };
+            &gross - crate::pricing::price(&source, markup).total
+        } else {
+            BigDecimal::from(0)
+        };
+        if supplier < 0 || gross < 0 {
             return Err(invalid());
         }
         let commission = rounded(pool * BigDecimal::from(share) / BigDecimal::from(100));
         let payable = &gross - &commission;
+        if payable < 0 {
+            return Err(invalid());
+        }
         passengers.insert(kind.clone(), json!({"count": count, "gross": decimal(&gross), "commission": decimal(&commission), "payable": decimal(&payable)}));
         total_gross += gross * BigDecimal::from(count);
         total_commission += commission * BigDecimal::from(count);
@@ -97,6 +122,43 @@ pub fn snapshot(
     Ok(
         json!({"version":1,"tier":tier,"commissionSharePercent":share,"currency":currency,"gross":decimal(&total_gross),"commission":decimal(&total_commission),"payable":decimal(&payable),"passengers":passengers}),
     )
+}
+
+/// Staff review uses published gross (base + taxes) and supplier net from the
+/// immutable original. Customer commission/payable use their saved tier snapshot.
+fn staff_pricing(original: &Value, mut pricing: Value) -> Result<Value, ApiError> {
+    if !pricing["tier"].is_null() || pricing["commissionSharePercent"] != 0 {
+        return Err(invalid());
+    }
+    let mut total = BigDecimal::from(0);
+    let mut total_gross = BigDecimal::from(0);
+    for (kind, row) in pricing["passengers"].as_object_mut().ok_or_else(invalid)? {
+        let count = row["count"].as_u64().ok_or_else(invalid)?;
+        if original["passengerCounts"][kind] != count {
+            return Err(invalid());
+        }
+        let supplier = rounded(money(&original["passengerFares"][kind]["totalPrice"])?);
+        let fare = &original["passengerFares"][kind];
+        let base = money(&fare["basePrice"])?;
+        let taxes = money(&fare["taxes"])?;
+        if base < 0 || taxes < 0 || supplier < 0 {
+            return Err(invalid());
+        }
+        let gross = rounded(base) + rounded(taxes);
+        total += &supplier * BigDecimal::from(count);
+        total_gross += &gross * BigDecimal::from(count);
+        row["supplier"] = json!(decimal(&supplier));
+        row["gross"] = json!(decimal(&gross));
+        row["commission"] = json!("0.00");
+        // Staff search has no payable transaction; this field drives the
+        // common search sorting/filtering and must match its displayed gross.
+        row["payable"] = json!(decimal(&gross));
+    }
+    pricing["supplier"] = json!(decimal(&total));
+    pricing["gross"] = json!(decimal(&total_gross));
+    pricing["commission"] = json!("0.00");
+    pricing["payable"] = json!(decimal(&total_gross));
+    Ok(pricing)
 }
 
 /// Global B2B shares, updated atomically so tier ordering cannot be torn.
@@ -152,7 +214,7 @@ async fn set_policy(
     {
         return Err(ApiError(StatusCode::BAD_REQUEST, "INVALID_TIER_POLICY"));
     }
-    let mut tx = state.pool.begin().await?;
+    let mut tx = crate::identity::business::begin(&state.pool).await?;
     let previous: TierPolicy=sqlx::query_as("SELECT version,basic,professional,enterprise FROM b2b_tier_policy WHERE singleton FOR UPDATE").fetch_one(&mut *tx).await?;
     if previous.version != input.expected_version {
         return Err(ApiError(
@@ -179,7 +241,7 @@ async fn set_tier(
     Json(input): Json<TierInput>,
 ) -> Result<Json<Value>, ApiError> {
     admin.super_admin()?;
-    let mut tx = state.pool.begin().await?;
+    let mut tx = crate::identity::business::begin(&state.pool).await?;
     let old: Option<(String,)> =
         sqlx::query_as("SELECT tier FROM api_clients WHERE id=$1 AND audience='b2b' FOR UPDATE")
             .bind(id)
@@ -232,31 +294,34 @@ async fn pricing(
     let query = match kind.as_str() {
         "offer" => {
             machine.require("search:read")?;
-            "SELECT tier_pricing FROM flight_offers WHERE id=$1 AND client_id=$2"
+            "SELECT CASE WHEN $3 THEN original ELSE '{}'::jsonb END,tier_pricing FROM flight_offers WHERE id=$1 AND client_id=$2"
         }
         "reprice" => {
             machine.require("search:read")?;
-            "SELECT tier_pricing FROM flight_reprices WHERE id=$1 AND client_id=$2"
+            "SELECT CASE WHEN $3 THEN COALESCE(original->'item1','{}'::jsonb) ELSE '{}'::jsonb END,tier_pricing FROM flight_reprices WHERE id=$1 AND client_id=$2"
         }
         "booking" => {
             machine.require("booking")?;
-            "SELECT r.tier_pricing FROM flight_bookings b JOIN flight_reprices r ON r.id=b.price_id AND r.client_id=b.client_id WHERE b.id=$1 AND b.client_id=$2"
+            "SELECT CASE WHEN $3 THEN COALESCE(r.original->'item1','{}'::jsonb) ELSE '{}'::jsonb END,r.tier_pricing FROM flight_bookings b JOIN flight_reprices r ON r.id=b.price_id AND r.client_id=b.client_id WHERE b.id=$1 AND b.client_id=$2"
         }
         _ => return Err(ApiError(StatusCode::NOT_FOUND, "NOT_FOUND")),
     };
-    let row: Option<(Option<Value>,)> = sqlx::query_as(query)
+    let row: Option<(Value, Option<Value>)> = sqlx::query_as(query)
         .bind(id)
         .bind(machine.client_id)
+        .bind(machine.portal_staff)
         .fetch_optional(&state.pool)
         .await?;
-    let value = row
-        .ok_or(ApiError(StatusCode::NOT_FOUND, "NOT_FOUND"))?
-        .0
-        .ok_or(ApiError(
-            StatusCode::CONFLICT,
-            "PRICING_SNAPSHOT_UNAVAILABLE",
-        ))?;
-    Ok(Json(value))
+    let (original, value) = row.ok_or(ApiError(StatusCode::NOT_FOUND, "NOT_FOUND"))?;
+    let value = value.ok_or(ApiError(
+        StatusCode::CONFLICT,
+        "PRICING_SNAPSHOT_UNAVAILABLE",
+    ))?;
+    Ok(Json(if machine.portal_staff {
+        staff_pricing(&original, value)?
+    } else {
+        value
+    }))
 }
 #[derive(Deserialize, ToSchema)]
 #[serde(deny_unknown_fields)]
@@ -282,24 +347,30 @@ async fn offer_pricing(
             "INVALID_PRICING_BATCH",
         ));
     }
-    let rows: Vec<(Uuid, Option<Value>)> = sqlx::query_as(
-        "SELECT id,tier_pricing FROM flight_offers WHERE id=ANY($1) AND client_id=$2",
+    let rows: Vec<(Uuid, Value, Option<Value>)> = sqlx::query_as(
+        "SELECT id,CASE WHEN $3 THEN original ELSE '{}'::jsonb END,tier_pricing FROM flight_offers WHERE id=ANY($1) AND client_id=$2",
     )
     .bind(&input.offer_ids)
     .bind(machine.client_id)
+    .bind(machine.portal_staff)
     .fetch_all(&state.pool)
     .await?;
     if rows.len() != input.offer_ids.len() {
         return Err(ApiError(StatusCode::NOT_FOUND, "NOT_FOUND"));
     }
     let mut offers = serde_json::Map::new();
-    for (id, pricing) in rows {
+    for (id, original, pricing) in rows {
+        let pricing = pricing.ok_or(ApiError(
+            StatusCode::CONFLICT,
+            "PRICING_SNAPSHOT_UNAVAILABLE",
+        ))?;
         offers.insert(
             id.to_string(),
-            pricing.ok_or(ApiError(
-                StatusCode::CONFLICT,
-                "PRICING_SNAPSHOT_UNAVAILABLE",
-            ))?,
+            if machine.portal_staff {
+                staff_pricing(&original, pricing)?
+            } else {
+                pricing
+            },
         );
     }
     Ok(Json(Value::Object(offers)))
@@ -323,102 +394,221 @@ pub fn routes() -> Router<AppState> {
 mod tests {
     use super::*;
     #[test]
-    fn seven_percent_pool_uses_existing_markup_and_does_not_touch_gross() {
-        let original = json!({"passengerCounts":{"ADT":1},"passengerFares":{"ADT":{"totalPrice":10000,"basePrice":8000,"taxes":1900,"ait":100}},"totalPrice":10000,"bookingComponents":[{"totalPrice":10000,"basePrice":8000,"taxes":1900,"ait":100}]});
-        let gross = crate::projection::single_component(
-            &original,
-            &crate::pricing::Markup::Percentage(7.into()),
-        )
-        .unwrap();
-        for (tier, commission, payable) in [
-            (Tier::Basic, "420.00", "10280.00"),
-            (Tier::Professional, "560.00", "10140.00"),
-            (Tier::Enterprise, "700.00", "10000.00"),
+    fn b2b_published_gross_commission_and_payable_reconcile_for_every_share() {
+        let original = json!({"passengerCounts":{"adt":1},"passengerFares":{"adt":{"basePrice":4624,"taxes":1125,"ait":0,"totalPrice":5263.48,"discountPrice":-485.52}},"totalPrice":5263.48,"bookingComponents":[{"basePrice":4624,"taxes":1125,"ait":0,"totalPrice":5263.48,"discountPrice":-485.52}]});
+        let gross = crate::projection::published_gross(&original).unwrap();
+        let owned = crate::projection::published_gross_owned(original.clone()).unwrap();
+        assert_eq!(gross, owned);
+        assert_eq!(gross["totalPrice"].to_string(), "5749");
+        assert_eq!(
+            gross["bookingComponents"][0]["totalPrice"].to_string(),
+            "5749"
+        );
+        for (share, commission, payable) in [
+            (0, "0.00", "5749.00"),
+            (55, "238.09", "5510.91"),
+            (85, "367.96", "5381.04"),
+            (100, "432.89", "5316.11"),
         ] {
-            let value = snapshot(
+            let result = snapshot(
                 &original,
                 &gross,
-                Some(tier),
-                match tier {
-                    Tier::Basic => 60,
-                    Tier::Professional => 80,
-                    Tier::Enterprise => 100,
-                },
+                Some(Tier::Enterprise),
+                share,
                 "BDT",
+                &crate::pricing::Markup::Percentage(1.into()),
             )
             .unwrap();
-            assert_eq!(value["gross"], "10700.00");
-            assert_eq!(value["commission"], commission);
-            assert_eq!(value["payable"], payable);
+            assert_eq!(result["gross"], "5749.00");
+            assert_eq!(result["commission"], commission);
+            assert_eq!(result["payable"], payable);
+            assert!(result.get("supplier").is_none());
+            assert_eq!(
+                crate::wallet::ticket::accepted_payable(
+                    Some(&result),
+                    &json!({"item1":gross}),
+                    "BDT"
+                )
+                .unwrap(),
+                payable.replace('.', "").parse::<i64>().unwrap()
+            );
         }
-        assert_eq!(gross["totalPrice"], 10700);
-        let zero = crate::projection::single_component(
+        // Higher markup increases the Enterprise payable; it cannot increase
+        // the agent discount as the previous implementation did.
+        let five_percent = snapshot(
             &original,
-            &crate::pricing::Markup::Fixed(0.into()),
+            &gross,
+            Some(Tier::Enterprise),
+            100,
+            "BDT",
+            &crate::pricing::Markup::Percentage(5.into()),
         )
         .unwrap();
-        assert_eq!(
-            snapshot(&original, &zero, Some(Tier::Enterprise), 100, "BDT").unwrap()["commission"],
-            "0.00"
-        );
+        assert_eq!(five_percent["payable"], "5526.65");
+        assert_eq!(five_percent["commission"], "222.35");
+        assert_eq!(original["totalPrice"], json!(5263.48));
+        let mut multi = original.clone();
+        multi["passengerCounts"]["adt"] = json!(2);
+        multi["totalPrice"] = json!(10526.96);
+        multi["bookingComponents"][0] =
+            json!({"basePrice":9248,"taxes":2250,"ait":0,"totalPrice":10526.96});
+        let gross = crate::projection::published_gross(&multi).unwrap();
+        let result = snapshot(
+            &multi,
+            &gross,
+            Some(Tier::Basic),
+            55,
+            "BDT",
+            &crate::pricing::Markup::Percentage(1.into()),
+        )
+        .unwrap();
+        assert_eq!(result["gross"], "11498.00");
+        assert_eq!(result["commission"], "476.18");
+        assert_eq!(result["payable"], "11021.82");
     }
-
     #[test]
-    fn configurable_shares_override_defaults_and_reject_invalid_inputs() {
-        let original =
-            json!({"passengerCounts":{"ADT":1},"passengerFares":{"ADT":{"totalPrice":5900}}});
-        let gross = json!({"totalPrice":6000,"passengerFares":{"ADT":{"totalPrice":6000}}});
+    fn staff_supplier_fare_uses_original_and_passenger_rounding() {
+        let original = json!({"passengerCounts":{"ADT":2,"CHD":1},"passengerFares":{"ADT":{"totalPrice":100.005,"basePrice":100,"taxes":20},"CHD":{"totalPrice":70.994,"basePrice":60,"taxes":30}}});
+        let stored = json!({"tier":null,"commissionSharePercent":0,"gross":"330.00","passengers":{"ADT":{"count":2,"gross":"120.00"},"CHD":{"count":1,"gross":"90.00"}}});
+        let pricing = staff_pricing(&original, stored.clone()).unwrap();
+        assert_eq!(pricing["supplier"], "271.01");
+        assert_eq!(pricing["passengers"]["ADT"]["supplier"], "100.01");
+        assert_eq!(pricing["gross"], stored["gross"]);
+        let mut b2b = stored;
+        b2b["tier"] = json!("basic");
+        assert!(staff_pricing(&original, b2b).is_err());
+    }
+    #[test]
+    fn staff_gross_is_base_plus_taxes_not_marked_up_supplier_net() {
+        let original = json!({"passengerCounts":{"adt":2,"chd":1},"passengerFares":{"adt":{"basePrice":4624,"taxes":1125,"ait":16,"totalPrice":5263.48},"chd":{"basePrice":3000,"taxes":1125,"ait":0,"totalPrice":3900}}});
+        let stored = json!({"tier":null,"commissionSharePercent":0,"gross":"15148.30","payable":"15148.30","commission":"0.00","passengers":{"adt":{"count":2,"gross":"5526.65"},"chd":{"count":1,"gross":"4095.00"}}});
+        let pricing = staff_pricing(&original, stored.clone()).unwrap();
+        assert_eq!(pricing["passengers"]["adt"]["gross"], "5749.00");
+        assert_eq!(pricing["passengers"]["adt"]["payable"], "5749.00");
+        assert_eq!(pricing["passengers"]["adt"]["supplier"], "5263.48");
+        assert_eq!(pricing["gross"], "15623.00");
+        assert_eq!(pricing["payable"], "15623.00");
+        assert_eq!(pricing["commission"], "0.00");
+        assert_eq!(pricing["supplier"], "14426.96");
+        assert_eq!(stored["passengers"]["adt"]["gross"], "5526.65");
+        for invalid_base in [Value::Null, json!("4624"), json!(-1)] {
+            let mut invalid_original = original.clone();
+            invalid_original["passengerFares"]["adt"]["basePrice"] = invalid_base;
+            assert!(staff_pricing(&invalid_original, stored.clone()).is_err());
+        }
+    }
+    #[test]
+    fn markup_shares_are_configurable_and_fixed_markup_is_per_passenger() {
+        use crate::pricing::Markup;
+        let original = json!({"passengerCounts":{"ADT":2,"CHD":1},"passengerFares":{"ADT":{"totalPrice":100,"basePrice":90,"taxes":30,"ait":1},"CHD":{"totalPrice":70,"basePrice":60,"taxes":30,"ait":0}}});
+        let gross = json!({"totalPrice":330,"passengerFares":{"ADT":{"totalPrice":120},"CHD":{"totalPrice":90}}});
         for (share, commission, payable) in [
-            (0, "0.00", "6000.00"),
-            (25, "25.00", "5975.00"),
-            (95, "95.00", "5905.00"),
-            (100, "100.00", "5900.00"),
+            (0, "0.00", "330.00"),
+            (60, "18.00", "312.00"),
+            (90, "27.00", "303.00"),
+            (100, "30.00", "300.00"),
         ] {
-            let value = snapshot(&original, &gross, Some(Tier::Basic), share, "BDT").unwrap();
-            assert_eq!(value["commission"], commission);
-            assert_eq!(value["payable"], payable);
+            let result = snapshot(
+                &original,
+                &gross,
+                Some(Tier::Basic),
+                share,
+                "BDT",
+                &Markup::Fixed(10.into()),
+            )
+            .unwrap();
+            assert_eq!(result["commission"], commission);
+            assert_eq!(result["payable"], payable);
         }
         for share in [-1, 101] {
-            assert!(snapshot(&original, &gross, Some(Tier::Basic), share, "BDT").is_err());
+            assert!(
+                snapshot(
+                    &original,
+                    &gross,
+                    Some(Tier::Basic),
+                    share,
+                    "BDT",
+                    &Markup::Fixed(10.into())
+                )
+                .is_err()
+            );
         }
-        assert!(snapshot(&original, &gross, None, 60, "BDT").is_err());
+        assert!(
+            snapshot(
+                &original,
+                &gross,
+                None,
+                60,
+                "BDT",
+                &Markup::Fixed(10.into())
+            )
+            .is_err()
+        );
+        let no_markup = snapshot(
+            &original,
+            &gross,
+            Some(Tier::Enterprise),
+            100,
+            "BDT",
+            &Markup::Fixed(0.into()),
+        )
+        .unwrap();
+        assert_eq!(no_markup["commission"], "60.00");
+        assert_eq!(no_markup["payable"], "270.00");
+        // Do not hide/clamp negative discounts when supplier plus markup is
+        // above gross: preserve the same formula and a positive payable.
+        let above_gross = snapshot(
+            &original,
+            &gross,
+            Some(Tier::Enterprise),
+            100,
+            "BDT",
+            &Markup::Fixed(1000.into()),
+        )
+        .unwrap();
+        assert_eq!(above_gross["commission"], "-2940.00");
+        assert_eq!(above_gross["payable"], "3270.00");
+        assert_eq!(
+            crate::wallet::ticket::accepted_payable(
+                Some(&above_gross),
+                &json!({"item1":gross}),
+                "BDT"
+            )
+            .unwrap(),
+            327000
+        );
+        let staff = snapshot(&original, &gross, None, 0, "BDT", &Markup::Fixed(10.into())).unwrap();
+        assert_eq!(staff["payable"], "330.00");
     }
 
     #[test]
-    fn shares_gross_and_passenger_rounding() {
-        let original =
-            json!({"passengerCounts":{"ADT":2},"passengerFares":{"ADT":{"totalPrice":5900}}});
-        let gross = json!({"totalPrice":12000,"passengerFares":{"ADT":{"totalPrice":6000}}});
-        for (tier, commission, payable) in [
-            (Tier::Basic, "120.00", "11880.00"),
-            (Tier::Professional, "160.00", "11840.00"),
-            (Tier::Enterprise, "200.00", "11800.00"),
-        ] {
-            let value = snapshot(
+    fn commission_rounds_per_passenger_before_counts_and_preserves_ait() {
+        let original = json!({"passengerCounts":{"ADT":3},"passengerFares":{"ADT":{"totalPrice":100.005,"basePrice":100,"taxes":20,"ait":1}}});
+        let gross = json!({"totalPrice":360,"passengerFares":{"ADT":{"totalPrice":120}}});
+        let result = snapshot(
+            &original,
+            &gross,
+            Some(Tier::Basic),
+            60,
+            "BDT",
+            &crate::pricing::Markup::Fixed("0.01".parse().unwrap()),
+        )
+        .unwrap();
+        assert_eq!(result["commission"], "35.97");
+        assert_eq!(result["payable"], "324.03");
+        assert_eq!(original["passengerFares"]["ADT"]["ait"], 1);
+        let mut invalid = gross.clone();
+        invalid["totalPrice"] = json!(361);
+        assert!(
+            snapshot(
                 &original,
-                &gross,
-                Some(tier),
-                match tier {
-                    Tier::Basic => 60,
-                    Tier::Professional => 80,
-                    Tier::Enterprise => 100,
-                },
+                &invalid,
+                Some(Tier::Basic),
+                60,
                 "BDT",
+                &crate::pricing::Markup::Fixed(1.into())
             )
-            .unwrap();
-            assert_eq!(value["gross"], "12000.00");
-            assert_eq!(value["commission"], commission);
-            assert_eq!(value["payable"], payable);
-        }
-        assert_eq!(
-            snapshot(&original, &gross, None, 0, "BDT").unwrap()["payable"],
-            "12000.00"
+            .is_err()
         );
-        let original =
-            json!({"passengerCounts":{"ADT":3},"passengerFares":{"ADT":{"totalPrice":100}}});
-        let gross = json!({"totalPrice":300.03,"passengerFares":{"ADT":{"totalPrice":100.01}}});
-        let value = snapshot(&original, &gross, Some(Tier::Basic), 60, "BDT").unwrap();
-        assert_eq!(value["commission"], "0.03");
-        assert_eq!(value["payable"], "300.00");
     }
 }

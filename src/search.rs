@@ -394,14 +394,29 @@ async fn search(
     let mut successes = 0;
     let mut batches = Vec::new();
     while let Some(task) = tasks.join_next().await {
-        let Ok((connection, Ok(Ok(mut body)))) = task else {
-            failures += 1;
-            continue;
+        let (connection, mut body) = match task {
+            Ok((connection, Ok(Ok(body)))) => (connection, body),
+            Ok((connection, Ok(Err(error)))) => {
+                tracing::warn!(supplier = %connection.id, ?error, "supplier search failed");
+                failures += 1;
+                continue;
+            }
+            Ok((connection, Err(_))) => {
+                tracing::warn!(supplier = %connection.id, "supplier search timed out");
+                failures += 1;
+                continue;
+            }
+            Err(_) => {
+                tracing::warn!("supplier search task failed");
+                failures += 1;
+                continue;
+            }
         };
         if !body
             .pointer("/item1/airSearchResponses")
             .is_some_and(Value::is_array)
         {
+            tracing::warn!(supplier = %connection.id, "supplier search returned an invalid envelope");
             failures += 1;
             continue;
         }
@@ -411,6 +426,7 @@ async fn search(
             _ => false,
         };
         if !valid {
+            tracing::warn!(supplier = %connection.id, "supplier search reported no successful sources");
             failures += 1;
             continue;
         }
@@ -574,14 +590,19 @@ async fn search(
             references.insert(supplier_transaction.into(), json!(search_id.to_string()));
             references.insert(supplier_item.into(), json!(id.to_string()));
             let tier_original = json!({"passengerCounts":original["passengerCounts"],"passengerFares":original["passengerFares"]});
-            let mut selling = projection::single_component_owned(original, &winner.markup)
-                .map_err(|_| error("SUPPLIER_PRICING_COVERAGE_UNSUPPORTED"))?;
+            let mut selling = if machine.tier.is_some() {
+                projection::published_gross_owned(original)
+            } else {
+                projection::single_component_owned(original, &winner.markup)
+            }
+            .map_err(|_| error("SUPPLIER_PRICING_COVERAGE_UNSUPPORTED"))?;
             let tier_pricing = crate::tier::snapshot(
                 &tier_original,
                 &selling,
                 machine.tier,
                 machine.commission_share_percent,
                 &currency,
+                &winner.markup,
             )?;
             bind_references(&mut selling, &mut references);
             pending.push((
@@ -698,12 +719,14 @@ pub struct FareRulesRequest {
 struct SavedOffer {
     search_id: Uuid,
     supplier_id: String,
+    availability_epoch: i64,
+    currency: String,
     original: Value,
     selling: Value,
     reference_map: Value,
     valid: bool,
 }
-#[utoipa::path(post,path="/api/FareRules",tag="Flights",security(("machine_token"=[])),request_body=FareRulesRequest,responses((status=200,body=Object),(status=404,description="Unknown or foreign offer"),(status=410,description="Platform reference expired"),(status=422,description="References do not match the saved offer"),(status=502,description="UPSTREAM_FARE_RULES_ERROR: rules unavailable; customer may continue to RePrice"),(status=504,description="Supplier timeout")))]
+#[utoipa::path(post,path="/api/FareRules",tag="Flights",security(("machine_token"=[])),request_body=FareRulesRequest,responses((status=200,body=Object),(status=404,description="Unknown or foreign offer"),(status=409,description="NEW_SEARCH_REQUIRED: supplier availability changed"),(status=410,description="Platform reference expired"),(status=422,description="References do not match the saved offer"),(status=502,description="UPSTREAM_FARE_RULES_ERROR: rules unavailable; customer may continue to RePrice"),(status=504,description="Supplier timeout")))]
 async fn fare_rules(
     machine: Machine,
     State(state): State<AppState>,
@@ -712,7 +735,7 @@ async fn fare_rules(
     machine.require("search:read")?;
     let id =
         Uuid::parse_str(&request.item_code_ref).map_err(|_| error("INVALID_OFFER_REFERENCE"))?;
-    let row:Option<SavedOffer>=sqlx::query_as("SELECT search_id,supplier_id,original,selling,reference_map,(expires_at>now()) AS valid FROM flight_offers WHERE id=$1 AND client_id=$2")
+    let row:Option<SavedOffer>=sqlx::query_as("SELECT o.search_id,o.supplier_id,o.availability_epoch,s.currency,o.original,o.selling,o.reference_map,(o.expires_at>clock_timestamp() AND s.expires_at>clock_timestamp()) AS valid FROM flight_offers o JOIN flight_searches s ON s.id=o.search_id WHERE o.id=$1 AND o.client_id=$2")
         .bind(id).bind(machine.client_id).fetch_optional(&state.pool).await?;
     let Some(row) = row else {
         return Err(crate::cleanup::missing_offer_error(&state.pool, id, machine.client_id).await?);
@@ -727,19 +750,56 @@ async fn fare_rules(
     let selection =
         crate::reprice_selection::select(&row.original, &row.selling, &request.segment_code_refs)
             .ok_or(error("OFFER_REFERENCE_MISMATCH"))?;
+    let (enabled, epoch, timeout): (bool, i64, i32) = sqlx::query_as(
+        "SELECT search_enabled,availability_epoch,timeout_seconds FROM supplier_connections WHERE id=$1",
+    ).bind(&row.supplier_id).fetch_one(&state.pool).await?;
+    if !enabled || epoch != row.availability_epoch {
+        return Err(ApiError(StatusCode::CONFLICT, "NEW_SEARCH_REQUIRED"));
+    }
     let transport = state
         .suppliers
         .get(&row.supplier_id)
         .ok_or(error("SUPPLIER_CONFIGURATION_ERROR"))?;
+    if transport.currency.as_deref() != Some(row.currency.as_str()) {
+        return Err(error("SUPPLIER_CURRENCY_MISMATCH"));
+    }
     let payload = json!({"uniqueTransID":row.original["uniqueTransID"],"itemCodeRef":row.original["itemCodeRef"],"segmentCodeRefs":selection["supplierSegmentCodeRefs"],"brandedFareRefs":""});
     let mut response = tokio::time::timeout(
-        Duration::from_secs(30),
+        Duration::from_secs(timeout as u64),
         transport.transport.read(ReadOperation::FareRules, &payload),
     )
     .await
     .map_err(|_| ApiError(StatusCode::GATEWAY_TIMEOUT, "SUPPLIER_TIMEOUT"))?
-    .map_err(|_| ApiError(StatusCode::BAD_GATEWAY, "UPSTREAM_FARE_RULES_ERROR"))?;
-    if response.pointer("/item2/isSuccess") != Some(&Value::Bool(true)) {
+    .map_err(|error| {
+        if error == crate::supplier::SupplierError::Timeout {
+            ApiError(StatusCode::GATEWAY_TIMEOUT, "SUPPLIER_TIMEOUT")
+        } else {
+            ApiError(StatusCode::BAD_GATEWAY, "UPSTREAM_FARE_RULES_ERROR")
+        }
+    })?;
+    // Availability and either reference lifetime may change during the read.
+    let current: Option<(bool, bool, i64)> = sqlx::query_as(
+        "SELECT o.expires_at>clock_timestamp() AND s.expires_at>clock_timestamp(),c.search_enabled,c.availability_epoch FROM flight_offers o JOIN flight_searches s ON s.id=o.search_id JOIN supplier_connections c ON c.id=o.supplier_id WHERE o.id=$1 AND o.client_id=$2",
+    ).bind(id).bind(machine.client_id).fetch_optional(&state.pool).await?;
+    let (valid, enabled, epoch) = current.ok_or(ApiError(StatusCode::GONE, "OFFER_EXPIRED"))?;
+    if !valid {
+        return Err(ApiError(StatusCode::GONE, "OFFER_EXPIRED"));
+    }
+    if !enabled || epoch != row.availability_epoch {
+        return Err(ApiError(StatusCode::CONFLICT, "NEW_SEARCH_REQUIRED"));
+    }
+    let valid_rules = response
+        .pointer("/item1/fareRuleDetails")
+        .and_then(Value::as_array)
+        .is_some_and(|rules| {
+            rules.iter().all(|rule| {
+                rule.is_object()
+                    && ["type", "fareRuleDetail"]
+                        .iter()
+                        .all(|key| rule.get(*key).is_some_and(|v| v.is_string() || v.is_null()))
+            })
+        });
+    if response.pointer("/item2/isSuccess") != Some(&Value::Bool(true)) || !valid_rules {
         return Err(ApiError(
             StatusCode::BAD_GATEWAY,
             "UPSTREAM_FARE_RULES_ERROR",

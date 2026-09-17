@@ -4,6 +4,8 @@ Rust/Axum backend for the flight aggregation and booking requirements in [REQUIR
 
 ## Local development
 
+**For this workspace's existing Next frontend:** run `node scripts/portal-dev.mjs` from this Rust project, and keep `npm run dev` running in the sibling `shopontravels` frontend. This resumes the existing local portal database and serves Rust on `127.0.0.1:18081`. See [local portal commands and troubleshooting](docs/LOCAL_PORTAL.md). The general setup below uses a separate database/listener.
+
 Install the Rust toolchain specified by `rust-toolchain.toml` and PostgreSQL 18. Create a dedicated `shapontravels` database. Copy `.env.example` to `.env` only on a new installation; preserve existing supplier credentials. Set `DATABASE_URL` for your own database. Environment variables take precedence over `.env`.
 
 ```sh
@@ -64,9 +66,15 @@ See [Swagger walkthrough and API contract](docs/MARKUP_API.md). Create a draft, 
 
 ## B2B tiers and API Management
 
+[Rust account and agency identity](docs/RUST_IDENTITY_REQUIREMENTS_PLAN.md) retains Clerk login and moves application identity to Rust PostgreSQL. Phases 0–8 are complete as staged/local implementation and verification, including lifecycle/recovery, profiles and approval, canonical business integration, account UI and isolated acceptance tests. [Phase 6–8 evidence](docs/evidence/RUST_IDENTITY_PHASE6_8_2026-09-17.md) records the tests and synthetic backup/restore rehearsal; the [runbook](docs/RUST_IDENTITY_RUNBOOK.md) describes setup and remaining activation gates. Phase 9 remains pending: actual target configuration, reviewed production activation code and live cutover are not complete. Defaults remain disabled; no live authority or provider activation occurred.
+
 [Tier pricing](docs/B2B_TIERS.md) and [managed API access](docs/API_MANAGEMENT.md) were released on 2026-09-14 as `44fc47d`, including migrations 0021–0023. Commercial documentation excludes Admin definitions, which require a human Admin session. [Release verification](docs/evidence/API_MANAGEMENT_RELEASE_2026-09-14.md) records successful CI, database backups/migrations and production health/authentication checks. The sibling frontend remains committed locally and unpushed at the user's instruction; its production bridge and booking-price integration remain separate work.
 
 ## Initial public Search
+
+[Portal prebooking](docs/PORTAL_PREBOOKING.md) is implemented locally in the existing frontend results design as a Search → RePrice → acceptance path with owner tier pricing. It requires the uncommitted migration 0024 and has not been deployed. Booking and wallet migration remain a later step.
+
+[Saved passengers](docs/SAVED_PASSENGERS.md) now use local Rust storage through the existing frontend form and API contract. Migration 0026 retains owner-scoped profiles and immutable references; 103 original profiles were copied and verified locally. Booking/wallet integration remains separate.
 
 `POST /api/Search` and `POST /api/FareRules` now use machine tokens. [Setup, examples and initial-release limits](docs/SEARCH_API.md). Activate your own markup rule and selected supplier Search controls before testing. Search now selects the lowest original supplier total for conservatively equivalent fares before markup; equal totals prefer Takeoff, Firsttrip, Triplover. Summary counts, airline/stops filters and net selling-price ranges now derive from retained offers. Broader equivalence and complex-fare coverage remain partial. Hold Book/status/reconciliation and UAT held-ticket Issue exist; [Direct Issue](docs/DIRECT_ISSUE.md) is deployed with real execution disabled; [held cancellation](docs/CANCELLATION_API.md) is deployed with real execution disabled.
 
@@ -83,6 +91,10 @@ After applying migrations through `0014_booking_public_reference.sql` and starti
 
 `POST /api/ticket/NewTicket` confirms a verified held booking with booking/ticketing permissions and a required idempotency key. `GET /api/bookings/{id}/ticket` retrieves saved ticket evidence. Migration 0015 adds the durable issue reservation; 0016 adds append-only saved-response verification. See [contract and execution limits](docs/TICKETING_API.md) and [UAT verification](docs/evidence/HELD_TICKETING_2026-09-11.md). Released on 2026-09-11 in `08a569e`, including migrations 0015–0016; production readiness and the three ticket endpoints were verified. Production supplier ticketing remains blocked.
 
+Local update, 2026-09-15: held-ticket issue now uses saved Book references without calling PNR. Explicit price acceptance, duplicate/Cancel protection and production restrictions remain. Missing or offset-free deadlines require supplier validation at NewTicket. The consistency review adds migration `0028_booking_pnr_observations.sql` to retain verified evidence after failed lookups and aligns surname-only ticket verification with Book. [Review and regression evidence](docs/evidence/TICKETING_WITHOUT_PNR_2026-09-15.md). This update has not been deployed; migration 0028 is required before serving it.
+
+The portal's explicit **Refresh Status / Deadline** action now uses the existing receipt route and Rust PNR reconciliation helper. Page loads and the normal ticket flow do not automatically call PNR. Latest verified status/deadline is owner-scoped and preserved across failed refreshes; missing latest deadlines supersede Book values. [Contract](docs/PORTAL_HOLDS.md#explicit-statusdeadline-refresh) and [local verification](docs/evidence/PORTAL_PNR_REFRESH_2026-09-15.md). The new refresh action is local and not live-supplier verified.
+
 ## Ticket details reports
 
 Owner-scoped live report lookup by booking UUID, STR reference or platform transaction uses accepted selling fares and verified ticket evidence. See [report API](docs/TICKET_REPORT_API.md). Released on 2026-09-11 as `cd3f2b5`, including migration 0017; production readiness and all three report routes verified.
@@ -90,3 +102,9 @@ Owner-scoped live report lookup by booking UUID, STR reference or platform trans
 ## Uncertain ticket reconciliation
 
 Read-only recovery from verified PNR and ticket reports has client and Admin endpoints, immutable evidence and no repeated Issue dispatch. See [ticket reconciliation](docs/TICKET_RECONCILIATION_API.md). Released as `15e8e58` on 2026-09-11, including migration 0018; production readiness and endpoint authentication verified.
+
+### Staged portal identity
+
+[Identity requirements and progress](docs/RUST_IDENTITY_REQUIREMENTS_PLAN.md) and [Staged API/setup](docs/PORTAL_IDENTITY_API.md) describe the dedicated identity bridge. It is disabled by default and does not change existing portal authority or perform live cutover.
+
+[Phase 9 preparation](docs/evidence/RUST_IDENTITY_PHASE9_PREFLIGHT_2026-09-17.md) adds read-only target review, mapping drift detection and coordinated maintenance controls. The [runbook](docs/RUST_IDENTITY_RUNBOOK.md) distinguishes a clear review snapshot from production activation; canonical production selection and actual cutover remain outstanding.
