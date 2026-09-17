@@ -1,32 +1,7 @@
-//! Local portal supplier reads use the configured endpoints, in either UAT or production.
-//! Write methods deliberately retain ReadSupplier's denying defaults.
-use serde_json::Value;
-use shapontravels_api::{
-    config::Config,
-    search::{ConfiguredSupplier, ReadSupplier},
-    supplier::{ReadOperation, SupplierAdapter, SupplierError},
-};
+//! Local suppliers use the main server adapter and configured capability flags.
+//! Shared adapter restrictions and database controls apply in both launchers.
+use shapontravels_api::{config::Config, search::ConfiguredSupplier, supplier::SupplierAdapter};
 use std::{collections::HashMap, sync::Arc, time::Duration};
-
-struct SearchReads(SupplierAdapter);
-impl ReadSupplier for SearchReads {
-    fn read<'a>(
-        &'a self,
-        operation: ReadOperation,
-        payload: &'a Value,
-    ) -> std::pin::Pin<
-        Box<dyn std::future::Future<Output = Result<Value, SupplierError>> + Send + 'a>,
-    > {
-        Box::pin(async move {
-            match operation {
-                ReadOperation::Search | ReadOperation::FareRules | ReadOperation::Reprice => {
-                    self.0.read(operation, payload).await
-                }
-                _ => Err(SupplierError::Configuration),
-            }
-        })
-    }
-}
 
 fn from_values(
     database: &str,
@@ -34,9 +9,6 @@ fn from_values(
 ) -> Result<HashMap<String, ConfiguredSupplier>, String> {
     let config = Config::from_lookup(|key| match key {
         "DATABASE_URL" => Some(database.to_owned()),
-        _ if key.ends_with("_BOOKING_ENABLED") || key.ends_with("_TICKETING_ENABLED") => {
-            Some("false".into())
-        }
         _ if ["FIRSTTRIP_", "TAKEOFF_", "TRIPLOVER_"]
             .iter()
             .any(|prefix| key.starts_with(prefix)) =>
@@ -60,7 +32,7 @@ fn from_values(
         suppliers.insert(
             id,
             ConfiguredSupplier {
-                transport: Arc::new(SearchReads(adapter)),
+                transport: Arc::new(adapter),
                 currency,
             },
         );
@@ -119,26 +91,97 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn uat_and_production_are_read_only_even_with_write_flags() {
+    async fn supplier_flags_match_main_server_in_uat_and_production() {
+        use serde_json::Value;
+        use shapontravels_api::{search::ReadSupplier, supplier::SupplierError};
+
         for uat in [false, true] {
-            let suppliers = from_values("postgres://localhost/local", &settings(uat)).unwrap();
-            assert_eq!(suppliers.len(), 3);
-            for supplier in suppliers.values() {
-                let reads = &supplier.transport;
-                assert!(!reads.hold_booking_enabled());
-                assert!(!reads.held_ticketing_enabled());
-                assert!(!reads.direct_issue_enabled());
-                assert!(!reads.cancellation_enabled());
-                for result in [
-                    reads.book(&Value::Null).await,
-                    reads.book_direct(&Value::Null).await,
-                    reads.issue_held(&Value::Null).await,
-                    reads.cancel_held(&Value::Null).await,
-                    reads.ticket_report("unused").await,
-                    reads.read(ReadOperation::Pnr, &Value::Null).await,
-                ] {
-                    assert_eq!(result, Err(SupplierError::Configuration));
+            for booking in [None, Some("false"), Some("true")] {
+                for ticketing in [None, Some("false"), Some("true")] {
+                    let mut values = settings(uat);
+                    for prefix in ["FIRSTTRIP", "TAKEOFF", "TRIPLOVER"] {
+                        for (suffix, flag) in [
+                            ("BOOKING_ENABLED", booking),
+                            ("TICKETING_ENABLED", ticketing),
+                        ] {
+                            let key = format!("{prefix}_{suffix}");
+                            values.remove(&key);
+                            if let Some(flag) = flag {
+                                values.insert(key, flag.into());
+                            }
+                        }
+                    }
+                    let suppliers = from_values("postgres://localhost/local", &values).unwrap();
+                    assert_eq!(suppliers.len(), 3);
+                    // Main reads the same flags without local database/identity isolation.
+                    let main_config = Config::from_lookup(|key| match key {
+                        "DATABASE_URL" => Some("postgres://localhost/main".into()),
+                        "APP_ENV" => Some("production".into()),
+                        _ => values.get(key).cloned(),
+                    })
+                    .unwrap();
+                    for supplier in main_config.suppliers {
+                        let id = supplier.id;
+                        let main =
+                            SupplierAdapter::new(supplier, Duration::from_secs(120)).unwrap();
+                        let local = &suppliers[id].transport;
+                        assert_eq!(local.hold_booking_enabled(), booking == Some("true"));
+                        assert_eq!(local.hold_booking_enabled(), main.hold_booking_enabled());
+                        assert_eq!(local.held_ticketing_enabled(), ticketing == Some("true"));
+                        assert_eq!(
+                            local.held_ticketing_enabled(),
+                            main.held_ticketing_enabled()
+                        );
+                        assert_eq!(local.direct_issue_enabled(), main.direct_issue_enabled());
+                        assert_eq!(local.cancellation_enabled(), main.cancellation_enabled());
+                        assert_eq!(
+                            local.book_direct(&Value::Null).await,
+                            Err(SupplierError::Configuration)
+                        );
+                        assert_eq!(
+                            local.cancel_held(&Value::Null).await,
+                            Err(SupplierError::Configuration)
+                        );
+                        // Disabled methods must deny before authentication or supplier traffic.
+                        if !local.hold_booking_enabled() {
+                            assert_eq!(
+                                local.book(&Value::Null).await,
+                                Err(SupplierError::Configuration)
+                            );
+                        }
+                        if !local.held_ticketing_enabled() {
+                            assert_eq!(
+                                local.issue_held(&Value::Null).await,
+                                Err(SupplierError::Configuration)
+                            );
+                        }
+                    }
                 }
+            }
+        }
+    }
+
+    #[test]
+    fn supplier_flags_are_independent_and_invalid_flags_fail_startup() {
+        for enabled in ["FIRSTTRIP", "TAKEOFF", "TRIPLOVER"] {
+            let mut values = settings(false);
+            for prefix in ["FIRSTTRIP", "TAKEOFF", "TRIPLOVER"] {
+                values.insert(
+                    format!("{prefix}_BOOKING_ENABLED"),
+                    (prefix == enabled).to_string(),
+                );
+            }
+            let suppliers = from_values("postgres://localhost/local", &values).unwrap();
+            for (id, supplier) in suppliers {
+                assert_eq!(
+                    supplier.transport.hold_booking_enabled(),
+                    id == enabled.to_lowercase()
+                );
+            }
+            for suffix in ["BOOKING_ENABLED", "TICKETING_ENABLED"] {
+                let mut invalid = values.clone();
+                invalid.insert(format!("{enabled}_{suffix}"), "yes".into());
+                assert!(from_values("postgres://localhost/local", &invalid).is_err());
             }
         }
     }

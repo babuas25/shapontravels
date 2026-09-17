@@ -1304,3 +1304,13 @@ Final validation: 60 regular tests passed; the complete disposable-database suit
 - Added `node scripts/portal-dev.mjs` to resume this workspace's saved portal setup, start PostgreSQL if needed, back up before pending migrations, build the backend and serve it on 18081. It preserves supplier controls, credentials and existing records.
 - Backed up the existing local portal database and applied migration 0028; both retained held bookings remain. Backend readiness and bridge login returned 200. No production database or deployment was touched.
 - Live Triplover UAT read verification: direct Rust DAC–SIN 30 September Search returned 38 offers; a subsequent real signed-in frontend Search rendered 102 schedule options with fares and supplier labels. No Book/Issue/Cancel was sent. [Run commands](docs/LOCAL_PORTAL.md).
+
+
+### Approved additive API fare breakdown — 2026-09-17
+
+- Keep the existing Admin-configurable tier calculation and accepted payable unchanged.
+- Expose `fareBreakdown` on B2B Search, RePrice, pricing and booking responses. Existing financial fields retain their meanings for client compatibility.
+- When supplier plus markup exceeds original Gross, the display Gross is final payable. Fold the tier adjustment into net service charge; expose any negative net charge as positive `discount`. `tierAdjustment` is always `0.00` in this object.
+- Otherwise display Gross remains the original Gross and service charge is zero. Include AIT exactly once in the component reconciliation.
+- `baseFare + taxes + ait + serviceCharge - discount = payable`, per passenger and in counted totals. Historical accepted bookings are enriched only in memory, without repricing or changing wallet amounts.
+- See [API fields, examples and compatibility](docs/FARE_BREAKDOWN_API.md).

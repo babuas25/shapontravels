@@ -56,7 +56,7 @@ fs.watchFile(supplierFile,{interval:1000},()=>{
     const next=fingerprint();
     if (stopping || next===loaded) return;
     loaded=next;
-    console.log('Supplier .env changed; reloading local read-only connections. Run a fresh search.');
+    console.log('Supplier .env changed; reloading supplier connections and capability flags. Run a fresh search.');
     restartRequested=true;
     if (child) child.kill('SIGTERM');
     else startBackend();
@@ -68,5 +68,5 @@ for(const signal of ['SIGINT','SIGTERM'])process.on(signal,()=>{
   fs.unwatchFile(supplierFile);
   if (child) child.kill(signal);
 });
-console.log('Supplier reads use .env (UAT or production); saves reload automatically. Booking and ticket issue are disabled.');
+console.log('Supplier reads use .env (UAT or production); saves reload automatically. All suppliers use main-server booking/ticketing flags, database controls and shared adapter restrictions.');
 startBackend();

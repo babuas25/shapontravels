@@ -1,4 +1,4 @@
-//! Local canonical identity with configuration-driven supplier reads only.
+//! Local canonical identity with the main server supplier adapters and capability flags.
 //! No automatic migrations, bootstrap, account import or authority activation.
 #[path = "support/portal_env_reads.rs"]
 mod portal_env_reads;
@@ -31,11 +31,14 @@ async fn main() {
         .with_maintenance(maintenance.0);
     let suppliers =
         portal_env_reads::configured(&database).unwrap_or_else(|message| panic!("{message}"));
+    for (id, supplier) in &suppliers {
+        tracing::info!(supplier = %id, hold_enabled = supplier.transport.hold_booking_enabled(), ticketing_enabled = supplier.transport.held_ticketing_enabled(), "Supplier adapter configured; database controls also apply");
+    }
     // Restarting discards supplier sessions. Old offers must not cross an
     // account/environment switch, even when the supplier ID is unchanged.
     let mut tx = pool.begin().await.expect("supplier restart transaction");
     let configured_ids: Vec<_> = suppliers.keys().cloned().collect();
-    // This local read-only launcher follows .env membership on each reload;
+    // This local launcher follows .env membership on each reload;
     // old UAT-only database switches must not hide configured live suppliers.
     sqlx::query("UPDATE supplier_connections SET search_enabled=(id=ANY($1)),availability_epoch=availability_epoch+1,version=version+1,updated_at=now()")
         .bind(&configured_ids).execute(&mut *tx).await.expect("activate configured supplier reads and invalidate prior offers");
@@ -67,7 +70,7 @@ async fn main() {
         .layer(axum::Extension(maintenance))
         .layer(axum::Extension(runtime));
     println!(
-        "Local Rust identity listening at http://{bind}; maintenance={}; supplier reads from .env; booking/issue/cancel disabled",
+        "Local Rust identity listening at http://{bind}; maintenance={}; supplier adapters and capability flags from .env (database controls and shared ticketing restrictions apply)",
         maintenance.0
     );
     axum::serve(listener, app)

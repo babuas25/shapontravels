@@ -604,6 +604,9 @@ async fn search(
                 &currency,
                 &winner.markup,
             )?;
+            if let Some(breakdown) = tier_pricing.get("fareBreakdown") {
+                selling["fareBreakdown"] = breakdown.clone();
+            }
             bind_references(&mut selling, &mut references);
             pending.push((
                 id,

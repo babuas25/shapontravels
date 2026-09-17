@@ -32,11 +32,23 @@ curl -i http://127.0.0.1:18081/health/ready
 
 Expect HTTP 200. Connection refused means Rust is stopped or listening on a different port. A readiness failure means PostgreSQL or migration checks are failing. Health does not test the supplier.
 
-The canonical local launcher now uses **configured supplier reads only**: Search, FareRules and RePrice for FirstTrip, TakeOff and Triplover. Each supplier uses its own `*_BASE_URL`, `*_SEARCH_BASE_URL`, `*_EMAIL`, `*_PASSWORD` and `*_CURRENCY` from Rust `.env`. UAT and production endpoints are both supported; credentials and endpoints must belong to the same supplier environment/account. No endpoints or currencies are guessed. The old `LOCAL_API_UAT_HOLDS` flag no longer selects this launcher's supplier mode.
+The canonical local launcher uses **configured supplier reads**: Search, FareRules and RePrice for FirstTrip, TakeOff and Triplover, plus each supplier's configured Hold and PNR support. Each supplier uses its own `*_BASE_URL`, `*_SEARCH_BASE_URL`, `*_EMAIL`, `*_PASSWORD` and `*_CURRENCY` from Rust `.env`. UAT and production endpoints are both supported; credentials and endpoints must belong to the same supplier environment/account. No endpoints or currencies are guessed. The old `LOCAL_API_UAT_HOLDS` flag no longer selects this launcher's supplier mode.
 
 At startup/reload this local launcher enables search for suppliers with credentials in `.env` and disables search for suppliers with both email and password absent. Incomplete credentials or URLs produce an actionable startup error. This replaces stale local UAT-only participation switches; dashboard search switches still apply until the next reload. Supplier authentication/transport errors are isolated per supplier, so successful suppliers can return partial results. Invalid credentials, denied access and unavailable inventory cannot be made into real flight results.
 
-Booking, direct issue, held-ticket issue, cancellation and PNR/report access are disabled by the local adapter, including when `.env` contains write-enabled flags. Existing bookings are retained. These restrictions apply to this local read-only launcher, not to the main production server or the separate explicit UAT Hold example. Start it with `node scripts/portal-dev.mjs` to retain automatic credential reload; directly running the Rust binary requires a restart after `.env` edits.
+Each supplier uses the same `SupplierAdapter` and capability flags as the main server:
+
+| Supplier | Hold flag | Ticketing flag |
+| --- | --- | --- |
+| FirstTrip | `FIRSTTRIP_BOOKING_ENABLED` | `FIRSTTRIP_TICKETING_ENABLED` |
+| TakeOff | `TAKEOFF_BOOKING_ENABLED` | `TAKEOFF_TICKETING_ENABLED` |
+| Triplover | `TRIPLOVER_BOOKING_ENABLED` | `TRIPLOVER_TICKETING_ENABLED` |
+
+Hold requires that supplier's booking flag to be `true`, plus `search_enabled=true` and `booking_enabled=true` in the selected database's `supplier_connections`. Missing/false flags disable the corresponding capability; invalid boolean values prevent startup. Flags are independent per supplier. Hold does not require ticketing. PNR reads still require database servicing permission.
+
+Ticketing flags pass through to the shared adapter for all three suppliers in UAT and production. Database `ticketing_enabled` and `servicing_enabled` controls, client authority, verified held-booking evidence and wallet funds are also required. The configured HTTPS endpoints and matching supplier credentials select the actual supplier environment. Direct issue and cancellation remain disabled by default. Existing bookings are retained.
+
+Start with `node scripts/portal-dev.mjs` to rebuild code and retain automatic credential reload; directly running the Rust binary requires a restart after `.env` edits. After restart/reload, run a fresh search before checkout because prior offers are invalidated.
 
 ## Recovery performed — 16 September 2026 (Bangladesh time)
 
@@ -45,3 +57,7 @@ The frontend and PostgreSQL were running, but there was no listener on port 1808
 An authenticated Rust Search for DAC → SIN, 30 September 2026, one adult in Economy returned HTTP 200 with 38 offers in approximately 43 seconds. This was a live Triplover UAT read; no Book, Issue or Cancel was submitted.
 
 The actual signed-in frontend was then tested through its Search button with the same route/date/passengers. It successfully rendered **102 flight options**, airline/stop filters, supplier labels and fares from BDT 35,536.00. The frontend expands supplier offers into selectable schedule options, so its displayed option count is distinct from the raw offer count. No frontend restart or credential change was necessary.
+
+## Supplier Hold on the main server
+
+The main binary already reads each supplier's booking/ticketing flags and uses the same adapters as the local connections. Set the relevant booking flag to `true` in the main server environment and enable that supplier's `search_enabled` and `booking_enabled` in that server's database. Deploy the built release through the normal deployment workflow and restart the service after environment changes; the main server does not use the local `.env` watcher. Local database controls are not copied to the main server. Verify a fresh checkout reports `submissionEnabled=true` before submitting any booking. The shared ticketing restrictions described above apply to both servers.

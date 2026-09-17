@@ -24,7 +24,7 @@ The response contains local booking/owner IDs, currency, exact required minor un
 - Portal review fields are checked again by the reservation helper. They cannot override accepted payable, owner, account, or currency.
 - The reserve ledger records the actual portal actor/role; supplier finalization remains a system operation. The saved Book creator is unchanged.
 - One durable issue per booking applies across different UUIDs, portal and API entry points. A different booking cannot reuse the same operation key.
-- Native environment/supplier/transport gates still apply. Production ticketing remains unauthorized by this build.
+- Native supplier/transport gates still apply in every environment. Production issuance requires the supplier ticketing flag, database ticketing/servicing controls and the same wallet/authority checks as UAT.
 
 ## Recovery
 
@@ -38,7 +38,7 @@ No timer, generic supplier error, missing deadline, failed PNR read, or operator
 
 The existing receipt, print/download, passenger table and Booking Management list project verified ticket results separately from the original held Book state. Passenger ticket numbers are matched by identity; multiple numbers stay associated with that passenger. Saved history also reflects issued/pending ticket operations.
 
-Portal issue controls and `/api/flights/holds/ticket` require `SHAPON_WALLET_BACKEND=rust-preview`. No running portal configuration has been changed. The Rust private endpoint independently retains the native environment and supplier gates.
+Portal issue controls and `/api/flights/holds/ticket` require `SHAPON_WALLET_BACKEND=rust-preview`. No running portal configuration has been changed. The Rust private endpoint independently enforces supplier flags, database controls and wallet authorization.
 
 The old confirmation-email Share button is disabled on Rust receipts because its legacy booking lookup has no Rust adapter yet. Cancellation, Direct Issue, post-ticket management and automatic deadline refresh remain outside these controls. Explicit **Refresh Status / Deadline** still performs the separately authorized PNR read; **Check saved ticket status** and **Verify saved ticket result** do not.
 

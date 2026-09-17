@@ -149,6 +149,28 @@ fn reply(row: Booking) -> BookingReply {
 fn date(s: &str) -> Result<NaiveDate, ApiError> {
     NaiveDate::parse_from_str(s, "%Y-%m-%d").map_err(|_| error("INVALID_PASSENGER_DATE"))
 }
+
+async fn enrich_saved_booking(pool: &sqlx::PgPool, row: &mut Booking) -> Result<(), ApiError> {
+    let Some(body) = row
+        .public_response
+        .as_mut()
+        .filter(|v| v["item1"].is_object())
+    else {
+        return Ok(());
+    };
+    let data: Option<(Option<Value>, Value)> = sqlx::query_as(
+        "SELECT r.tier_pricing,r.original->'item1' FROM flight_bookings b JOIN flight_reprices r ON r.id=b.price_id AND r.client_id=b.client_id WHERE b.id=$1",
+    ).bind(row.id).fetch_optional(pool).await?;
+    if let Some((Some(pricing), fare)) = data
+        && let Some(breakdown) = crate::fare_breakdown::build(&pricing, &fare)
+    {
+        body["item1"]["fareBreakdown"] = breakdown.clone();
+        if body["item1"]["flightInfo"].is_object() {
+            body["item1"]["flightInfo"]["fareBreakdown"] = breakdown;
+        }
+    }
+    Ok(())
+}
 fn country(s: &str) -> bool {
     s.len() == 2 && s.bytes().all(|c| c.is_ascii_uppercase())
 }
@@ -402,8 +424,10 @@ pub(crate) async fn book_owned(
         .bind(machine.client_id)
         .execute(&mut *tx)
         .await?;
-    if let Some(previous)=sqlx::query_as::<_,Booking>("SELECT id,public_ref,request_hash,state,public_response,(SELECT (SELECT state FROM flight_ticket_outcomes s WHERE s.id=t.id) FROM flight_ticket_issues t WHERE booking_id=flight_bookings.id) AS ticket_state,(SELECT state FROM flight_cancellations c WHERE c.booking_id=flight_bookings.id) AS cancellation_state FROM flight_bookings WHERE client_id=$1 AND idempotency_key=$2").bind(machine.client_id).bind(key).fetch_optional(&mut *tx).await? {
+    if let Some(mut previous)=sqlx::query_as::<_,Booking>("SELECT id,public_ref,request_hash,state,public_response,(SELECT (SELECT state FROM flight_ticket_outcomes s WHERE s.id=t.id) FROM flight_ticket_issues t WHERE booking_id=flight_bookings.id) AS ticket_state,(SELECT state FROM flight_cancellations c WHERE c.booking_id=flight_bookings.id) AS cancellation_state FROM flight_bookings WHERE client_id=$1 AND idempotency_key=$2").bind(machine.client_id).bind(key).fetch_optional(&mut *tx).await? {
   if previous.request_hash!=hash{return Err(ApiError(StatusCode::CONFLICT,"IDEMPOTENCY_KEY_REUSED"));}
+  tx.rollback().await?;
+  enrich_saved_booking(&state.pool, &mut previous).await?;
   return Ok(reply(previous));
  }
     if let Some((draft, actor, _)) = &creator {
@@ -735,6 +759,12 @@ fn project_booking_response(body: &Value, q: &Quote, id: Uuid) -> Option<Value> 
     // Suppliers may reuse one opaque string in several reference fields. Bind
     // public identities by field, not by source-string equality alone.
     bind_booking_identities(&mut result, q, id);
+    if let Some(breakdown) = q.selling["item1"].get("fareBreakdown") {
+        result["item1"]["fareBreakdown"] = breakdown.clone();
+        if result["item1"]["flightInfo"].is_object() {
+            result["item1"]["flightInfo"]["fareBreakdown"] = breakdown.clone();
+        }
+    }
     Some(result)
 }
 fn bind_booking_identities(v: &mut Value, q: &Quote, id: Uuid) {
@@ -785,7 +815,8 @@ async fn status(
     Path(id): Path<Uuid>,
 ) -> Result<BookingReply, ApiError> {
     machine.require("booking")?;
-    let row=sqlx::query_as::<_,Booking>("SELECT id,public_ref,request_hash,state,public_response,(SELECT (SELECT state FROM flight_ticket_outcomes s WHERE s.id=t.id) FROM flight_ticket_issues t WHERE booking_id=flight_bookings.id) AS ticket_state,(SELECT state FROM flight_cancellations c WHERE c.booking_id=flight_bookings.id) AS cancellation_state FROM flight_bookings WHERE id=$1 AND client_id=$2").bind(id).bind(machine.client_id).fetch_optional(&state.pool).await?.ok_or(ApiError(StatusCode::NOT_FOUND,"NOT_FOUND"))?;
+    let mut row=sqlx::query_as::<_,Booking>("SELECT id,public_ref,request_hash,state,public_response,(SELECT (SELECT state FROM flight_ticket_outcomes s WHERE s.id=t.id) FROM flight_ticket_issues t WHERE booking_id=flight_bookings.id) AS ticket_state,(SELECT state FROM flight_cancellations c WHERE c.booking_id=flight_bookings.id) AS cancellation_state FROM flight_bookings WHERE id=$1 AND client_id=$2").bind(id).bind(machine.client_id).fetch_optional(&state.pool).await?.ok_or(ApiError(StatusCode::NOT_FOUND,"NOT_FOUND"))?;
+    enrich_saved_booking(&state.pool, &mut row).await?;
     Ok(reply(row))
 }
 #[utoipa::path(get,path="/api/bookings/by-reference/{reference}",operation_id="booking_status_by_reference",tag="Flights",security(("machine_token"=[])),params(("reference"=String,Path,description="Platform public booking reference, e.g. STR8FE94RKECOCE")),responses((status=200,body=Object,description="Saved booking response; X-Booking-Reference carries the stable public reference"),(status=202,body=Object,description="Unresolved booking; X-Booking-Reference remains stable"),(status=404,description="Malformed, unknown or foreign reference"),(status=409,description="Reference matches multiple bookings; use booking UUID")))]
@@ -811,9 +842,10 @@ async fn status_by_reference(
             "BOOKING_REFERENCE_AMBIGUOUS",
         ));
     }
-    let row = rows
+    let mut row = rows
         .pop()
         .ok_or(ApiError(StatusCode::NOT_FOUND, "NOT_FOUND"))?;
+    enrich_saved_booking(&state.pool, &mut row).await?;
     Ok(reply(row))
 }
 /// Public supplier-shaped references always identify platform-owned records.

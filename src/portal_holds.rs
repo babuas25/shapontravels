@@ -283,13 +283,32 @@ async fn snapshot(
     owner_id: &str,
     d: Draft,
 ) -> Result<Json<Value>, ApiError> {
-    let (quote,pricing,expires,accepted):(Value,Value,chrono::DateTime<chrono::Utc>,bool)=sqlx::query_as("SELECT selling,tier_pricing,expires_at,accepted_at IS NOT NULL FROM flight_reprices WHERE id=$1 AND client_id=$2")
+    let (mut quote,mut pricing,expires,accepted):(Value,Value,chrono::DateTime<chrono::Utc>,bool)=sqlx::query_as("SELECT selling,tier_pricing,expires_at,accepted_at IS NOT NULL FROM flight_reprices WHERE id=$1 AND client_id=$2")
         .bind(d.price_id.ok_or(ApiError(StatusCode::CONFLICT,"HOLD_PREPARING"))?).bind(d.client_id).fetch_one(&state.pool).await?;
+    crate::fare_breakdown::enrich(&mut pricing, &quote["item1"]);
+    if let Some(breakdown) = pricing.get("fareBreakdown") {
+        quote["item1"]["fareBreakdown"] = breakdown.clone();
+    }
     let booking:Option<BookingSnapshot>=sqlx::query_as("SELECT id,public_ref,state,public_response,jsonb_build_object('createdAt',created_at,'ticketingTimeLimit',ticketing_time_limit,'passengers',request->'passengerInfoes'),original_response,request FROM flight_bookings WHERE client_id=$1 AND idempotency_key=$2")
         .bind(d.client_id).bind(draft_id.to_string()).fetch_optional(&state.pool).await?;
-    let booking = if let Some((id, reference, status, response, mut details, original, request)) =
-        booking
+    let booking = if let Some((
+        id,
+        reference,
+        status,
+        mut response,
+        mut details,
+        original,
+        request,
+    )) = booking
     {
+        if let (Some(body), Some(breakdown)) = (response.as_mut(), pricing.get("fareBreakdown"))
+            && body["item1"].is_object()
+        {
+            body["item1"]["fareBreakdown"] = breakdown.clone();
+            if body["item1"]["flightInfo"].is_object() {
+                body["item1"]["flightInfo"]["fareBreakdown"] = breakdown.clone();
+            }
+        }
         // Only safe outcome flags cross the portal boundary, never raw supplier errors or refs.
         details["supplierReportedFailure"] = json!(
             original
@@ -362,7 +381,16 @@ async fn accept(
     if d.price_id != Some(input.price_id) {
         return Err(missing());
     }
-    if price_context(&state, &d, &machine).await? != input.pricing {
+    let mut current = price_context(&state, &d, &machine).await?;
+    let mut reviewed = input.pricing;
+    // Display-only enrichment is optional for older clients. Every accepted
+    // financial/context field still has to match the immutable snapshot exactly.
+    for pricing in [&mut current, &mut reviewed] {
+        if let Some(object) = pricing.as_object_mut() {
+            object.remove("fareBreakdown");
+        }
+    }
+    if current != reviewed {
         return Err(ApiError(StatusCode::CONFLICT, "PRICE_REVIEW_REQUIRED"));
     }
     crate::reprice::accept(

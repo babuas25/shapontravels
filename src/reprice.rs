@@ -219,6 +219,9 @@ pub(crate) async fn reprice(
     }
     let mut selling = original.clone();
     selling["item1"] = selling_fare;
+    if let Some(breakdown) = tier_pricing.get("fareBreakdown") {
+        selling["item1"]["fareBreakdown"] = breakdown.clone();
+    }
     // A platform markup change can change selling fare even if supplier fare did not change.
     selling["item1"]["isPriceChanged"] = json!(
         fare["isPriceChanged"] == true

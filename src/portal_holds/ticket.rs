@@ -129,8 +129,6 @@ async fn preview(state: &AppState, c: &Context) -> Result<Value, ApiError> {
         .and_then(|v| ticketing::supplier_payload(v, &c.request));
     let reason = if !ticket.is_null() {
         Some("TICKET_OPERATION_EXISTS")
-    } else if !["uat", "test"].contains(&state.environment.as_str()) {
-        Some("PRODUCTION_TICKETING_NOT_AUTHORIZED")
     } else if !c.held || !c.accepted {
         Some("VERIFIED_HELD_BOOKING_REQUIRED")
     } else if cancelled {

@@ -1,4 +1,4 @@
-//! Held-booking ticket issue. Production commercial authorization is not enabled.
+//! Held-booking ticket issue gated by supplier controls, authority and wallet funds.
 use super::*;
 use chrono::{DateTime, Duration, Utc};
 
@@ -258,6 +258,9 @@ pub(super) fn issued_response(
     if let Some(flight) = projected["item1"].get("flightInfo") {
         result["item1"]["flightInfo"] = flight.clone();
     }
+    if let Some(breakdown) = projected["item1"].get("fareBreakdown") {
+        result["item1"]["fareBreakdown"] = breakdown.clone();
+    }
     Some(result)
 }
 
@@ -324,12 +327,6 @@ pub(crate) async fn issue_as(
     }
     if let Some(old) = existing(&state.pool, machine.client_id, &key, id).await? {
         return replay(old, &hash, id);
-    }
-    if !["uat", "test"].contains(&state.environment.as_str()) {
-        return Err(ApiError(
-            StatusCode::FORBIDDEN,
-            "PRODUCTION_TICKETING_NOT_AUTHORIZED",
-        ));
     }
     if booking_state != "held"
         || !q.accepted
@@ -440,7 +437,19 @@ pub(super) async fn load_quote(
     id: Uuid,
     client: Uuid,
 ) -> Result<Quote, ApiError> {
-    let q: Quote = sqlx::query_as("SELECT r.id AS price_id,r.offer_id,o.search_id,o.supplier_id,o.availability_epoch,o.reprice_required,r.original,r.selling,r.reference_map,o.original AS search_original,s.request,true AS valid,(r.accepted_at IS NOT NULL) AS accepted,true AS latest,r.audience,r.agent_id FROM flight_bookings b JOIN flight_reprices r ON r.id=b.price_id JOIN flight_offers o ON o.id=b.offer_id JOIN flight_searches s ON s.id=o.search_id WHERE b.id=$1 AND b.client_id=$2").bind(id).bind(client).fetch_one(pool).await?;
+    let mut q: Quote = sqlx::query_as("SELECT r.id AS price_id,r.offer_id,o.search_id,o.supplier_id,o.availability_epoch,o.reprice_required,r.original,r.selling,r.reference_map,o.original AS search_original,s.request,true AS valid,(r.accepted_at IS NOT NULL) AS accepted,true AS latest,r.audience,r.agent_id FROM flight_bookings b JOIN flight_reprices r ON r.id=b.price_id JOIN flight_offers o ON o.id=b.offer_id JOIN flight_searches s ON s.id=o.search_id WHERE b.id=$1 AND b.client_id=$2").bind(id).bind(client).fetch_one(pool).await?;
+    let pricing: Option<Value> =
+        sqlx::query_scalar("SELECT tier_pricing FROM flight_reprices WHERE id=$1 AND client_id=$2")
+            .bind(q.price_id)
+            .bind(client)
+            .fetch_one(pool)
+            .await?;
+    if let Some(breakdown) = pricing
+        .as_ref()
+        .and_then(|p| crate::fare_breakdown::build(p, &q.original["item1"]))
+    {
+        q.selling["item1"]["fareBreakdown"] = breakdown;
+    }
     Ok(q)
 }
 #[utoipa::path(post,path="/api/bookings/{id}/ticket/verify",operation_id="verify_saved_ticket",tag="Flights",security(("machine_token"=[])),params(("id"=String,Path)),responses((status=200,body=Object,description="Captured successful issue response verified without supplier calls"),(status=202,body=Object),(status=404,description="Unknown or foreign issue"),(status=409,description="Saved evidence insufficient")))]

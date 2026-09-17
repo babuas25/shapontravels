@@ -119,9 +119,9 @@ pub fn snapshot(
         return Err(invalid());
     }
     let payable = &total_gross - &total_commission;
-    Ok(
-        json!({"version":1,"tier":tier,"commissionSharePercent":share,"currency":currency,"gross":decimal(&total_gross),"commission":decimal(&total_commission),"payable":decimal(&payable),"passengers":passengers}),
-    )
+    let mut pricing = json!({"version":1,"tier":tier,"commissionSharePercent":share,"currency":currency,"gross":decimal(&total_gross),"commission":decimal(&total_commission),"payable":decimal(&payable),"passengers":passengers});
+    crate::fare_breakdown::enrich(&mut pricing, original);
+    Ok(pricing)
 }
 
 /// Staff review uses published gross (base + taxes) and supplier net from the
@@ -294,29 +294,29 @@ async fn pricing(
     let query = match kind.as_str() {
         "offer" => {
             machine.require("search:read")?;
-            "SELECT CASE WHEN $3 THEN original ELSE '{}'::jsonb END,tier_pricing FROM flight_offers WHERE id=$1 AND client_id=$2"
+            "SELECT original,tier_pricing FROM flight_offers WHERE id=$1 AND client_id=$2"
         }
         "reprice" => {
             machine.require("search:read")?;
-            "SELECT CASE WHEN $3 THEN COALESCE(original->'item1','{}'::jsonb) ELSE '{}'::jsonb END,tier_pricing FROM flight_reprices WHERE id=$1 AND client_id=$2"
+            "SELECT COALESCE(original->'item1','{}'::jsonb),tier_pricing FROM flight_reprices WHERE id=$1 AND client_id=$2"
         }
         "booking" => {
             machine.require("booking")?;
-            "SELECT CASE WHEN $3 THEN COALESCE(r.original->'item1','{}'::jsonb) ELSE '{}'::jsonb END,r.tier_pricing FROM flight_bookings b JOIN flight_reprices r ON r.id=b.price_id AND r.client_id=b.client_id WHERE b.id=$1 AND b.client_id=$2"
+            "SELECT COALESCE(r.original->'item1','{}'::jsonb),r.tier_pricing FROM flight_bookings b JOIN flight_reprices r ON r.id=b.price_id AND r.client_id=b.client_id WHERE b.id=$1 AND b.client_id=$2"
         }
         _ => return Err(ApiError(StatusCode::NOT_FOUND, "NOT_FOUND")),
     };
     let row: Option<(Value, Option<Value>)> = sqlx::query_as(query)
         .bind(id)
         .bind(machine.client_id)
-        .bind(machine.portal_staff)
         .fetch_optional(&state.pool)
         .await?;
     let (original, value) = row.ok_or(ApiError(StatusCode::NOT_FOUND, "NOT_FOUND"))?;
-    let value = value.ok_or(ApiError(
+    let mut value = value.ok_or(ApiError(
         StatusCode::CONFLICT,
         "PRICING_SNAPSHOT_UNAVAILABLE",
     ))?;
+    crate::fare_breakdown::enrich(&mut value, &original);
     Ok(Json(if machine.portal_staff {
         staff_pricing(&original, value)?
     } else {
@@ -348,11 +348,10 @@ async fn offer_pricing(
         ));
     }
     let rows: Vec<(Uuid, Value, Option<Value>)> = sqlx::query_as(
-        "SELECT id,CASE WHEN $3 THEN original ELSE '{}'::jsonb END,tier_pricing FROM flight_offers WHERE id=ANY($1) AND client_id=$2",
+        "SELECT id,original,tier_pricing FROM flight_offers WHERE id=ANY($1) AND client_id=$2",
     )
     .bind(&input.offer_ids)
     .bind(machine.client_id)
-    .bind(machine.portal_staff)
     .fetch_all(&state.pool)
     .await?;
     if rows.len() != input.offer_ids.len() {
@@ -360,10 +359,11 @@ async fn offer_pricing(
     }
     let mut offers = serde_json::Map::new();
     for (id, original, pricing) in rows {
-        let pricing = pricing.ok_or(ApiError(
+        let mut pricing = pricing.ok_or(ApiError(
             StatusCode::CONFLICT,
             "PRICING_SNAPSHOT_UNAVAILABLE",
         ))?;
+        crate::fare_breakdown::enrich(&mut pricing, &original);
         offers.insert(
             id.to_string(),
             if machine.portal_staff {

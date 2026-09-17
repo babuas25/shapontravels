@@ -1180,10 +1180,36 @@ async fn verify_ticketing(app: &Router, pool: &PgPool, token: &str, admin: &str,
             },
         )])),
     });
+    // Production uses the same explicit supplier controls and wallet checks.
+    // Keep all subsequent success, concurrency and replay assertions in production.
+    let app = &prod;
+    mock.ticket_enabled.store(false, Ordering::SeqCst);
     assert_eq!(
-        issue_call(&prod, token, "issue", input.clone()).await.1["error"],
-        "PRODUCTION_TICKETING_NOT_AUTHORIZED"
+        issue_call(app, token, "issue", input.clone()).await.1["error"],
+        "SUPPLIER_TICKETING_DISABLED"
     );
+    mock.ticket_enabled.store(true, Ordering::SeqCst);
+    for column in ["ticketing_enabled", "servicing_enabled"] {
+        sqlx::query(&format!(
+            "UPDATE supplier_connections SET {column}=false WHERE id=$1"
+        ))
+        .bind(&supplier)
+        .execute(pool)
+        .await
+        .unwrap();
+        assert_eq!(
+            issue_call(app, token, "issue", input.clone()).await.1["error"],
+            "SUPPLIER_TICKETING_DISABLED"
+        );
+        sqlx::query(&format!(
+            "UPDATE supplier_connections SET {column}=true WHERE id=$1"
+        ))
+        .bind(&supplier)
+        .execute(pool)
+        .await
+        .unwrap();
+    }
+    assert_eq!(mock.issue_calls.load(Ordering::SeqCst), 0);
     let price = Uuid::parse_str(request["priceCodeRef"].as_str().unwrap()).unwrap();
     sqlx::query("UPDATE flight_reprices SET original=jsonb_set(original,'{item1,bookable}','false') WHERE id=$1").bind(price).execute(pool).await.unwrap();
     assert_eq!(

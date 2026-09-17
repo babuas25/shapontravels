@@ -6,6 +6,7 @@ pub mod booking;
 pub mod cleanup;
 pub mod config;
 pub mod connections;
+pub mod fare_breakdown;
 pub mod identity;
 pub mod markup;
 pub mod passengers;

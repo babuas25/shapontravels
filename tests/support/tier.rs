@@ -58,7 +58,11 @@ pub async fn verify(app: &Router, admin: &str, token: &str, pool: &PgPool) {
         403
     );
     sqlx::query("UPDATE administrators SET role='super_admin' WHERE id=(SELECT administrator_id FROM bootstrap_state)").execute(pool).await.unwrap();
-    let (booking, snapshot):(Uuid,Value) = sqlx::query_as("SELECT b.id,r.tier_pricing FROM flight_bookings b JOIN flight_reprices r ON r.id=b.price_id WHERE b.client_id=$1 AND r.tier_pricing IS NOT NULL LIMIT 1").bind(client).fetch_one(pool).await.unwrap();
+    let (booking, snapshot, fare):(Uuid,Value,Value) = sqlx::query_as("SELECT b.id,r.tier_pricing,r.original->'item1' FROM flight_bookings b JOIN flight_reprices r ON r.id=b.price_id WHERE b.client_id=$1 AND r.tier_pricing IS NOT NULL LIMIT 1").bind(client).fetch_one(pool).await.unwrap();
+    let mut expected = snapshot.clone();
+    if let Some(breakdown) = shapontravels_api::fare_breakdown::build(&snapshot, &fare) {
+        expected["fareBreakdown"] = breakdown;
+    }
     for (tier, share) in [("enterprise", 100), ("professional", 80), ("basic", 60)] {
         let (status, value) = call(app, "PUT", &path, Some(admin), json!({"tier":tier})).await;
         assert_eq!(status, 200, "{value}");
@@ -84,10 +88,28 @@ pub async fn verify(app: &Router, admin: &str, token: &str, pool: &PgPool) {
         .await;
         assert_eq!(status, 200);
         assert_eq!(
-            saved, snapshot,
+            saved, expected,
             "existing booking must not reprice with new tier"
         );
     }
+    let stored: Value = sqlx::query_scalar("SELECT r.tier_pricing FROM flight_bookings b JOIN flight_reprices r ON r.id=b.price_id WHERE b.id=$1")
+        .bind(booking).fetch_one(pool).await.unwrap();
+    assert_eq!(
+        stored, snapshot,
+        "display enrichment never updates accepted pricing"
+    );
+    let (_, booking_reply) = call(
+        app,
+        "GET",
+        &format!("/api/bookings/{booking}"),
+        Some(token),
+        Value::Null,
+    )
+    .await;
+    assert_eq!(
+        booking_reply["item1"]["fareBreakdown"],
+        expected["fareBreakdown"]
+    );
     let (price,): (Uuid,) = sqlx::query_as("SELECT price_id FROM flight_bookings WHERE id=$1")
         .bind(booking)
         .fetch_one(pool)

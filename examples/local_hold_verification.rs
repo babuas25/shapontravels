@@ -197,7 +197,8 @@ async fn main() {
                 currency: Some("BDT".into()),
             },
         )])),
-        environment: "test".into(),
+        // Exercise production eligibility using only the synthetic Fixture transport.
+        environment: "production".into(),
         db_timeout: Duration::from_secs(5),
     };
     let bind: std::net::SocketAddr = std::env::var("LOCAL_PREBOOKING_BIND")

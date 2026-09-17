@@ -91,11 +91,9 @@ impl SupplierAdapter {
             timeout,
         )?;
         adapter.booking_enabled = config.booking_enabled;
-        // This release permits real ticket issue only on the approved Triplover UAT hosts.
-        adapter.ticketing_enabled = config.ticketing_enabled
-            && config.id == "triplover"
-            && adapter.base.as_str() == "https://userapi-uat.triplover.com/"
-            && adapter.search_base.as_str() == "https://searchapi-uat.triplover.com/";
+        // Account endpoints select UAT/production; capability flags control dispatch.
+        // The issue service also enforces database controls, authority and wallet funds.
+        adapter.ticketing_enabled = config.ticketing_enabled;
         Ok(adapter)
     }
     fn build(
