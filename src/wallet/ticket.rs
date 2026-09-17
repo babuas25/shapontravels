@@ -44,7 +44,9 @@ pub(crate) async fn reserve(
 }
 
 pub(crate) async fn finalize(pool: &PgPool, issue: Uuid) -> Result<()> {
-    let mut tx = pool.begin().await?;
+    // Authority barrier -> ticket -> wallet owner -> account -> operation.
+    // Finalization consumes saved proof; it must not recheck a caller's role.
+    let mut tx = crate::identity::begin_authority_transaction(pool).await?;
     let (required,resolved):(bool,bool)=sqlx::query_as("SELECT wallet_required,(state='issued' OR EXISTS(SELECT 1 FROM flight_ticket_verifications v WHERE v.issue_id=t.id)) FROM flight_ticket_issues t WHERE id=$1 FOR UPDATE")
         .bind(issue).fetch_one(&mut *tx).await?;
     if !required {

@@ -1344,6 +1344,40 @@ async fn verify_ticketing(app: &Router, pool: &PgPool, token: &str, admin: &str,
         "one reserve and one capture across concurrent issue/replay"
     );
     assert_eq!(mock.pnr_calls.load(Ordering::SeqCst), pnr_before);
+    // A saved-ticket finalizer must wait at the authority barrier before
+    // locking its ticket/wallet, so another reservation cannot deadlock it.
+    let mut authority = shapontravels_api::identity::begin_mutation(pool)
+        .await
+        .unwrap();
+    let retry_app = app.clone();
+    let retry_token = token.to_owned();
+    let finalizer = tokio::spawn(async move {
+        super::call(
+            &retry_app,
+            "POST",
+            &format!("/api/bookings/{id}/ticket/verify"),
+            Some(&retry_token),
+            Value::Null,
+        )
+        .await
+    });
+    super::wallet_lock_order::wait_for_authority_waiter(&mut authority).await;
+    sqlx::query("SELECT id FROM flight_ticket_issues WHERE booking_id=$1 FOR UPDATE NOWAIT")
+        .bind(id)
+        .execute(&mut *authority)
+        .await
+        .expect("finalizer locked ticket before authority");
+    sqlx::query("SELECT o.id FROM wallet_owners o JOIN wallet_accounts a ON a.owner_id=o.id WHERE a.id=$1 FOR UPDATE OF o NOWAIT")
+        .bind(account).execute(&mut *authority).await.expect("finalizer locked wallet before authority");
+    authority.commit().await.unwrap();
+    assert_eq!(finalizer.await.unwrap().0, 200);
+    let after: i64 =
+        sqlx::query_scalar("SELECT count(*) FROM wallet_ledger_entries WHERE booking_id=$1")
+            .bind(id)
+            .fetch_one(pool)
+            .await
+            .unwrap();
+    assert_eq!(after, entries, "saved proof replay must not post twice");
     mock.pnr_mode.store(0, Ordering::SeqCst);
     assert_eq!(
         final_reply.1["item1"]["ticketInfoes"][0]["ticketNumbers"][0],

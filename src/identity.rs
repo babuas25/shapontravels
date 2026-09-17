@@ -131,17 +131,24 @@ pub async fn begin_mutation(pool: &PgPool) -> Result<Transaction<'_, Postgres>, 
     rollout::check_transaction(&mut tx).await?;
     Ok(tx)
 }
-pub(super) async fn begin_authority_transaction(
+pub(crate) async fn begin_authority_transaction(
     pool: &PgPool,
 ) -> Result<Transaction<'_, Postgres>, ApiError> {
     let mut tx = pool.begin().await?;
+    lock_authority(&mut tx).await?;
+    Ok(tx)
+}
+
+/// Acquire the business-write barrier before any owner/account/operation locks.
+/// This does not reauthorize a completed supplier operation or check rollout mode.
+pub(crate) async fn lock_authority(tx: &mut Transaction<'_, Postgres>) -> Result<(), ApiError> {
     sqlx::query("SET LOCAL lock_timeout='2s'")
-        .execute(&mut *tx)
+        .execute(&mut **tx)
         .await?;
     let result = sqlx::query(
         "SELECT pg_advisory_xact_lock(hashtextextended('portal_identity_authority',0))",
     )
-    .execute(&mut *tx)
+    .execute(&mut **tx)
     .await;
     if let Err(error) = result {
         if error.as_database_error().and_then(|e| e.code()).as_deref() == Some("55P03") {
@@ -149,7 +156,7 @@ pub(super) async fn begin_authority_transaction(
         }
         return Err(error.into());
     }
-    Ok(tx)
+    Ok(())
 }
 
 /// Call under `begin_mutation` before changing role/status or beginning deletion.

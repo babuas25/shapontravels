@@ -194,6 +194,7 @@ pub async fn reserve(tx: &mut Transaction<'_, Postgres>, r: Reservation<'_>) -> 
 }
 
 pub async fn lock_account(tx: &mut Transaction<'_, Postgres>, account: Uuid) -> Result<()> {
+    crate::identity::lock_authority(tx).await?;
     let found=sqlx::query("SELECT o.id FROM wallet_owners o JOIN wallet_accounts a ON a.owner_id=o.id WHERE a.id=$1 FOR UPDATE OF o")
         .bind(account).fetch_optional(&mut **tx).await?;
     if found.is_none() {

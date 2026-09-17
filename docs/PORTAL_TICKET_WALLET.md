@@ -36,6 +36,14 @@ No timer, generic supplier error, missing deadline, failed PNR read, or operator
 
 ## UI and rollout
 
+Migration 0049 and the matching backend fix serialize wallet writes in one order:
+identity authority barrier, domain rows (booking/ticket/review where needed),
+wallet owner, account, then operation. Saved-ticket finalization and the SQL
+posting function acquire the barrier before any wallet rows. Supplier I/O stays
+outside these transactions; saved-proof recovery does not reauthorize the original
+caller. This prevents concurrent reservation/capture from deadlocking. Apply the
+migration and backend together; amounts, ledger history and replay rules are unchanged.
+
 The existing receipt, print/download, passenger table and Booking Management list project verified ticket results separately from the original held Book state. Passenger ticket numbers are matched by identity; multiple numbers stay associated with that passenger. Saved history also reflects issued/pending ticket operations.
 
 Portal issue controls and `/api/flights/holds/ticket` require `SHAPON_WALLET_BACKEND=rust-preview`. No running portal configuration has been changed. The Rust private endpoint independently enforces supplier flags, database controls and wallet authorization.

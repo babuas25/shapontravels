@@ -109,7 +109,9 @@ pub(crate) async fn begin(pool: &PgPool) -> Result<Transaction<'_, Postgres>, Ap
         }
         Ok(tx)
     } else {
-        Ok(pool.begin().await?)
+        // Legacy/API callers also hit the identity business-write triggers.
+        // Take their barrier before domain rows, just like canonical callers.
+        super::begin_authority_transaction(pool).await
     }
 }
 fn owner(p: &Principal) -> Value {

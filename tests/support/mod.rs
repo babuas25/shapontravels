@@ -11,6 +11,7 @@ mod reprice;
 mod return_markup;
 mod search;
 mod tier;
+pub mod wallet_lock_order;
 use axum::{Router, body::Body, http::Request};
 use http_body_util::BodyExt;
 use serde_json::{Value, json};

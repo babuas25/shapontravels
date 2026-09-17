@@ -419,7 +419,10 @@ pub(crate) async fn issue_as(
         let original=tokio::time::timeout(std::time::Duration::from_secs(timeout as u64),transport.issue_held(&payload)).await.ok().and_then(Result::ok);
         let public=original.as_ref().and_then(|v|issued_response(v,&payload,&saved["passengerInfoes"],&q,id,issue_id));
         let status=if public.is_some(){"issued"}else{"outcome_unknown"};
-        let mut tx=pool.begin().await?;
+        // Dispatch already happened: a barrier timeout is an unknown outcome,
+        // never a fresh pre-dispatch authority refusal.
+        let mut tx=crate::identity::begin_authority_transaction(&pool).await
+            .map_err(|_|ApiError(StatusCode::SERVICE_UNAVAILABLE,"TICKETING_OUTCOME_UNKNOWN"))?;
         sqlx::query("UPDATE flight_ticket_issues SET state=$2,original_response=$3,public_response=$4,updated_at=clock_timestamp() WHERE id=$1 AND state='pending'").bind(issue_id).bind(status).bind(original).bind(public).execute(&mut *tx).await?;
         sqlx::query("INSERT INTO audit_events(actor_kind,action,resource_kind,resource_id,metadata) VALUES('system','ticket.outcome','booking',$1,$2)").bind(id.to_string()).bind(json!({"state":status})).execute(&mut *tx).await?;
         tx.commit().await?;
@@ -429,8 +432,8 @@ pub(crate) async fn issue_as(
             tracing::error!(%issue_id,code=e.1,"ticket wallet finalization requires recovery");
         }
         let row=sqlx::query_as::<_,Issue>("SELECT id,booking_id,request_hash,wallet_required,(SELECT state FROM wallet_operations w WHERE w.subject_kind='ticket_issue' AND w.subject_id=flight_ticket_issues.id) AS payment_state,(SELECT id FROM wallet_operations w WHERE w.subject_kind='ticket_issue' AND w.subject_id=flight_ticket_issues.id) AS wallet_operation_id,(SELECT state FROM flight_ticket_outcomes s WHERE s.id=flight_ticket_issues.id) AS state,COALESCE((SELECT public_response FROM flight_ticket_verifications v WHERE v.issue_id=flight_ticket_issues.id),public_response) AS public_response FROM flight_ticket_issues WHERE id=$1").bind(issue_id).fetch_one(&pool).await?;
-        Ok::<_,sqlx::Error>(row)
-    }).await.map_err(|_|ApiError(StatusCode::SERVICE_UNAVAILABLE,"TICKETING_OUTCOME_UNKNOWN"))?.map(issue_reply).map_err(ApiError::from)
+        Ok::<_,ApiError>(row)
+    }).await.map_err(|_|ApiError(StatusCode::SERVICE_UNAVAILABLE,"TICKETING_OUTCOME_UNKNOWN"))?.map(issue_reply)
 }
 pub(super) async fn load_quote(
     pool: &sqlx::PgPool,
