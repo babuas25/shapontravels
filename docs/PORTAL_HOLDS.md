@@ -40,7 +40,7 @@ The existing receipt route accepts `refresh:true`. It authorizes Super Admin or 
 
 The browser's **Refresh Status / Deadline** button posts `{action:"refresh",draftId}` through the same-origin Next bridge. Fresh Clerk identity supplies the reader. It sends one PNR read and then returns the saved receipt. Automatic Search/RePrice/Book/NewTicket and ordinary receipt loads do not call PNR. Refresh never dispatches Book, Issue or Cancel.
 
-`booking.details.pnrObservation` is the newest verified observation by request timestamp: `status`, `lastTicketTime`, `checkedAt`, and `manualResolutionRequired`. It contains no raw supplier payload. `booking.details.ticketingTimeLimit` uses that observation's valid deadline, even when null; otherwise it uses the saved Book deadline. A verified absent/invalid deadline does not fall back to an older Book value. The documented PNR format is `MM/dd/yyyy HH:mm:ss`; no timezone or countdown is inferred. The check timestamp itself is an explicit UTC instant.
+`booking.details.pnrObservation` is the newest verified observation by request timestamp: `status`, `lastTicketTime`, `lastTicketTimeIso`, `lastTicketTimeZone`, `checkedAt`, and `manualResolutionRequired`. It contains no raw supplier payload. `booking.details.ticketingTimeLimit` uses that observation's valid deadline, even when null; otherwise it uses the saved Book deadline. A verified absent/invalid deadline does not fall back to an older Book value. Explicit RFC3339 offsets are preserved. Confirmed named-month PNR values (for example `19 Sep 2026, 12:44 PM`) normalize to `2026-09-19T12:44:00+06:00` with zone `Asia/Dhaka`. Legacy numeric dates remain raw without an inferred timezone. The check timestamp itself is an explicit UTC instant.
 
 Failed/mismatched reads return an error and preserve the last verified observation and its timestamp. The UI retains prior details and labels the failed refresh. A verified terminal/conflicting status displays manual review rather than promoting the local booking to issued/cancelled or showing it as ready to issue. Migration **0028** is required before serving this build; this addition requires no further migration.
 
@@ -57,3 +57,9 @@ Failed/mismatched reads return an error and preserve the last verified observati
 ## Staged held-ticket issuance — 16 September 2026
 
 The fresh wallet preview now adds a separate native Issue/preview/saved-verification bridge after Book. Book remains unpaid. Existing receipt/list/history surfaces show saved ticket and payment results. See [portal ticket wallet contract](PORTAL_TICKET_WALLET.md) for authorization, gates and recovery limits. Normal Issue adds no PNR call.
+
+## Safe outcome diagnostics — 18 September 2026
+
+Pending/unknown receipts include `booking.details.outcome` with `reason`, `nextAction` (`check_saved_status` or `contact_support`) and `automaticRetryAllowed:false`; resolved booking states return null. Classification is shared with the commercial Book response. Pending under five minutes means check saved status, while stale pending and unknown outcomes require support. Raw supplier messages and machine API status URLs are not included in this portal object.
+
+The frontend retains normalized PNR metadata, gives the latest verified PNR priority (including a missing deadline), and presents the safe outcome guidance without automatically replaying Book. This is an additive response change with no migration.

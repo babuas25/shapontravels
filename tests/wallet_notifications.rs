@@ -123,7 +123,7 @@ async fn notification_claims_retry_and_financial_isolation() {
             .1
             .is_null()
     );
-    let plan = json!({"action":"prepare","id":event,"claim_token":claimed["claim_token"],"templates":{"decision":{"subject":"Synthetic decision","html":"<p>Approved</p>","text":"Approved"}},"recipients":[{"key":"requester","address":"owner@example.invalid","audience":"requester","template":"decision","suppression":null},{"key":"archive","address":"archive@example.invalid","audience":"archive","template":"decision","suppression":null},{"key":"missing","address":null,"audience":"reviewer","template":"decision","suppression":"NO_ADDRESS"}]});
+    let plan = json!({"action":"prepare","id":event,"claim_token":claimed["claim_token"],"templates":{"decision":{"subject":"Synthetic decision","html":"<p>Approved</p>","text":"Approved"}},"recipients":[{"key":"requester","address":"owner@example.invalid","audience":"requester","template":"decision","suppression":null},{"key":"reviewer","address":"reviewer@example.invalid","audience":"reviewer","template":"decision","suppression":null},{"key":"missing","address":null,"audience":"reviewer","template":"decision","suppression":"NO_ADDRESS"}]});
     let (a, b) = tokio::join!(
         worker(&app, &token, plan.clone()),
         worker(&app, &token, plan.clone())
@@ -136,7 +136,7 @@ async fn notification_claims_retry_and_financial_isolation() {
     let ids:Vec<(Uuid,String)>=sqlx::query_as("SELECT id,audience FROM wallet_notification_deliveries WHERE notification_id=$1 AND recipient IS NOT NULL").bind(event).fetch_all(&pool).await.unwrap();
     assert_eq!(ids.len(), 2);
     let primary = ids.iter().find(|r| r.1 == "requester").unwrap().0;
-    let archive = ids.iter().find(|r| r.1 == "archive").unwrap().0;
+    let reviewer = ids.iter().find(|r| r.1 == "reviewer").unwrap().0;
     let c = json!({"action":"claim_delivery","id":primary});
     let (a, b) = tokio::join!(worker(&app, &token, c.clone()), worker(&app, &token, c));
     assert_eq!(a.0, 200);
@@ -215,15 +215,15 @@ async fn notification_claims_retry_and_financial_isolation() {
     let (_, crash) = worker(
         &app,
         &token,
-        json!({"action":"claim_delivery","id":archive}),
+        json!({"action":"claim_delivery","id":reviewer}),
     )
     .await;
-    sqlx::query("UPDATE wallet_notification_deliveries SET claimed_at=now()-interval '11 minutes' WHERE id=$1").bind(archive).execute(&pool).await.unwrap();
+    sqlx::query("UPDATE wallet_notification_deliveries SET claimed_at=now()-interval '11 minutes' WHERE id=$1").bind(reviewer).execute(&pool).await.unwrap();
     assert!(
         worker(
             &app,
             &token,
-            json!({"action":"claim_delivery","id":archive})
+            json!({"action":"claim_delivery","id":reviewer})
         )
         .await
         .1

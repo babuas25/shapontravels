@@ -147,7 +147,7 @@ pub(crate) async fn run_worker(
                     if r.key.is_empty()
                         || r.key.len() > 200
                         || !keys.insert(&r.key)
-                        || !["requester", "reviewer", "partner", "admin", "archive"]
+                        || !["requester", "reviewer", "partner", "admin"]
                             .contains(&r.audience.as_str())
                     {
                         return Err(invalid("INVALID_NOTIFICATION_PLAN"));
@@ -222,7 +222,7 @@ pub(crate) async fn run_worker(
         }
         Command::ClaimDelivery { id } => {
             let token = Uuid::new_v4();
-            let row:Option<Value>=sqlx::query_scalar("UPDATE wallet_notification_deliveries SET state='sending',claim_token=$1,claimed_at=clock_timestamp(),completed_at=NULL,attempts=attempts+1,generation_attempts=generation_attempts+1 WHERE id=(SELECT id FROM wallet_notification_deliveries WHERE (state='pending' OR (state='failed' AND generation_attempts<3)) AND next_attempt_at<=clock_timestamp() AND ($2::uuid IS NULL OR id=$2) ORDER BY created_at,id FOR UPDATE SKIP LOCKED LIMIT 1) RETURNING to_jsonb(wallet_notification_deliveries)").bind(token).bind(id).fetch_optional(&mut *tx).await?;
+            let row:Option<Value>=sqlx::query_scalar("UPDATE wallet_notification_deliveries SET state='sending',claim_token=$1,claimed_at=clock_timestamp(),completed_at=NULL,attempts=attempts+1,generation_attempts=generation_attempts+1 WHERE id=(SELECT id FROM wallet_notification_deliveries WHERE audience<>'archive' AND (state='pending' OR (state='failed' AND generation_attempts<3)) AND next_attempt_at<=clock_timestamp() AND ($2::uuid IS NULL OR id=$2) ORDER BY created_at,id FOR UPDATE SKIP LOCKED LIMIT 1) RETURNING to_jsonb(wallet_notification_deliveries)").bind(token).bind(id).fetch_optional(&mut *tx).await?;
             if let Some(mut delivery) = row {
                 let id = Uuid::parse_str(delivery["id"].as_str().unwrap_or(""))
                     .map_err(|_| missing())?;

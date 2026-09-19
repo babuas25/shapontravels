@@ -1,6 +1,8 @@
 //! Hold booking with durable at-most-one dispatch reservation.
 pub mod cancellation;
+mod deadline;
 mod direct;
+pub(crate) mod outcome;
 pub mod report;
 pub mod ticket_reconciliation;
 pub mod ticketing;
@@ -108,6 +110,10 @@ struct Booking {
     request_hash: Vec<u8>,
     state: String,
     public_response: Option<Value>,
+    supplier_id: String,
+    supplier_result: Option<Value>,
+    error_code: Option<String>,
+    pending_stale: bool,
 }
 type BookingReply = (StatusCode, HeaderMap, Json<Value>);
 fn reply(row: Booking) -> BookingReply {
@@ -140,14 +146,85 @@ fn reply(row: Booking) -> BookingReply {
             ),
         );
     }
-    (
-        StatusCode::ACCEPTED,
-        headers,
-        Json(json!({"bookingId":row.id,"state":row.state,"requiresReconciliation":true})),
-    )
+    let mut body = outcome::booking_diagnostics(
+        &row.state,
+        row.pending_stale,
+        &row.supplier_id,
+        row.supplier_result.as_ref(),
+        row.error_code.as_deref(),
+    );
+    // Preserve the existing unresolved response even for historical states.
+    if body.is_null() {
+        body = outcome::actions("BOOKING_OUTCOME_UNKNOWN", false);
+    }
+    body["bookingId"] = json!(row.id);
+    body["state"] = json!(row.state);
+    body["requiresReconciliation"] = json!(true);
+    body["statusUrl"] = json!(format!("/api/bookings/{}", row.id));
+    (StatusCode::ACCEPTED, headers, Json(body))
 }
 fn date(s: &str) -> Result<NaiveDate, ApiError> {
     NaiveDate::parse_from_str(s, "%Y-%m-%d").map_err(|_| error("INVALID_PASSENGER_DATE"))
+}
+
+#[cfg(test)]
+mod pending_reply_tests {
+    use super::*;
+    #[test]
+    fn pending_and_completed_unknown_results_have_distinct_client_actions() {
+        for (state, stale, result, code, action) in [
+            (
+                "pending",
+                false,
+                None,
+                "BOOKING_IN_PROGRESS",
+                "check_saved_status",
+            ),
+            (
+                "pending",
+                true,
+                None,
+                "BOOKING_STATUS_STALE",
+                "contact_support",
+            ),
+            (
+                "outcome_unknown",
+                false,
+                None,
+                "BOOKING_TIMEOUT",
+                "contact_support",
+            ),
+            (
+                "outcome_unknown",
+                false,
+                Some(
+                    json!({"isSuccess":false,"message":"Duplicate booking for Passenger: private passenger"}),
+                ),
+                "SUPPLIER_DUPLICATE_REPORTED",
+                "contact_support",
+            ),
+        ] {
+            let (status, _, Json(body)) = reply(Booking {
+                id: Uuid::new_v4(),
+                ticket_state: None,
+                cancellation_state: None,
+                public_ref: None,
+                request_hash: vec![],
+                state: state.into(),
+                public_response: None,
+                supplier_id: "triplover".into(),
+                supplier_result: result,
+                error_code: Some("BOOKING_TIMEOUT".into()),
+                pending_stale: stale,
+            });
+            assert_eq!(status, StatusCode::ACCEPTED);
+            assert_eq!(body["reason"], code);
+            assert_eq!(body["nextAction"], action);
+            assert_eq!(body["automaticRetryAllowed"], false);
+            assert_eq!(body["requiresReconciliation"], true);
+            assert!(!body.to_string().contains("private passenger"));
+        }
+    }
 }
 
 async fn enrich_saved_booking(pool: &sqlx::PgPool, row: &mut Booking) -> Result<(), ApiError> {
@@ -419,12 +496,18 @@ pub(crate) async fn book_owned(
     };
     let hash = crate::auth::digest(&canonical.to_string());
     let mut tx = crate::identity::business::begin(&state.pool).await?;
-    // Serialize reservations per client; release locks before sending to supplier.
-    sqlx::query("SELECT id FROM api_clients WHERE id=$1 FOR UPDATE")
+    // Authentication may predate a wait on the authority barrier. Recheck the
+    // current grant under the reservation lock before any new supplier intent.
+    let allowed: bool = sqlx::query_scalar("SELECT active AND CASE WHEN $2 THEN audience='b2b' AND 'search:read'=ANY(permissions) ELSE 'booking'=ANY(permissions) AND (NOT $3 OR 'ticketing'=ANY(permissions)) AND (external_user_id IS NULL OR (api_management_enabled AND tier='enterprise')) END FROM api_clients WHERE id=$1 FOR UPDATE")
         .bind(machine.client_id)
-        .execute(&mut *tx)
+        .bind(creator.is_some())
+        .bind(request.direct_issue_intent)
+        .fetch_one(&mut *tx)
         .await?;
-    if let Some(mut previous)=sqlx::query_as::<_,Booking>("SELECT id,public_ref,request_hash,state,public_response,(SELECT (SELECT state FROM flight_ticket_outcomes s WHERE s.id=t.id) FROM flight_ticket_issues t WHERE booking_id=flight_bookings.id) AS ticket_state,(SELECT state FROM flight_cancellations c WHERE c.booking_id=flight_bookings.id) AS cancellation_state FROM flight_bookings WHERE client_id=$1 AND idempotency_key=$2").bind(machine.client_id).bind(key).fetch_optional(&mut *tx).await? {
+    if !allowed {
+        return Err(ApiError(StatusCode::FORBIDDEN, "CLIENT_BOOKING_DISABLED"));
+    }
+    if let Some(mut previous)=sqlx::query_as::<_,Booking>("SELECT id,public_ref,request_hash,state,public_response,supplier_id,original_response->'item2' AS supplier_result,error_code,(created_at<clock_timestamp()-INTERVAL '5 minutes') AS pending_stale,(SELECT (SELECT state FROM flight_ticket_outcomes s WHERE s.id=t.id) FROM flight_ticket_issues t WHERE booking_id=flight_bookings.id) AS ticket_state,(SELECT state FROM flight_cancellations c WHERE c.booking_id=flight_bookings.id) AS cancellation_state FROM flight_bookings WHERE client_id=$1 AND idempotency_key=$2").bind(machine.client_id).bind(key).fetch_optional(&mut *tx).await? {
   if previous.request_hash!=hash{return Err(ApiError(StatusCode::CONFLICT,"IDEMPOTENCY_KEY_REUSED"));}
   tx.rollback().await?;
   enrich_saved_booking(&state.pool, &mut previous).await?;
@@ -551,26 +634,31 @@ pub(crate) async fn book_owned(
     let pool = state.pool.clone();
     tokio::spawn(async move {
   let result=tokio::time::timeout(std::time::Duration::from_secs(timeout as u64),transport.book(&payload)).await;
-  let original=result.ok().and_then(Result::ok);
+  let (original, failure) = match result {
+   Ok(Ok(body)) => (Some(body), "BOOKING_RESPONSE_UNVERIFIED"),
+   Ok(Err(error)) => (None, outcome::transport_reason(&error)),
+   Err(_) => (None, "BOOKING_TIMEOUT"),
+  };
   let public=original.as_ref().and_then(|body|held_response(body,&q,booking_id));
   let status=if public.is_some(){"held"}else{"outcome_unknown"};
+  let diagnostic = if public.is_some() {None} else {Some(outcome::reason(&q.supplier_id, original.as_ref().map(|v| &v["item2"]), Some(failure)))};
   let pnr=original.as_ref().and_then(|v|v.pointer("/item1/pnr")).and_then(Value::as_str).map(str::to_owned);
   let supplier_ref=original.as_ref().and_then(|v|v.pointer("/item1/bookingCodeRef")).and_then(Value::as_str).map(str::to_owned);
   let deadline=original.as_ref().and_then(|v|v.pointer("/item1/ticketingTimeLimit")).and_then(Value::as_str).map(str::to_owned);
   let mut tx=pool.begin().await?;
   let written=sqlx::query("UPDATE flight_bookings SET state=$2,original_response=$3,public_response=$4,pnr=$5,supplier_booking_ref=$6,ticketing_time_limit=$7,error_code=$8,updated_at=clock_timestamp() WHERE id=$1 AND state='pending'")
-   .bind(booking_id).bind(status).bind(&original).bind(&public).bind(&pnr).bind(&supplier_ref).bind(&deadline).bind(if public.is_some(){None}else{Some("BOOKING_OUTCOME_UNKNOWN")}).execute(&mut *tx).await?.rows_affected();
+   .bind(booking_id).bind(status).bind(&original).bind(&public).bind(&pnr).bind(&supplier_ref).bind(&deadline).bind(diagnostic).execute(&mut *tx).await?.rows_affected();
   if written == 0 {
    // A late worker must preserve new evidence and reopen review, not overwrite a human decision.
    sqlx::query("INSERT INTO booking_late_outcomes(booking_id,response) VALUES($1,$2)").bind(booking_id).bind(&original).execute(&mut *tx).await?;
    sqlx::query("UPDATE flight_bookings SET state='outcome_unknown',public_response=NULL,original_response=COALESCE($2,original_response),pnr=COALESCE($3,pnr),supplier_booking_ref=COALESCE($4,supplier_booking_ref),error_code='LATE_BOOKING_OUTCOME',updated_at=clock_timestamp() WHERE id=$1").bind(booking_id).bind(&original).bind(&pnr).bind(&supplier_ref).execute(&mut *tx).await?;
    sqlx::query("INSERT INTO audit_events(actor_kind,action,resource_kind,resource_id) VALUES('system','booking.late_outcome','booking',$1)").bind(booking_id.to_string()).execute(&mut *tx).await?;
-   let saved=sqlx::query_as::<_,Booking>("SELECT id,public_ref,request_hash,state,public_response,(SELECT (SELECT state FROM flight_ticket_outcomes s WHERE s.id=t.id) FROM flight_ticket_issues t WHERE booking_id=flight_bookings.id) AS ticket_state,(SELECT state FROM flight_cancellations c WHERE c.booking_id=flight_bookings.id) AS cancellation_state FROM flight_bookings WHERE id=$1").bind(booking_id).fetch_one(&mut *tx).await?;
+   let saved=sqlx::query_as::<_,Booking>("SELECT id,public_ref,request_hash,state,public_response,supplier_id,original_response->'item2' AS supplier_result,error_code,(created_at<clock_timestamp()-INTERVAL '5 minutes') AS pending_stale,(SELECT (SELECT state FROM flight_ticket_outcomes s WHERE s.id=t.id) FROM flight_ticket_issues t WHERE booking_id=flight_bookings.id) AS ticket_state,(SELECT state FROM flight_cancellations c WHERE c.booking_id=flight_bookings.id) AS cancellation_state FROM flight_bookings WHERE id=$1").bind(booking_id).fetch_one(&mut *tx).await?;
    tx.commit().await?;
    return Ok::<_,sqlx::Error>(saved);
   }
-  sqlx::query("INSERT INTO audit_events(actor_kind,action,resource_kind,resource_id,metadata) VALUES('system','booking.outcome','booking',$1,$2)").bind(booking_id.to_string()).bind(json!({"state":status})).execute(&mut *tx).await?;
-  let saved = sqlx::query_as::<_,Booking>("SELECT id,public_ref,request_hash,state,public_response,(SELECT (SELECT state FROM flight_ticket_outcomes s WHERE s.id=t.id) FROM flight_ticket_issues t WHERE booking_id=flight_bookings.id) AS ticket_state,(SELECT state FROM flight_cancellations c WHERE c.booking_id=flight_bookings.id) AS cancellation_state FROM flight_bookings WHERE id=$1").bind(booking_id).fetch_one(&mut *tx).await?;
+  sqlx::query("INSERT INTO audit_events(actor_kind,action,resource_kind,resource_id,metadata) VALUES('system','booking.outcome','booking',$1,$2)").bind(booking_id.to_string()).bind(json!({"state":status,"reason":diagnostic})).execute(&mut *tx).await?;
+  let saved = sqlx::query_as::<_,Booking>("SELECT id,public_ref,request_hash,state,public_response,supplier_id,original_response->'item2' AS supplier_result,error_code,(created_at<clock_timestamp()-INTERVAL '5 minutes') AS pending_stale,(SELECT (SELECT state FROM flight_ticket_outcomes s WHERE s.id=t.id) FROM flight_ticket_issues t WHERE booking_id=flight_bookings.id) AS ticket_state,(SELECT state FROM flight_cancellations c WHERE c.booking_id=flight_bookings.id) AS cancellation_state FROM flight_bookings WHERE id=$1").bind(booking_id).fetch_one(&mut *tx).await?;
   tx.commit().await?;
   Ok::<_,sqlx::Error>(saved)
  }).await.map_err(|_|ApiError(StatusCode::SERVICE_UNAVAILABLE,"BOOKING_OUTCOME_UNKNOWN"))?.map(reply).map_err(ApiError::from)
@@ -815,7 +903,17 @@ async fn status(
     Path(id): Path<Uuid>,
 ) -> Result<BookingReply, ApiError> {
     machine.require("booking")?;
-    let mut row=sqlx::query_as::<_,Booking>("SELECT id,public_ref,request_hash,state,public_response,(SELECT (SELECT state FROM flight_ticket_outcomes s WHERE s.id=t.id) FROM flight_ticket_issues t WHERE booking_id=flight_bookings.id) AS ticket_state,(SELECT state FROM flight_cancellations c WHERE c.booking_id=flight_bookings.id) AS cancellation_state FROM flight_bookings WHERE id=$1 AND client_id=$2").bind(id).bind(machine.client_id).fetch_optional(&state.pool).await?.ok_or(ApiError(StatusCode::NOT_FOUND,"NOT_FOUND"))?;
+    let row=sqlx::query_as::<_,Booking>("SELECT id,public_ref,request_hash,state,public_response,supplier_id,original_response->'item2' AS supplier_result,error_code,(created_at<clock_timestamp()-INTERVAL '5 minutes') AS pending_stale,(SELECT (SELECT state FROM flight_ticket_outcomes s WHERE s.id=t.id) FROM flight_ticket_issues t WHERE booking_id=flight_bookings.id) AS ticket_state,(SELECT state FROM flight_cancellations c WHERE c.booking_id=flight_bookings.id) AS cancellation_state FROM flight_bookings WHERE id=$1 AND client_id=$2").bind(id).bind(machine.client_id).fetch_optional(&state.pool).await?;
+    let mut row = match row {
+        Some(row) => row,
+        None => {
+            let imported =
+                crate::portal_imports::api::load(&state.pool, machine.client_id, Some(id), None)
+                    .await?
+                    .ok_or(ApiError(StatusCode::NOT_FOUND, "NOT_FOUND"))?;
+            return Ok((StatusCode::OK, imported.headers(), Json(imported.booking())));
+        }
+    };
     enrich_saved_booking(&state.pool, &mut row).await?;
     Ok(reply(row))
 }
@@ -834,13 +932,19 @@ async fn status_by_reference(
     {
         return Err(ApiError(StatusCode::NOT_FOUND, "NOT_FOUND"));
     }
-    let mut rows = sqlx::query_as::<_, Booking>("SELECT id,public_ref,request_hash,state,public_response,(SELECT (SELECT state FROM flight_ticket_outcomes s WHERE s.id=t.id) FROM flight_ticket_issues t WHERE booking_id=flight_bookings.id) AS ticket_state,(SELECT state FROM flight_cancellations c WHERE c.booking_id=flight_bookings.id) AS cancellation_state FROM flight_bookings WHERE public_ref=$1 AND client_id=$2 LIMIT 2")
-        .bind(reference).bind(machine.client_id).fetch_all(&state.pool).await?;
-    if rows.len() > 1 {
+    let mut rows = sqlx::query_as::<_, Booking>("SELECT id,public_ref,request_hash,state,public_response,supplier_id,original_response->'item2' AS supplier_result,error_code,(created_at<clock_timestamp()-INTERVAL '5 minutes') AS pending_stale,(SELECT (SELECT state FROM flight_ticket_outcomes s WHERE s.id=t.id) FROM flight_ticket_issues t WHERE booking_id=flight_bookings.id) AS ticket_state,(SELECT state FROM flight_cancellations c WHERE c.booking_id=flight_bookings.id) AS cancellation_state FROM flight_bookings WHERE public_ref=$1 AND client_id=$2 LIMIT 2")
+        .bind(&reference).bind(machine.client_id).fetch_all(&state.pool).await?;
+    let imported =
+        crate::portal_imports::api::load(&state.pool, machine.client_id, None, Some(&reference))
+            .await?;
+    if rows.len() + usize::from(imported.is_some()) > 1 {
         return Err(ApiError(
             StatusCode::CONFLICT,
             "BOOKING_REFERENCE_AMBIGUOUS",
         ));
+    }
+    if let Some(imported) = imported {
+        return Ok((StatusCode::OK, imported.headers(), Json(imported.booking())));
     }
     let mut row = rows
         .pop()
@@ -869,7 +973,7 @@ pub struct PnrRequest {
     #[schema(value_type = String)]
     booking_id: Uuid,
 }
-#[utoipa::path(post,path="/api/pnr",operation_id="pnr",tag="Flights",security(("machine_token"=[])),request_body=PnrRequest,responses((status=200,body=Object,description="Live supplier PNR status and latest raw lastTicketTime; timezone is unverified. X-Booking-State and X-Manual-Resolution-Required describe local outcome. Does not Book, Cancel or Issue."),(status=403,description="Booking permission or supplier servicing disabled"),(status=404,description="Unknown or foreign booking"),(status=409,description="Missing stored supplier references; manual reconciliation required"),(status=422,description="Platform reference mismatch"),(status=502,description="Supplier lookup failed or mismatched response"),(status=504,description="Supplier deadline exceeded")))]
+#[utoipa::path(post,path="/api/pnr",operation_id="pnr",tag="Flights",security(("machine_token"=[])),request_body=PnrRequest,responses((status=200,body=Object,description="Native bookings: live supplier PNR status and latest lastTicketTime, prioritized over Book's deadline. Named-month local times use Asia/Dhaka; lastTicketTimeIso provides the resolved offset. X-Booking-State and X-Manual-Resolution-Required describe local outcome. Imported bookings: saved import evidence with X-Evidence-Source: saved-import; no live supplier lookup. Does not Book, Cancel or Issue."),(status=403,description="Booking permission or supplier servicing disabled"),(status=404,description="Unknown or foreign booking"),(status=409,description="Missing stored supplier references; manual reconciliation required"),(status=422,description="Platform reference mismatch"),(status=502,description="Supplier lookup failed or mismatched response"),(status=504,description="Supplier deadline exceeded")))]
 async fn pnr(
     machine: Machine,
     State(state): State<AppState>,
@@ -879,6 +983,25 @@ async fn pnr(
     let row: Option<(Uuid, Uuid, Uuid, Option<String>)> = sqlx::query_as(
         "SELECT o.search_id,b.offer_id,b.price_id,b.pnr FROM flight_bookings b JOIN flight_offers o ON o.id=b.offer_id WHERE b.id=$1 AND b.client_id=$2",
     ).bind(request.booking_id).bind(machine.client_id).fetch_optional(&state.pool).await?;
+    if row.is_none() {
+        let imported = crate::portal_imports::api::load(
+            &state.pool,
+            machine.client_id,
+            Some(request.booking_id),
+            None,
+        )
+        .await?
+        .ok_or(ApiError(StatusCode::NOT_FOUND, "NOT_FOUND"))?;
+        if imported.row["transaction_id"] != json!(request.search_id)
+            || imported.row["item_id"] != json!(request.offer_id)
+            || imported.row["price_id"] != json!(request.price_id)
+            || imported.document["booking"]["pnr"] != request.pnr
+            || request.booking_ref_number != request.pnr
+        {
+            return Err(error("BOOKING_REFERENCE_MISMATCH"));
+        }
+        return Ok((imported.headers(), Json(imported.pnr())));
+    }
     let (search, offer, price, saved_pnr) =
         row.ok_or(ApiError(StatusCode::NOT_FOUND, "NOT_FOUND"))?;
     if request.search_id != search
@@ -893,13 +1016,18 @@ async fn pnr(
     reconcile(machine, State(state), Path(request.booking_id)).await
 }
 /// Reconciliation is read-only. Never release a reservation or resend Book.
-#[utoipa::path(post,path="/api/bookings/{id}/reconcile",operation_id="booking_reconcile",tag="Flights",security(("machine_token"=[])),params(("id"=String,Path)),responses((status=200,body=Object,description="Live PNR evidence; unresolved booking remains blocked"),(status=409,description="Missing supplier references; manual reconciliation required"),(status=502,description="Supplier read failed")))]
+#[utoipa::path(post,path="/api/bookings/{id}/reconcile",operation_id="booking_reconcile",tag="Flights",security(("machine_token"=[])),params(("id"=String,Path)),responses((status=200,body=Object,description="Native bookings: live PNR evidence; unresolved booking remains blocked. Imports: saved evidence with X-Evidence-Source: saved-import"),(status=409,description="Missing supplier references; manual reconciliation required"),(status=502,description="Supplier read failed")))]
 async fn reconcile(
     machine: Machine,
     State(state): State<AppState>,
     Path(id): Path<Uuid>,
 ) -> Result<(HeaderMap, Json<Value>), ApiError> {
     machine.require("booking")?;
+    if let Some(imported) =
+        crate::portal_imports::api::load(&state.pool, machine.client_id, Some(id), None).await?
+    {
+        return Ok((imported.headers(), Json(imported.pnr())));
+    }
     reconcile_owned(&state, machine.client_id, id, "client", machine.client_id).await
 }
 fn held_pnr_status(info: &Value) -> bool {
@@ -908,7 +1036,7 @@ fn held_pnr_status(info: &Value) -> bool {
 fn pnr_deadline(body: &Value) -> Option<&str> {
     body["item1"]["lastTicketTime"]
         .as_str()
-        .filter(|s| chrono::NaiveDateTime::parse_from_str(s, "%m/%d/%Y %H:%M:%S").is_ok())
+        .filter(|s| deadline::valid_raw(s))
 }
 pub(crate) fn pnr_summary(
     booking_state: &str,
@@ -918,6 +1046,8 @@ pub(crate) fn pnr_summary(
     json!({
         "status": body["item1"]["status"],
         "lastTicketTime": pnr_deadline(body),
+        "lastTicketTimeIso": pnr_deadline(body).and_then(deadline::instant).map(|d| d.to_rfc3339()),
+        "lastTicketTimeZone": pnr_deadline(body).and_then(deadline::timezone),
         "checkedAt": checked_at,
         "manualResolutionRequired": booking_state != "held" || !held_pnr_status(&body["item1"]) || contains_ticket(body),
     })
@@ -1012,7 +1142,7 @@ pub(crate) async fn reconcile_owned(
             let value = &body["item1"][key];
             value.is_null() || value == &json!("") || value == &payload[source]
         });
-    // Missing/invalid latest deadlines clear old authority; never invent a timezone.
+    // Verified PNR supersedes Book. Missing/invalid latest deadlines clear old authority.
     let deadline = pnr_deadline(&body);
     let mut tx = state.pool.begin().await?;
     // Serialize observation persistence with Issue/Cancel reservation, including
@@ -1054,6 +1184,9 @@ pub(crate) async fn reconcile_owned(
     if let Some(value) = booking_ref {
         public["item1"]["bookingRef"] = value;
     }
+    let summary = pnr_summary(&booking_state, &public, started);
+    public["item1"]["lastTicketTimeIso"] = summary["lastTicketTimeIso"].clone();
+    public["item1"]["lastTicketTimeZone"] = summary["lastTicketTimeZone"].clone();
     let mut headers = HeaderMap::new();
     headers.insert(
         "x-booking-state",

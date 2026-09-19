@@ -19,7 +19,18 @@ use uuid::Uuid;
 pub struct ApiError(pub StatusCode, pub &'static str);
 impl IntoResponse for ApiError {
     fn into_response(self) -> Response {
-        (self.0, Json(serde_json::json!({"error":self.1}))).into_response()
+        let mut response = (self.0, Json(serde_json::json!({"error":self.1}))).into_response();
+        if ["REPRICE_BUSY", "AUTHENTICATION_BUSY"].contains(&self.1) {
+            response
+                .headers_mut()
+                .insert("retry-after", axum::http::HeaderValue::from_static("1"));
+        }
+        if self.0 == StatusCode::TOO_MANY_REQUESTS {
+            response
+                .headers_mut()
+                .insert("retry-after", axum::http::HeaderValue::from_static("60"));
+        }
+        response
     }
 }
 impl From<sqlx::Error> for ApiError {
@@ -66,12 +77,21 @@ pub async fn hash_secret(secret: String) -> Result<String, ApiError> {
     .map_err(|_| invalid())?
     .map_err(|_| invalid())
 }
-async fn verify(secret: String, hash: Option<String>) -> Result<bool, ApiError> {
-    let permit = HASH_SLOTS
+static MACHINE_VERIFY: std::sync::LazyLock<std::sync::Arc<tokio::sync::Semaphore>> =
+    std::sync::LazyLock::new(|| std::sync::Arc::new(tokio::sync::Semaphore::new(2)));
+static ADMIN_VERIFY: std::sync::LazyLock<std::sync::Arc<tokio::sync::Semaphore>> =
+    std::sync::LazyLock::new(|| std::sync::Arc::new(tokio::sync::Semaphore::new(2)));
+async fn verify(secret: String, hash: Option<String>, admin: bool) -> Result<bool, ApiError> {
+    // Separate human/machine CPU capacity, with no unbounded hashing wait queue.
+    let slots = if admin {
+        &*ADMIN_VERIFY
+    } else {
+        &*MACHINE_VERIFY
+    };
+    let permit = slots
         .clone()
-        .acquire_owned()
-        .await
-        .map_err(|_| invalid())?;
+        .try_acquire_owned()
+        .map_err(|_| ApiError(StatusCode::SERVICE_UNAVAILABLE, "AUTHENTICATION_BUSY"))?;
     let result = tokio::task::spawn_blocking(move || {
         let _permit = permit;
         if let Some(hash) = hash {
@@ -102,6 +122,27 @@ fn bearer(parts: &Parts, prefix: &str) -> Result<String, ApiError> {
     Ok(value.into())
 }
 
+#[cfg(test)]
+mod admission_tests {
+    use super::*;
+    #[tokio::test]
+    async fn exhausted_machine_verification_keeps_admin_capacity_available() {
+        let one = MACHINE_VERIFY.clone().try_acquire_owned().unwrap();
+        let two = MACHINE_VERIFY.clone().try_acquire_owned().unwrap();
+        let error = verify("test".into(), None, false).await.unwrap_err();
+        assert_eq!(error.0, StatusCode::SERVICE_UNAVAILABLE);
+        assert_eq!(error.1, "AUTHENTICATION_BUSY");
+        let hash = hash_secret("admin-test-password".into()).await.unwrap();
+        assert!(
+            verify("admin-test-password".into(), Some(hash), true)
+                .await
+                .unwrap()
+        );
+        drop((one, two));
+        assert!(!verify("test".into(), None, false).await.unwrap());
+    }
+}
+
 pub(crate) async fn rate_limit(pool: &PgPool, key: &str, limit: i32) -> Result<(), ApiError> {
     let (count,): (i32,) = sqlx::query_as("INSERT INTO rate_buckets(bucket_key) VALUES($1) ON CONFLICT(bucket_key) DO UPDATE SET requests = CASE WHEN rate_buckets.window_start <= now() - INTERVAL '60 seconds' THEN 1 ELSE rate_buckets.requests + 1 END, window_start = CASE WHEN rate_buckets.window_start <= now() - INTERVAL '60 seconds' THEN now() ELSE rate_buckets.window_start END RETURNING requests")
         .bind(digest(key)).fetch_one(pool).await?;
@@ -110,9 +151,14 @@ pub(crate) async fn rate_limit(pool: &PgPool, key: &str, limit: i32) -> Result<(
     }
     Ok(())
 }
-async fn login_limit(pool: &PgPool, subject: &str) -> Result<(), ApiError> {
-    rate_limit(pool, "auth:global", 120).await?;
-    rate_limit(pool, &format!("auth:{subject}"), 10).await
+async fn login_limit(
+    pool: &PgPool,
+    kind: &str,
+    source: &str,
+    subject: &str,
+) -> Result<(), ApiError> {
+    rate_limit(pool, &format!("auth:{kind}:source:{source}"), 120).await?;
+    rate_limit(pool, &format!("auth:{kind}:identity:{subject}"), 10).await
 }
 pub async fn audit(
     tx: &mut Transaction<'_, Postgres>,
@@ -266,15 +312,28 @@ pub struct TokenResponse {
 }
 #[utoipa::path(post, path="/auth/token", request_body=TokenRequest, responses((status=200,body=TokenResponse),(status=401,description="Invalid, revoked or disabled credentials"),(status=429,description="Authentication rate limit exceeded")))]
 async fn token(
+    source: crate::auth_admission::Source,
     State(state): State<AppState>,
     Json(request): Json<TokenRequest>,
 ) -> Result<Json<TokenResponse>, ApiError> {
-    login_limit(&state.pool, &request.client_id.to_string()).await?;
-    if request.client_secret.len() > 256 {
+    if request.client_secret.is_empty() || request.client_secret.len() > 256 {
         return Err(unauthorized());
     }
+    login_limit(
+        &state.pool,
+        "machine",
+        &source.0,
+        &request.client_id.to_string(),
+    )
+    .await?;
     let row: Option<(Uuid,String)> = sqlx::query_as("SELECT k.id,k.secret_hash FROM client_credentials k JOIN api_clients c ON c.id=k.client_id WHERE c.id=$1 AND c.active AND k.active AND c.id NOT IN (SELECT client_id FROM portal_staff_clients) AND (c.external_user_id IS NULL OR (c.api_management_enabled AND c.tier='enterprise'))").bind(request.client_id).fetch_optional(&state.pool).await?;
-    if !verify(request.client_secret, row.as_ref().map(|r| r.1.clone())).await? {
+    if !verify(
+        request.client_secret,
+        row.as_ref().map(|r| r.1.clone()),
+        false,
+    )
+    .await?
+    {
         return Err(unauthorized());
     }
     let credential = row.ok_or_else(unauthorized)?.0;
@@ -306,19 +365,24 @@ pub struct LoginRequest {
 }
 #[utoipa::path(post,path="/admin/login",request_body=LoginRequest,responses((status=200,body=TokenResponse),(status=401,description="Invalid credentials"),(status=429,description="Authentication rate limit exceeded")))]
 async fn login(
+    source: crate::auth_admission::Source,
     State(state): State<AppState>,
     Json(request): Json<LoginRequest>,
 ) -> Result<Json<TokenResponse>, ApiError> {
-    login_limit(&state.pool, &format!("admin:{}", request.username)).await?;
-    if request.username.len() > 100 || request.password.len() > 256 {
+    if request.username.is_empty()
+        || request.password.is_empty()
+        || request.username.len() > 100
+        || request.password.len() > 256
+    {
         return Err(unauthorized());
     }
+    login_limit(&state.pool, "admin", &source.0, &request.username).await?;
     let row: Option<(Uuid, String)> =
         sqlx::query_as("SELECT id,password_hash FROM administrators WHERE username=$1 AND active")
             .bind(request.username)
             .fetch_optional(&state.pool)
             .await?;
-    if !verify(request.password, row.as_ref().map(|r| r.1.clone())).await? {
+    if !verify(request.password, row.as_ref().map(|r| r.1.clone()), true).await? {
         return Err(unauthorized());
     }
     let id = row.ok_or_else(unauthorized)?.0;
@@ -383,6 +447,8 @@ impl ClientInput {
                     "cancellation",
                     "ticketing",
                     "wallet:read",
+                    "ticket-management:read",
+                    "ticket-management:write",
                 ]
                 .contains(&p.as_str())
             })

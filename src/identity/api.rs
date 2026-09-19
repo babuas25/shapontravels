@@ -223,6 +223,13 @@ impl Runtime {
                 if let Ok(token) = std::env::var("PORTAL_IDENTITY_MAIL_TOKEN")
                     && !token.is_empty()
                 {
+                    // Notification workers can authenticate while automatic identity
+                    // delivery remains disabled for a controlled local rollout.
+                    runtime = runtime.with_mail_token(&token)?;
+                    if std::env::var("PORTAL_IDENTITY_MAIL_AUTODISPATCH").as_deref() == Ok("false")
+                    {
+                        return Ok(Some(runtime));
+                    }
                     if runtime.creator.is_none() {
                         return Err(
                             "identity mail requires an explicit provider writer mode".into()
@@ -235,7 +242,6 @@ impl Runtime {
                     } else {
                         super::mail::HttpMail::new(&origin, token.clone())?
                     }));
-                    runtime = runtime.with_mail_token(&token)?;
                 }
                 Ok(Some(runtime))
             }
@@ -273,7 +279,9 @@ async fn boundary(State(state): State<AppState>, mut request: Request, next: Nex
     let read_only = preflight || request.uri().path() == "/admin/portal-identity/readiness";
     let mail = matches!(
         request.uri().path(),
-        "/admin/portal-identity/mail/start" | "/admin/portal-identity/wallet/notifications"
+        "/admin/portal-identity/mail/start"
+            | "/admin/portal-identity/wallet/notifications"
+            | "/admin/portal-identity/notifications"
     );
     let event = request.uri().path() == "/admin/portal-identity/events";
     let expected = if mail {
@@ -1287,6 +1295,10 @@ async fn document_uploads(
 }
 pub fn routes(state: AppState) -> Router<AppState> {
     Router::new()
+        .route(
+            "/admin/portal-identity/notifications",
+            post(super::notifications::worker),
+        )
         .route(
             "/admin/portal-identity/rollout",
             post(super::rollout::command),

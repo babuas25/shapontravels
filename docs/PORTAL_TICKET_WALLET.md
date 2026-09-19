@@ -55,3 +55,7 @@ Use the updated hold verifier in the frontend with a new `api_hold_verification_
 ## Completed-unknown ticket hold release
 
 [Non-issuance review](TICKET_NONISSUANCE_REVIEW.md) adds the private `/admin/portal-wallet/nonissuance` bridge and staged finance UI. Explicit supplier confirmation, immutable evidence and a different finance reviewer are required. Pending workers, deadlines and PNR status alone cannot authorize release. Receipt/API outcomes distinguish `not_issued` + `released` from unresolved and issued payment conflicts; NewTicket remains blocked after resolution. Refunds and pending-worker recovery remain separate work.
+
+## Safe outcome diagnostics — 18 September 2026
+
+The nullable ticket snapshot now includes nullable `outcome` (`reason`, `nextAction`, `automaticRetryAllowed:false`). It uses the same safe classification as commercial Issue: fresh pending requests a saved-status check; stale pending, unknown supplier outcomes and outstanding settlement require support. Confirmed/settled and reviewed non-issued results have no unresolved diagnostic. Supplier response text is not exposed. This changes receipt guidance only; wallet state, issue admission, evidence verification and duplicate-mutation guards remain authoritative.

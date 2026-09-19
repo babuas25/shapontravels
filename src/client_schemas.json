@@ -1,0 +1,2085 @@
+{
+  "ErrorResponse": {
+    "type": "object",
+    "properties": {
+      "error": {
+        "type": "string",
+        "pattern": "^[A-Z][A-Z0-9_]*$",
+        "description": "Stable machine-readable code. Correlate using the x-request-id response header."
+      }
+    },
+    "required": [
+      "error"
+    ],
+    "additionalProperties": true
+  },
+  "FareBreakdownPassenger": {
+    "type": "object",
+    "properties": {
+      "baseFare": {
+        "type": "string",
+        "pattern": "^-?[0-9]+\\.[0-9]{2}$",
+        "description": "Exact decimal major units. Parse as decimal, not binary float."
+      },
+      "taxes": {
+        "type": "string",
+        "pattern": "^-?[0-9]+\\.[0-9]{2}$",
+        "description": "Exact decimal major units. Parse as decimal, not binary float."
+      },
+      "ait": {
+        "type": "string",
+        "pattern": "^-?[0-9]+\\.[0-9]{2}$",
+        "description": "Exact decimal major units. Parse as decimal, not binary float."
+      },
+      "serviceCharge": {
+        "type": "string",
+        "pattern": "^-?[0-9]+\\.[0-9]{2}$",
+        "description": "Exact decimal major units. Parse as decimal, not binary float."
+      },
+      "discount": {
+        "type": "string",
+        "pattern": "^-?[0-9]+\\.[0-9]{2}$",
+        "description": "Exact decimal major units. Parse as decimal, not binary float."
+      },
+      "tierAdjustment": {
+        "type": "string",
+        "pattern": "^-?[0-9]+\\.[0-9]{2}$",
+        "description": "Exact decimal major units. Parse as decimal, not binary float."
+      },
+      "gross": {
+        "type": "string",
+        "pattern": "^-?[0-9]+\\.[0-9]{2}$",
+        "description": "Exact decimal major units. Parse as decimal, not binary float."
+      },
+      "payable": {
+        "type": "string",
+        "pattern": "^-?[0-9]+\\.[0-9]{2}$",
+        "description": "Exact decimal major units. Parse as decimal, not binary float."
+      },
+      "count": {
+        "type": "integer",
+        "minimum": 0
+      }
+    },
+    "required": [
+      "baseFare",
+      "taxes",
+      "ait",
+      "serviceCharge",
+      "discount",
+      "tierAdjustment",
+      "gross",
+      "payable",
+      "count"
+    ],
+    "additionalProperties": true
+  },
+  "FareBreakdown": {
+    "type": "object",
+    "properties": {
+      "baseFare": {
+        "type": "string",
+        "pattern": "^-?[0-9]+\\.[0-9]{2}$",
+        "description": "Exact decimal major units. Parse as decimal, not binary float."
+      },
+      "taxes": {
+        "type": "string",
+        "pattern": "^-?[0-9]+\\.[0-9]{2}$",
+        "description": "Exact decimal major units. Parse as decimal, not binary float."
+      },
+      "ait": {
+        "type": "string",
+        "pattern": "^-?[0-9]+\\.[0-9]{2}$",
+        "description": "Exact decimal major units. Parse as decimal, not binary float."
+      },
+      "serviceCharge": {
+        "type": "string",
+        "pattern": "^-?[0-9]+\\.[0-9]{2}$",
+        "description": "Exact decimal major units. Parse as decimal, not binary float."
+      },
+      "discount": {
+        "type": "string",
+        "pattern": "^-?[0-9]+\\.[0-9]{2}$",
+        "description": "Exact decimal major units. Parse as decimal, not binary float."
+      },
+      "tierAdjustment": {
+        "type": "string",
+        "pattern": "^-?[0-9]+\\.[0-9]{2}$",
+        "description": "Exact decimal major units. Parse as decimal, not binary float."
+      },
+      "gross": {
+        "type": "string",
+        "pattern": "^-?[0-9]+\\.[0-9]{2}$",
+        "description": "Exact decimal major units. Parse as decimal, not binary float."
+      },
+      "payable": {
+        "type": "string",
+        "pattern": "^-?[0-9]+\\.[0-9]{2}$",
+        "description": "Exact decimal major units. Parse as decimal, not binary float."
+      },
+      "version": {
+        "type": "integer",
+        "enum": [
+          1
+        ]
+      },
+      "currency": {
+        "type": "string",
+        "pattern": "^[A-Z]{3}$"
+      },
+      "passengers": {
+        "type": "object",
+        "additionalProperties": {
+          "$ref": "#/components/schemas/FareBreakdownPassenger"
+        }
+      }
+    },
+    "required": [
+      "baseFare",
+      "taxes",
+      "ait",
+      "serviceCharge",
+      "discount",
+      "tierAdjustment",
+      "gross",
+      "payable",
+      "version",
+      "currency",
+      "passengers"
+    ],
+    "additionalProperties": true,
+    "description": "Reconciled final payable. Per-passenger amounts are multiplied by count; do not add legacy AIT or commission again."
+  },
+  "PassengerFare": {
+    "type": "object",
+    "properties": {
+      "basePrice": {
+        "type": "number"
+      },
+      "taxes": {
+        "type": "number"
+      },
+      "ait": {
+        "type": "number"
+      },
+      "totalPrice": {
+        "type": "number"
+      },
+      "discountPrice": {
+        "anyOf": [
+          {
+            "type": "number"
+          },
+          {
+            "type": "null"
+          }
+        ]
+      },
+      "serviceCharge": {
+        "anyOf": [
+          {
+            "type": "number"
+          },
+          {
+            "type": "null"
+          }
+        ]
+      }
+    },
+    "required": [
+      "basePrice",
+      "taxes",
+      "ait",
+      "totalPrice"
+    ],
+    "additionalProperties": true
+  },
+  "Segment": {
+    "type": "object",
+    "properties": {
+      "segmentCodeRef": {
+        "type": "string",
+        "format": "uuid"
+      },
+      "from": {
+        "type": "string"
+      },
+      "to": {
+        "type": "string"
+      },
+      "departure": {
+        "type": "string"
+      },
+      "arrival": {
+        "type": "string"
+      },
+      "airlineCode": {
+        "type": "string"
+      },
+      "flightNumber": {
+        "type": "string"
+      },
+      "bookingClass": {
+        "type": [
+          "string",
+          "null"
+        ]
+      },
+      "cabinClass": {
+        "type": [
+          "string",
+          "null"
+        ]
+      }
+    },
+    "required": [
+      "segmentCodeRef",
+      "from",
+      "to",
+      "departure",
+      "arrival",
+      "airlineCode",
+      "flightNumber"
+    ],
+    "additionalProperties": true
+  },
+  "Direction": {
+    "type": "object",
+    "properties": {
+      "segments": {
+        "type": "array",
+        "items": {
+          "$ref": "#/components/schemas/Segment"
+        }
+      },
+      "from": {
+        "type": "string"
+      },
+      "to": {
+        "type": "string"
+      },
+      "stops": {
+        "type": "integer"
+      }
+    },
+    "required": [
+      "segments"
+    ],
+    "additionalProperties": true
+  },
+  "FlightFare": {
+    "type": "object",
+    "properties": {
+      "totalPrice": {
+        "type": "number"
+      },
+      "passengerCounts": {
+        "type": "object",
+        "additionalProperties": {
+          "type": "integer",
+          "minimum": 0
+        }
+      },
+      "passengerFares": {
+        "type": "object",
+        "additionalProperties": {
+          "anyOf": [
+            {
+              "$ref": "#/components/schemas/PassengerFare"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      },
+      "bookingComponents": {
+        "type": "array",
+        "items": {
+          "type": "object",
+          "properties": {
+            "totalPrice": {
+              "type": "number"
+            },
+            "basePrice": {
+              "type": "number"
+            },
+            "taxes": {
+              "type": "number"
+            },
+            "ait": {
+              "type": "number"
+            },
+            "discountPrice": {
+              "type": "number"
+            }
+          },
+          "required": [],
+          "additionalProperties": true
+        }
+      },
+      "directions": {
+        "type": "array",
+        "items": {
+          "type": "array",
+          "items": {
+            "$ref": "#/components/schemas/RepricedDirection"
+          }
+        }
+      },
+      "fareBreakdown": {
+        "$ref": "#/components/schemas/FareBreakdown"
+      },
+      "currency": {
+        "type": [
+          "string",
+          "null"
+        ]
+      }
+    },
+    "required": [
+      "passengerCounts",
+      "passengerFares"
+    ],
+    "additionalProperties": true,
+    "description": "Supplier-compatible flight evidence. Book/Issue may omit aggregate totalPrice; B2B legacy totals are published base+tax gross, not final charge."
+  },
+  "FlightOffer": {
+    "type": "object",
+    "properties": {
+      "uniqueTransID": {
+        "type": "string",
+        "format": "uuid"
+      },
+      "itemCodeRef": {
+        "type": "string",
+        "format": "uuid"
+      },
+      "bookable": {
+        "type": "boolean"
+      },
+      "refundable": {
+        "type": "boolean"
+      },
+      "platingCarrier": {
+        "type": "string"
+      },
+      "totalPrice": {
+        "type": "number"
+      },
+      "passengerCounts": {
+        "type": "object",
+        "additionalProperties": {
+          "type": "integer"
+        }
+      },
+      "passengerFares": {
+        "type": "object",
+        "additionalProperties": {
+          "anyOf": [
+            {
+              "$ref": "#/components/schemas/PassengerFare"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      },
+      "bookingComponents": {
+        "type": "array",
+        "items": {
+          "type": "object",
+          "properties": {
+            "totalPrice": {
+              "type": "number"
+            },
+            "basePrice": {
+              "type": "number"
+            },
+            "taxes": {
+              "type": "number"
+            },
+            "ait": {
+              "type": "number"
+            }
+          },
+          "required": [],
+          "additionalProperties": true
+        }
+      },
+      "directions": {
+        "type": "array",
+        "items": {
+          "type": "array",
+          "items": {
+            "$ref": "#/components/schemas/Direction"
+          }
+        }
+      },
+      "fareBreakdown": {
+        "$ref": "#/components/schemas/FareBreakdown"
+      },
+      "currency": {
+        "type": [
+          "string",
+          "null"
+        ]
+      }
+    },
+    "required": [
+      "uniqueTransID",
+      "itemCodeRef",
+      "bookable",
+      "refundable",
+      "totalPrice",
+      "passengerCounts",
+      "passengerFares",
+      "bookingComponents",
+      "directions"
+    ],
+    "additionalProperties": true,
+    "description": "Extensible supplier-compatible offer. One complete direction per route must be selected for subsequent reads. B2B totalPrice is published gross; fareBreakdown.payable is the final price."
+  },
+  "SupplierResult": {
+    "type": "object",
+    "properties": {
+      "isSuccess": {
+        "type": "boolean"
+      },
+      "message": {
+        "type": [
+          "string",
+          "null"
+        ]
+      }
+    },
+    "required": [
+      "isSuccess"
+    ],
+    "additionalProperties": true
+  },
+  "SearchData": {
+    "type": "object",
+    "properties": {
+      "airSearchResponses": {
+        "type": "array",
+        "items": {
+          "$ref": "#/components/schemas/FlightOffer"
+        }
+      },
+      "currency": {
+        "type": [
+          "string",
+          "null"
+        ]
+      },
+      "totalFlights": {
+        "anyOf": [
+          {
+            "type": "integer"
+          },
+          {
+            "type": "null"
+          }
+        ]
+      },
+      "supplierCount": {
+        "anyOf": [
+          {
+            "type": "integer"
+          },
+          {
+            "type": "null"
+          }
+        ]
+      },
+      "minMaxPrice": {
+        "anyOf": [
+          {
+            "type": "object",
+            "properties": {
+              "minNetPrice": {
+                "type": "number"
+              },
+              "maxNetPrice": {
+                "type": "number"
+              },
+              "minPrice": {
+                "type": "number"
+              },
+              "maxPrice": {
+                "type": "number"
+              }
+            },
+            "required": [],
+            "additionalProperties": true
+          },
+          {
+            "type": "null"
+          }
+        ]
+      },
+      "airlineFilters": {
+        "anyOf": [
+          {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "code": {
+                  "type": "string"
+                }
+              },
+              "required": [],
+              "additionalProperties": true
+            }
+          },
+          {
+            "type": "null"
+          }
+        ]
+      },
+      "stops": {
+        "anyOf": [
+          {
+            "type": "array",
+            "items": {
+              "type": "integer"
+            }
+          },
+          {
+            "type": "null"
+          }
+        ]
+      }
+    },
+    "required": [
+      "airSearchResponses"
+    ],
+    "additionalProperties": true
+  },
+  "SearchResponse": {
+    "type": "object",
+    "properties": {
+      "item1": {
+        "$ref": "#/components/schemas/SearchData"
+      },
+      "item2": {
+        "anyOf": [
+          {
+            "$ref": "#/components/schemas/SupplierResult"
+          },
+          {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/SupplierResult"
+            }
+          }
+        ]
+      }
+    },
+    "required": [
+      "item1",
+      "item2"
+    ],
+    "additionalProperties": true
+  },
+  "FareRulesData": {
+    "type": "object",
+    "properties": {
+      "uniqueTransID": {
+        "anyOf": [
+          {
+            "type": "string",
+            "format": "uuid"
+          },
+          {
+            "type": "null"
+          }
+        ]
+      },
+      "itemCodeRef": {
+        "anyOf": [
+          {
+            "type": "string",
+            "format": "uuid"
+          },
+          {
+            "type": "null"
+          }
+        ]
+      },
+      "fareRuleDetails": {
+        "type": "array",
+        "items": {
+          "type": "object",
+          "properties": {
+            "type": {
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "fareRuleDetail": {
+              "type": [
+                "string",
+                "null"
+              ]
+            }
+          },
+          "required": [
+            "type",
+            "fareRuleDetail"
+          ],
+          "additionalProperties": true
+        }
+      }
+    },
+    "required": [
+      "fareRuleDetails"
+    ],
+    "additionalProperties": true
+  },
+  "FareRulesResponse": {
+    "type": "object",
+    "properties": {
+      "item1": {
+        "$ref": "#/components/schemas/FareRulesData"
+      },
+      "item2": {
+        "$ref": "#/components/schemas/SupplierResult"
+      }
+    },
+    "required": [
+      "item1",
+      "item2"
+    ],
+    "additionalProperties": true
+  },
+  "RepriceResponse": {
+    "type": "object",
+    "properties": {
+      "item1": {
+        "allOf": [
+          {
+            "$ref": "#/components/schemas/RepricedOffer"
+          },
+          {
+            "type": "object",
+            "properties": {
+              "priceCodeRef": {
+                "type": "string",
+                "format": "uuid"
+              },
+              "isPriceChanged": {
+                "type": "boolean"
+              },
+              "currency": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "priceCodeRef",
+              "isPriceChanged",
+              "currency"
+            ],
+            "additionalProperties": true
+          }
+        ]
+      },
+      "item2": {
+        "$ref": "#/components/schemas/SupplierResult"
+      }
+    },
+    "required": [
+      "item1",
+      "item2"
+    ],
+    "additionalProperties": true
+  },
+  "AcceptanceResponse": {
+    "type": "object",
+    "properties": {
+      "priceCodeRef": {
+        "type": "string",
+        "format": "uuid"
+      },
+      "pricingVersion": {
+        "type": "integer",
+        "minimum": 1
+      },
+      "accepted": {
+        "type": "boolean",
+        "enum": [
+          true
+        ]
+      }
+    },
+    "required": [
+      "priceCodeRef",
+      "pricingVersion",
+      "accepted"
+    ],
+    "additionalProperties": true
+  },
+  "BookingReceipt": {
+    "type": "object",
+    "properties": {
+      "uniqueTransID": {
+        "type": "string",
+        "format": "uuid"
+      },
+      "itemCodeRef": {
+        "type": "string",
+        "format": "uuid"
+      },
+      "priceCodeRef": {
+        "type": "string",
+        "format": "uuid"
+      },
+      "bookingCodeRef": {
+        "type": "string",
+        "format": "uuid"
+      },
+      "pnr": {
+        "type": "string"
+      },
+      "bookingStatus": {
+        "type": "string"
+      },
+      "bookingRefNumber": {
+        "type": [
+          "string",
+          "null"
+        ]
+      },
+      "ticketingTimeLimit": {
+        "type": [
+          "string",
+          "null"
+        ]
+      },
+      "flightInfo": {
+        "anyOf": [
+          {
+            "$ref": "#/components/schemas/FlightFare"
+          },
+          {
+            "type": "null"
+          }
+        ]
+      },
+      "fareBreakdown": {
+        "$ref": "#/components/schemas/FareBreakdown"
+      },
+      "passengerInfoes": {
+        "type": "array",
+        "items": {
+          "type": "object",
+          "properties": {
+            "nameElement": {
+              "type": "object",
+              "properties": {
+                "title": {
+                  "type": "string"
+                },
+                "firstName": {
+                  "type": "string"
+                },
+                "lastName": {
+                  "type": "string"
+                }
+              },
+              "required": [],
+              "additionalProperties": true
+            },
+            "passengerType": {
+              "type": "string"
+            }
+          },
+          "required": [],
+          "additionalProperties": true
+        }
+      }
+    },
+    "required": [
+      "uniqueTransID",
+      "itemCodeRef",
+      "priceCodeRef",
+      "bookingCodeRef",
+      "pnr",
+      "bookingStatus"
+    ],
+    "additionalProperties": true
+  },
+  "BookingReceiptResponse": {
+    "type": "object",
+    "properties": {
+      "item1": {
+        "$ref": "#/components/schemas/BookingReceipt"
+      },
+      "item2": {
+        "$ref": "#/components/schemas/SupplierResult"
+      }
+    },
+    "required": [
+      "item1",
+      "item2"
+    ],
+    "additionalProperties": true
+  },
+  "ManualBookingOutcome": {
+    "type": "object",
+    "properties": {
+      "bookingId": {
+        "type": "string",
+        "format": "uuid"
+      },
+      "state": {
+        "type": "string",
+        "enum": [
+          "manually_resolved"
+        ]
+      },
+      "manualOutcome": {
+        "type": "string",
+        "enum": [
+          "held",
+          "not_created",
+          "issued",
+          "cancelled"
+        ]
+      },
+      "requiresReconciliation": {
+        "type": "boolean",
+        "enum": [
+          false
+        ]
+      }
+    },
+    "required": [
+      "bookingId",
+      "state",
+      "manualOutcome",
+      "requiresReconciliation"
+    ],
+    "additionalProperties": true
+  },
+  "PendingBooking": {
+    "type": "object",
+    "properties": {
+      "bookingId": {
+        "type": "string",
+        "format": "uuid"
+      },
+      "state": {
+        "type": "string",
+        "enum": [
+          "pending",
+          "outcome_unknown"
+        ]
+      },
+      "requiresReconciliation": {
+        "type": "boolean",
+        "enum": [
+          true
+        ]
+      },
+      "reason": {
+        "type": "string",
+        "description": "Safe diagnostic: BOOKING_IN_PROGRESS, BOOKING_STATUS_STALE, SUPPLIER_DUPLICATE_REPORTED, SUPPLIER_REPORTED_FAILURE, BOOKING_TIMEOUT, BOOKING_TRANSPORT_ERROR, BOOKING_RESPONSE_UNVERIFIED or another documented safe code. Never proof that no upstream booking exists."
+      },
+      "automaticRetryAllowed": {
+        "type": "boolean",
+        "enum": [
+          false
+        ],
+        "description": "Do not repeat the supplier mutation or create a new key to recover this attempt. Same-key status replay remains safe."
+      },
+      "nextAction": {
+        "type": "string",
+        "enum": [
+          "check_saved_status",
+          "contact_support"
+        ],
+        "description": "Stop automatic polling when contact_support; operator evidence is required. Pending records older than five minutes also require support."
+      },
+      "statusUrl": {
+        "type": "string",
+        "description": "Owner-scoped saved status URL."
+      }
+    },
+    "required": [
+      "bookingId",
+      "state",
+      "requiresReconciliation"
+    ],
+    "additionalProperties": true
+  },
+  "BookingResponse": {
+    "oneOf": [
+      {
+        "$ref": "#/components/schemas/BookingReceiptResponse"
+      },
+      {
+        "$ref": "#/components/schemas/ManualBookingOutcome"
+      },
+      {
+        "$ref": "#/components/schemas/TicketReceiptResponse"
+      }
+    ]
+  },
+  "PnrData": {
+    "type": "object",
+    "properties": {
+      "uniqueTransID": {
+        "anyOf": [
+          {
+            "type": "string",
+            "format": "uuid"
+          },
+          {
+            "type": "null"
+          }
+        ]
+      },
+      "itemCodeRef": {
+        "anyOf": [
+          {
+            "type": "string",
+            "format": "uuid"
+          },
+          {
+            "type": "null"
+          }
+        ]
+      },
+      "priceCodeRef": {
+        "anyOf": [
+          {
+            "type": "string",
+            "format": "uuid"
+          },
+          {
+            "type": "null"
+          }
+        ]
+      },
+      "bookingCodeRef": {
+        "anyOf": [
+          {
+            "type": "string",
+            "format": "uuid"
+          },
+          {
+            "type": "null"
+          }
+        ]
+      },
+      "pnr": {
+        "type": "string"
+      },
+      "bookingRef": {
+        "type": [
+          "string",
+          "null"
+        ]
+      },
+      "status": {
+        "type": "string"
+      },
+      "lastTicketTime": {
+        "type": [
+          "string",
+          "null"
+        ],
+        "description": "Original supplier deadline, preserved verbatim. Prefer the latest verified PNR value over Book ticketingTimeLimit."
+      },
+      "lastTicketTimeIso": {
+        "type": [
+          "string",
+          "null"
+        ],
+        "format": "date-time",
+        "description": "Resolved deadline with explicit offset; null when the format/timezone is not established."
+      },
+      "lastTicketTimeZone": {
+        "type": [
+          "string",
+          "null"
+        ],
+        "enum": [
+          "Asia/Dhaka",
+          null
+        ],
+        "description": "Asia/Dhaka for the confirmed named-month Bangladesh local format; null for other formats."
+      }
+    },
+    "required": [
+      "pnr",
+      "status"
+    ],
+    "additionalProperties": true,
+    "description": "Latest verified PNR lastTicketTime takes priority over the original Book deadline. Named-month local values (19 Sep 2026, 12:44 PM) use Asia/Dhaka, as confirmed by the operator. Explicit RFC3339 offsets are honored; ambiguous legacy numeric formats remain raw."
+  },
+  "PnrResponse": {
+    "type": "object",
+    "properties": {
+      "item1": {
+        "$ref": "#/components/schemas/PnrData"
+      },
+      "item2": {
+        "$ref": "#/components/schemas/SupplierResult"
+      }
+    },
+    "required": [
+      "item1",
+      "item2"
+    ],
+    "additionalProperties": true
+  },
+  "TicketPassenger": {
+    "type": "object",
+    "properties": {
+      "passengerInfo": {
+        "type": "object",
+        "properties": {
+          "nameElement": {
+            "type": "object",
+            "properties": {
+              "title": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "firstName": {
+                "type": "string"
+              },
+              "middleName": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "lastName": {
+                "type": "string"
+              }
+            },
+            "required": [],
+            "additionalProperties": true
+          },
+          "passengerType": {
+            "type": "string"
+          },
+          "gender": {
+            "type": [
+              "string",
+              "null"
+            ]
+          }
+        },
+        "required": [],
+        "additionalProperties": true
+      },
+      "ticketNumbers": {
+        "type": "array",
+        "minItems": 1,
+        "items": {
+          "type": "string",
+          "pattern": "^[0-9]{10,16}$"
+        }
+      }
+    },
+    "required": [
+      "ticketNumbers"
+    ],
+    "additionalProperties": true
+  },
+  "PaymentState": {
+    "type": "object",
+    "properties": {
+      "required": {
+        "type": "boolean"
+      },
+      "state": {
+        "type": [
+          "string",
+          "null"
+        ]
+      },
+      "operationId": {
+        "anyOf": [
+          {
+            "type": "string",
+            "format": "uuid"
+          },
+          {
+            "type": "null"
+          }
+        ]
+      }
+    },
+    "required": [
+      "required",
+      "state",
+      "operationId"
+    ],
+    "additionalProperties": true
+  },
+  "TicketReceiptResponse": {
+    "type": "object",
+    "properties": {
+      "item1": {
+        "type": "object",
+        "properties": {
+          "uniqueTransID": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "itemCodeRef": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "priceCodeRef": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "bookingCodeRef": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "pnr": {
+            "type": "string"
+          },
+          "ticketCodeRef": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "ticketInfoes": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/TicketPassenger"
+            }
+          },
+          "flightInfo": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/FlightFare"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "fareBreakdown": {
+            "$ref": "#/components/schemas/FareBreakdown"
+          }
+        },
+        "required": [
+          "pnr",
+          "uniqueTransID",
+          "itemCodeRef",
+          "priceCodeRef",
+          "bookingCodeRef",
+          "ticketCodeRef",
+          "ticketInfoes"
+        ],
+        "additionalProperties": true
+      },
+      "item2": {
+        "$ref": "#/components/schemas/SupplierResult"
+      },
+      "payment": {
+        "$ref": "#/components/schemas/PaymentState"
+      },
+      "requiresReconciliation": {
+        "type": "boolean"
+      },
+      "reason": {
+        "type": "string",
+        "description": "Safe Issue diagnostic: TICKETING_IN_PROGRESS, TICKETING_STATUS_STALE, SUPPLIER_RECORD_LOCATOR_NOT_FOUND, SUPPLIER_REPORTED_FAILURE, TICKETING_RESPONSE_UNVERIFIED, TICKETING_OUTCOME_UNKNOWN or WALLET_SETTLEMENT_REQUIRED. No supplier message is exposed. A supplier failure is not proof of non-issuance; keep any wallet reservation pending reconciliation."
+      },
+      "nextAction": {
+        "type": "string",
+        "enum": [
+          "check_saved_status",
+          "contact_support"
+        ],
+        "description": "Stop automatic polling when contact_support; operator evidence is required. Pending records older than five minutes also require support."
+      },
+      "automaticRetryAllowed": {
+        "type": "boolean",
+        "enum": [
+          false
+        ],
+        "description": "Do not repeat the supplier mutation or create a new key to recover this attempt. Same-key status replay remains safe."
+      },
+      "statusUrl": {
+        "type": "string",
+        "description": "Owner-scoped saved ticket status URL. Diagnostics are present on unresolved HTTP 202 replies; successful settled receipts do not require them."
+      }
+    },
+    "required": [
+      "item1",
+      "item2"
+    ],
+    "additionalProperties": true
+  },
+  "TicketOutcome": {
+    "type": "object",
+    "properties": {
+      "issueId": {
+        "type": "string",
+        "format": "uuid"
+      },
+      "bookingId": {
+        "type": "string",
+        "format": "uuid"
+      },
+      "state": {
+        "type": "string",
+        "enum": [
+          "pending",
+          "outcome_unknown",
+          "not_issued"
+        ]
+      },
+      "requiresReconciliation": {
+        "type": "boolean"
+      },
+      "canIssueAgain": {
+        "type": "boolean"
+      },
+      "payment": {
+        "$ref": "#/components/schemas/PaymentState"
+      },
+      "reason": {
+        "type": "string",
+        "description": "Safe Issue diagnostic: TICKETING_IN_PROGRESS, TICKETING_STATUS_STALE, SUPPLIER_RECORD_LOCATOR_NOT_FOUND, SUPPLIER_REPORTED_FAILURE, TICKETING_RESPONSE_UNVERIFIED, TICKETING_OUTCOME_UNKNOWN or WALLET_SETTLEMENT_REQUIRED. No supplier message is exposed. A supplier failure is not proof of non-issuance; keep any wallet reservation pending reconciliation."
+      },
+      "nextAction": {
+        "type": "string",
+        "enum": [
+          "check_saved_status",
+          "contact_support"
+        ],
+        "description": "Stop automatic polling when contact_support; operator evidence is required. Pending records older than five minutes also require support."
+      },
+      "automaticRetryAllowed": {
+        "type": "boolean",
+        "enum": [
+          false
+        ],
+        "description": "Do not repeat the supplier mutation or create a new key to recover this attempt. Same-key status replay remains safe."
+      },
+      "statusUrl": {
+        "type": "string",
+        "description": "Owner-scoped saved ticket status URL. Diagnostics are present on unresolved HTTP 202 replies; successful settled receipts do not require them."
+      }
+    },
+    "required": [
+      "issueId",
+      "bookingId",
+      "state",
+      "requiresReconciliation"
+    ],
+    "additionalProperties": true
+  },
+  "TicketResponse": {
+    "oneOf": [
+      {
+        "$ref": "#/components/schemas/TicketReceiptResponse"
+      },
+      {
+        "$ref": "#/components/schemas/TicketOutcome"
+      }
+    ]
+  },
+  "ReportFare": {
+    "type": "object",
+    "properties": {
+      "passengerType": {
+        "type": "string"
+      },
+      "passengerCount": {
+        "type": "integer"
+      },
+      "basePrice": {
+        "type": "number"
+      },
+      "tax": {
+        "type": "number"
+      },
+      "ait": {
+        "type": "number"
+      },
+      "discount": {
+        "type": "number"
+      },
+      "discountPrice": {
+        "type": "number"
+      },
+      "totalPrice": {
+        "type": "number"
+      }
+    },
+    "required": [
+      "passengerType",
+      "passengerCount",
+      "totalPrice"
+    ],
+    "additionalProperties": true
+  },
+  "TicketReport": {
+    "type": "object",
+    "properties": {
+      "ticketInfo": {
+        "type": "object",
+        "properties": {
+          "status": {
+            "type": "string",
+            "enum": [
+              "Issued"
+            ]
+          },
+          "statusFor": {
+            "type": "string",
+            "enum": [
+              "Ticket"
+            ]
+          },
+          "pnr": {
+            "type": "string"
+          },
+          "uniqueTransID": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "itemCodeRef": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "bookingId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "ticketingPrice": {
+            "type": "number"
+          }
+        },
+        "required": [
+          "status",
+          "statusFor",
+          "pnr",
+          "uniqueTransID",
+          "itemCodeRef",
+          "bookingId",
+          "ticketingPrice"
+        ],
+        "additionalProperties": true
+      },
+      "passengerInfo": {
+        "type": "array",
+        "items": {
+          "type": "object",
+          "properties": {
+            "first": {
+              "type": "string"
+            },
+            "last": {
+              "type": "string"
+            },
+            "passengerType": {
+              "type": "string"
+            },
+            "ticketNumbers": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "array",
+                  "items": {
+                    "type": "string"
+                  }
+                }
+              ]
+            },
+            "basePrice": {
+              "type": "number"
+            },
+            "tax": {
+              "type": "number"
+            },
+            "ait": {
+              "type": "number"
+            },
+            "totalPrice": {
+              "type": "number"
+            }
+          },
+          "required": [
+            "first",
+            "last",
+            "passengerType",
+            "ticketNumbers",
+            "totalPrice"
+          ],
+          "additionalProperties": true
+        }
+      },
+      "fareBreakdown": {
+        "type": "array",
+        "items": {
+          "$ref": "#/components/schemas/ReportFare"
+        }
+      },
+      "segments": {
+        "type": "array",
+        "items": {
+          "type": "object",
+          "properties": {
+            "origin": {
+              "type": "string"
+            },
+            "destination": {
+              "type": "string"
+            },
+            "departure": {
+              "type": "string"
+            },
+            "arrival": {
+              "type": "string"
+            },
+            "flightNumber": {
+              "type": "string"
+            },
+            "operationCarrier": {
+              "type": "string"
+            }
+          },
+          "required": [],
+          "additionalProperties": true
+        }
+      }
+    },
+    "required": [
+      "ticketInfo",
+      "passengerInfo"
+    ],
+    "additionalProperties": true,
+    "description": "Legacy report shape: fareBreakdown is an optional ARRAY, not the reconciled object. ticketingPrice/totalPrice are B2B published gross. Retrieve /api/pricing/booking/{id} for accepted payable."
+  },
+  "CancellationResponse": {
+    "type": "object",
+    "properties": {
+      "item1": {
+        "type": "object",
+        "properties": {
+          "uniqueTransID": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "itemCodeRef": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "priceCodeRef": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "bookingCodeRef": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "isCancel": {
+            "type": "boolean",
+            "enum": [
+              true
+            ]
+          }
+        },
+        "required": [
+          "uniqueTransID",
+          "itemCodeRef",
+          "priceCodeRef",
+          "bookingCodeRef",
+          "isCancel"
+        ],
+        "additionalProperties": true
+      },
+      "item2": {
+        "$ref": "#/components/schemas/SupplierResult"
+      }
+    },
+    "required": [
+      "item1",
+      "item2"
+    ],
+    "additionalProperties": true
+  },
+  "PendingCancellation": {
+    "type": "object",
+    "properties": {
+      "cancellationId": {
+        "type": "string",
+        "format": "uuid"
+      },
+      "bookingId": {
+        "type": "string",
+        "format": "uuid"
+      },
+      "state": {
+        "type": "string"
+      },
+      "requiresReconciliation": {
+        "type": "boolean"
+      }
+    },
+    "required": [
+      "cancellationId",
+      "bookingId",
+      "state",
+      "requiresReconciliation"
+    ],
+    "additionalProperties": true
+  },
+  "PricingPassenger": {
+    "type": "object",
+    "properties": {
+      "count": {
+        "type": "integer"
+      },
+      "gross": {
+        "type": "string",
+        "pattern": "^-?[0-9]+\\.[0-9]{2}$",
+        "description": "Exact decimal major units. Parse as decimal, not binary float."
+      },
+      "commission": {
+        "type": "string",
+        "pattern": "^-?[0-9]+\\.[0-9]{2}$",
+        "description": "Exact decimal major units. Parse as decimal, not binary float."
+      },
+      "payable": {
+        "type": "string",
+        "pattern": "^-?[0-9]+\\.[0-9]{2}$",
+        "description": "Exact decimal major units. Parse as decimal, not binary float."
+      }
+    },
+    "required": [
+      "count",
+      "gross",
+      "commission",
+      "payable"
+    ],
+    "additionalProperties": true
+  },
+  "PricingSnapshot": {
+    "type": "object",
+    "properties": {
+      "version": {
+        "type": "integer"
+      },
+      "tier": {
+        "type": [
+          "string",
+          "null"
+        ]
+      },
+      "commissionSharePercent": {
+        "type": "integer"
+      },
+      "currency": {
+        "type": "string"
+      },
+      "gross": {
+        "type": "string",
+        "pattern": "^-?[0-9]+\\.[0-9]{2}$",
+        "description": "Exact decimal major units. Parse as decimal, not binary float."
+      },
+      "commission": {
+        "type": "string",
+        "pattern": "^-?[0-9]+\\.[0-9]{2}$",
+        "description": "Exact decimal major units. Parse as decimal, not binary float."
+      },
+      "payable": {
+        "type": "string",
+        "pattern": "^-?[0-9]+\\.[0-9]{2}$",
+        "description": "Exact decimal major units. Parse as decimal, not binary float."
+      },
+      "passengers": {
+        "type": "object",
+        "additionalProperties": {
+          "$ref": "#/components/schemas/PricingPassenger"
+        }
+      },
+      "fareBreakdown": {
+        "$ref": "#/components/schemas/FareBreakdown"
+      }
+    },
+    "required": [
+      "version",
+      "currency",
+      "gross",
+      "commission",
+      "payable",
+      "passengers"
+    ],
+    "additionalProperties": true,
+    "description": "Immutable accepted pricing snapshot. commission is the signed gross-to-payable discount; negative values are valid. All money fields are decimal major-unit strings."
+  },
+  "PricingBatch": {
+    "type": "object",
+    "additionalProperties": {
+      "$ref": "#/components/schemas/PricingSnapshot"
+    }
+  },
+  "WalletBalance": {
+    "type": "object",
+    "properties": {
+      "currency": {
+        "type": "string"
+      },
+      "scale": {
+        "type": "integer",
+        "enum": [
+          2
+        ]
+      },
+      "status": {
+        "type": "string",
+        "enum": [
+          "active",
+          "frozen"
+        ]
+      },
+      "availableMinor": {
+        "type": "string",
+        "pattern": "^-?[0-9]+$",
+        "description": "Integer minor units; scale 2 means 100 = 1.00."
+      },
+      "holdMinor": {
+        "type": "string",
+        "pattern": "^-?[0-9]+$",
+        "description": "Integer minor units; scale 2 means 100 = 1.00."
+      },
+      "totalMinor": {
+        "type": "string",
+        "pattern": "^-?[0-9]+$",
+        "description": "Integer minor units; scale 2 means 100 = 1.00."
+      },
+      "version": {
+        "type": "string",
+        "pattern": "^-?[0-9]+$",
+        "description": "Monotonic integer counter encoded as a string; not a money amount."
+      },
+      "updatedAt": {
+        "type": "string",
+        "format": "date-time"
+      },
+      "asOf": {
+        "type": "string",
+        "format": "date-time"
+      }
+    },
+    "required": [
+      "currency",
+      "scale",
+      "status",
+      "availableMinor",
+      "holdMinor",
+      "totalMinor",
+      "version",
+      "updatedAt",
+      "asOf"
+    ],
+    "additionalProperties": true
+  },
+  "WalletBalances": {
+    "type": "object",
+    "properties": {
+      "availableMinor": {
+        "type": "string",
+        "pattern": "^-?[0-9]+$",
+        "description": "Integer minor units; scale 2 means 100 = 1.00."
+      },
+      "holdMinor": {
+        "type": "string",
+        "pattern": "^-?[0-9]+$",
+        "description": "Integer minor units; scale 2 means 100 = 1.00."
+      }
+    },
+    "required": [
+      "availableMinor",
+      "holdMinor"
+    ],
+    "additionalProperties": true
+  },
+  "WalletTransaction": {
+    "type": "object",
+    "properties": {
+      "id": {
+        "type": "string",
+        "format": "uuid"
+      },
+      "sequence": {
+        "type": "string",
+        "pattern": "^-?[0-9]+$",
+        "description": "Monotonic integer counter encoded as a string; not a money amount."
+      },
+      "type": {
+        "type": "string",
+        "enum": [
+          "deposit",
+          "booking_hold",
+          "booking_confirm",
+          "hold_release",
+          "refund",
+          "manual_credit",
+          "manual_debit"
+        ]
+      },
+      "amountMinor": {
+        "type": "string",
+        "pattern": "^-?[0-9]+$",
+        "description": "Integer minor units; scale 2 means 100 = 1.00."
+      },
+      "currency": {
+        "type": "string"
+      },
+      "scale": {
+        "type": "integer",
+        "enum": [
+          2
+        ]
+      },
+      "availableBeforeMinor": {
+        "type": "string",
+        "pattern": "^-?[0-9]+$",
+        "description": "Integer minor units; scale 2 means 100 = 1.00."
+      },
+      "availableAfterMinor": {
+        "type": "string",
+        "pattern": "^-?[0-9]+$",
+        "description": "Integer minor units; scale 2 means 100 = 1.00."
+      },
+      "holdBeforeMinor": {
+        "type": "string",
+        "pattern": "^-?[0-9]+$",
+        "description": "Integer minor units; scale 2 means 100 = 1.00."
+      },
+      "holdAfterMinor": {
+        "type": "string",
+        "pattern": "^-?[0-9]+$",
+        "description": "Integer minor units; scale 2 means 100 = 1.00."
+      },
+      "availableDeltaMinor": {
+        "type": "string",
+        "pattern": "^-?[0-9]+$",
+        "description": "Integer minor units; scale 2 means 100 = 1.00."
+      },
+      "holdDeltaMinor": {
+        "type": "string",
+        "pattern": "^-?[0-9]+$",
+        "description": "Integer minor units; scale 2 means 100 = 1.00."
+      },
+      "bookingId": {
+        "anyOf": [
+          {
+            "type": "string",
+            "format": "uuid"
+          },
+          {
+            "type": "null"
+          }
+        ]
+      },
+      "bookingReference": {
+        "type": [
+          "string",
+          "null"
+        ]
+      },
+      "createdAt": {
+        "type": "string",
+        "format": "date-time"
+      }
+    },
+    "required": [
+      "id",
+      "sequence",
+      "type",
+      "amountMinor",
+      "currency",
+      "scale",
+      "availableBeforeMinor",
+      "availableAfterMinor",
+      "holdBeforeMinor",
+      "holdAfterMinor",
+      "availableDeltaMinor",
+      "holdDeltaMinor",
+      "bookingId",
+      "bookingReference",
+      "createdAt"
+    ],
+    "additionalProperties": true
+  },
+  "WalletStatement": {
+    "type": "object",
+    "properties": {
+      "currency": {
+        "type": "string"
+      },
+      "scale": {
+        "type": "integer",
+        "enum": [
+          2
+        ]
+      },
+      "snapshotVersion": {
+        "type": "string",
+        "pattern": "^-?[0-9]+$",
+        "description": "Monotonic integer counter encoded as a string; not a money amount."
+      },
+      "opening": {
+        "$ref": "#/components/schemas/WalletBalances"
+      },
+      "closing": {
+        "$ref": "#/components/schemas/WalletBalances"
+      },
+      "transactions": {
+        "type": "array",
+        "items": {
+          "$ref": "#/components/schemas/WalletTransaction"
+        }
+      },
+      "nextCursor": {
+        "type": [
+          "string",
+          "null"
+        ]
+      }
+    },
+    "required": [
+      "currency",
+      "scale",
+      "snapshotVersion",
+      "opening",
+      "closing",
+      "transactions",
+      "nextCursor"
+    ],
+    "additionalProperties": true
+  },
+  "CancellationObservation": {
+    "type": "object",
+    "required": [
+      "bookingId",
+      "cancellationId",
+      "verifiedCancelled",
+      "requiresManualReview",
+      "dispatchAllowed"
+    ],
+    "properties": {
+      "bookingId": {
+        "type": "string",
+        "format": "uuid"
+      },
+      "cancellationId": {
+        "type": "string",
+        "format": "uuid"
+      },
+      "verifiedCancelled": {
+        "type": "boolean"
+      },
+      "requiresManualReview": {
+        "type": "boolean",
+        "enum": [
+          true
+        ]
+      },
+      "dispatchAllowed": {
+        "type": "boolean",
+        "enum": [
+          false
+        ]
+      }
+    },
+    "additionalProperties": true
+  },
+  "RepricedSegment": {
+    "type": "object",
+    "properties": {
+      "segmentCodeRef": {
+        "type": [
+          "string",
+          "null"
+        ],
+        "format": "uuid",
+        "description": "Optional refreshed reference; null or absent is valid. Book does not consume it."
+      },
+      "from": {
+        "type": "string"
+      },
+      "to": {
+        "type": "string"
+      },
+      "departure": {
+        "type": "string"
+      },
+      "arrival": {
+        "type": "string"
+      },
+      "airlineCode": {
+        "type": "string"
+      },
+      "flightNumber": {
+        "type": "string"
+      },
+      "bookingClass": {
+        "type": [
+          "string",
+          "null"
+        ]
+      },
+      "cabinClass": {
+        "type": [
+          "string",
+          "null"
+        ]
+      }
+    },
+    "required": [
+      "from",
+      "to",
+      "departure",
+      "arrival",
+      "airlineCode",
+      "flightNumber"
+    ],
+    "additionalProperties": true
+  },
+  "RepricedDirection": {
+    "type": "object",
+    "properties": {
+      "segments": {
+        "type": "array",
+        "items": {
+          "$ref": "#/components/schemas/RepricedSegment"
+        }
+      },
+      "from": {
+        "type": "string"
+      },
+      "to": {
+        "type": "string"
+      },
+      "stops": {
+        "type": "integer"
+      }
+    },
+    "required": [
+      "segments"
+    ],
+    "additionalProperties": true
+  },
+  "RepricedOffer": {
+    "type": "object",
+    "properties": {
+      "uniqueTransID": {
+        "type": "string",
+        "format": "uuid"
+      },
+      "itemCodeRef": {
+        "type": "string",
+        "format": "uuid"
+      },
+      "bookable": {
+        "type": "boolean"
+      },
+      "refundable": {
+        "type": "boolean"
+      },
+      "platingCarrier": {
+        "type": "string"
+      },
+      "totalPrice": {
+        "type": "number"
+      },
+      "passengerCounts": {
+        "type": "object",
+        "additionalProperties": {
+          "type": "integer"
+        }
+      },
+      "passengerFares": {
+        "type": "object",
+        "additionalProperties": {
+          "anyOf": [
+            {
+              "$ref": "#/components/schemas/PassengerFare"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      },
+      "bookingComponents": {
+        "type": "array",
+        "items": {
+          "type": "object",
+          "properties": {
+            "totalPrice": {
+              "type": "number"
+            },
+            "basePrice": {
+              "type": "number"
+            },
+            "taxes": {
+              "type": "number"
+            },
+            "ait": {
+              "type": "number"
+            }
+          },
+          "required": [],
+          "additionalProperties": true
+        }
+      },
+      "directions": {
+        "type": "array",
+        "items": {
+          "type": "array",
+          "items": {
+            "$ref": "#/components/schemas/RepricedDirection"
+          }
+        }
+      },
+      "fareBreakdown": {
+        "$ref": "#/components/schemas/FareBreakdown"
+      },
+      "currency": {
+        "type": [
+          "string",
+          "null"
+        ]
+      }
+    },
+    "required": [
+      "uniqueTransID",
+      "itemCodeRef",
+      "bookable",
+      "refundable",
+      "totalPrice",
+      "passengerCounts",
+      "passengerFares",
+      "bookingComponents",
+      "directions"
+    ],
+    "additionalProperties": true,
+    "description": "Refreshed offer; segment references may be missing or null. Use priceCodeRef for acceptance and Book."
+  }
+}

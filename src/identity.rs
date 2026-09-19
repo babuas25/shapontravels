@@ -14,6 +14,7 @@ pub mod invitations;
 pub mod mail;
 pub mod maintenance;
 pub mod names;
+pub(crate) mod notifications;
 pub mod operations;
 mod phase5;
 pub mod preflight;

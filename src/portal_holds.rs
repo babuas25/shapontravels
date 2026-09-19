@@ -275,6 +275,9 @@ type BookingSnapshot = (
     Value,
     Option<Value>,
     Value,
+    String,
+    Option<String>,
+    bool,
 );
 
 async fn snapshot(
@@ -289,7 +292,7 @@ async fn snapshot(
     if let Some(breakdown) = pricing.get("fareBreakdown") {
         quote["item1"]["fareBreakdown"] = breakdown.clone();
     }
-    let booking:Option<BookingSnapshot>=sqlx::query_as("SELECT id,public_ref,state,public_response,jsonb_build_object('createdAt',created_at,'ticketingTimeLimit',ticketing_time_limit,'passengers',request->'passengerInfoes'),original_response,request FROM flight_bookings WHERE client_id=$1 AND idempotency_key=$2")
+    let booking:Option<BookingSnapshot>=sqlx::query_as("SELECT id,public_ref,state,public_response,jsonb_build_object('createdAt',created_at,'ticketingTimeLimit',ticketing_time_limit,'passengers',request->'passengerInfoes'),original_response,request,supplier_id,error_code,(created_at<clock_timestamp()-INTERVAL '5 minutes') FROM flight_bookings WHERE client_id=$1 AND idempotency_key=$2")
         .bind(d.client_id).bind(draft_id.to_string()).fetch_optional(&state.pool).await?;
     let booking = if let Some((
         id,
@@ -299,6 +302,9 @@ async fn snapshot(
         mut details,
         original,
         request,
+        supplier_id,
+        error_code,
+        pending_stale,
     )) = booking
     {
         if let (Some(body), Some(breakdown)) = (response.as_mut(), pricing.get("fareBreakdown"))
@@ -309,6 +315,13 @@ async fn snapshot(
                 body["item1"]["flightInfo"]["fareBreakdown"] = breakdown.clone();
             }
         }
+        details["outcome"] = crate::booking::outcome::booking_diagnostics(
+            &status,
+            pending_stale,
+            &supplier_id,
+            original.as_ref().map(|body| &body["item2"]),
+            error_code.as_deref(),
+        );
         // Only safe outcome flags cross the portal boundary, never raw supplier errors or refs.
         details["supplierReportedFailure"] = json!(
             original
@@ -582,6 +595,12 @@ async fn dashboard(
 ) -> Result<Json<Value>, ApiError> {
     let staff = reader_authority(&admin, &state, &input.reader).await?;
     let supplier_visible = matches!(input.reader.role, ReaderRole::Superadmin);
+    let principal = crate::identity::business::current_principal().ok();
+    let import_agency = principal
+        .as_ref()
+        .filter(|p| ["b2b", "b2b_sub"].contains(&p.role.as_str()))
+        .and_then(|p| p.agency_code.as_deref());
+    let import_admin = principal.as_ref().is_some_and(|p| p.role == "superadmin");
     let q = input.query;
     if !(1..=1_000_000).contains(&q.page)
         || ![10, 25, 50, 100].contains(&q.page_size)
@@ -637,6 +656,23 @@ async fn dashboard(
       LEFT JOIN flight_ticket_issues t ON t.booking_id=b.id
       LEFT JOIN flight_ticket_verifications v ON v.issue_id=t.id
       WHERE ($1 OR d.owner_external_user_id=$2)
+      UNION ALL
+      SELECT b.id,NULL::uuid,coalesce(b.booking_reference,b.public_ref),b.created_at,b.updated_at,b.status,
+        coalesce(b.data->>'pnr',''),coalesce(b.data->'airlinesPnr','[]'::jsonb),
+        concat_ws(' ',b.data#>>'{{passengers,travellers,0,firstName}}',b.data#>>'{{passengers,travellers,0,lastName}}'),
+        jsonb_array_length(b.data#>'{{passengers,travellers}}'),creator.clerk_user_id,
+        jsonb_build_object('name',coalesce(nullif(trim(concat_ws(' ',assigned.first_name,assigned.last_name)),''),assigned.clerk_user_id),
+          'email',coalesce(assigned.email,''),'agencyName',coalesce(profile.fields->>'agencyName',''),'agencyCode',b.agency_code),
+        assigned.clerk_user_id,b.currency,b.payable_minor::numeric/100,b.gross_minor::numeric/100,
+        CASE WHEN $15 THEN coalesce((SELECT c.supplier_minor FROM portal_import_cost_corrections c WHERE c.booking_id=b.id),b.supplier_minor)::numeric/100 ELSE NULL END,
+        coalesce(b.data#>>'{{itinerary,legs,0,departure}}',b.data#>>'{{itinerary,legs,0,segments,0,departure}}'),
+        b.data#>>'{{itinerary,carrierCode}}',
+        (SELECT string_agg(concat_ws(' → ',coalesce(l->>'from',l#>>'{{segments,0,from}}'),coalesce(l->>'to',l#>>'{{segments,-1,to}}')),' → ' ORDER BY n)
+          FROM jsonb_array_elements(b.data#>'{{itinerary,legs}}') WITH ORDINALITY AS legs(l,n))
+      FROM portal_import_bookings b JOIN portal_users creator ON creator.id=b.creator_id
+      JOIN portal_users assigned ON assigned.id=b.assigned_user_id JOIN portal_agencies agency ON agency.agency_code=b.agency_code
+      LEFT JOIN portal_identity_profiles profile ON profile.user_id=agency.owner_user_id AND profile.kind='profile'
+      WHERE ($17 OR b.agency_code=$16)
     ), filtered AS (
       SELECT * FROM records WHERE ($3='' OR concat_ws(' ',reference,pnr,name,owner->>'email',owner->>'name',owner->>'agencyName') ILIKE '%'||$3||'%')
       AND ($4='all' OR status=$4) AND ($5='' OR creator=ANY($14) OR concat_ws(' ',creator,owner->>'name',owner->>'agencyName') ILIKE '%'||$5||'%')
@@ -646,11 +682,14 @@ async fn dashboard(
       AND ($10='' OR payable>=nullif($10,'')::numeric) AND ($11='' OR payable<=nullif($11,'')::numeric)
     ), page AS (SELECT * FROM filtered ORDER BY {sort} {direction} NULLS LAST,id DESC LIMIT $12 OFFSET $13)
     SELECT jsonb_build_object('total',(SELECT count(*) FROM filtered),'bookings',coalesce((SELECT jsonb_agg(jsonb_build_object(
-      'id',id,'draftId',draft_id,'reference',reference,'createdAt',created_at,'status',status,'pnr',pnr,'airlinePnrs',airline_pnrs,'name',name,'passengerCount',pax_count,
+      'id',id,'draftId',draft_id,'detailHref',CASE WHEN draft_id IS NULL THEN '/dashboard/bookings/import/'||reference ELSE '/dashboard/bookings/hold/'||draft_id END,'reference',reference,'createdAt',created_at,'status',status,'pnr',pnr,'airlinePnrs',airline_pnrs,'name',name,'passengerCount',pax_count,
       'creatorId',creator,'ownerId',owner_id,'owner',owner,'currency',currency,'payable',payable::text,'gross',gross::text,'supplier',supplier::text,
-      'flyDate',fly_date,'airline',airline,'route',route)) FROM page),'[]'::jsonb))
+      'flyDate',fly_date,'airline',airline,'route',route,
+      'lifecycleAt',CASE WHEN draft_id IS NULL THEN (SELECT coalesce(i.issued_at,i.updated_at) FROM portal_import_bookings i WHERE i.id=page.id) END,
+      'supplierReference',CASE WHEN $15 AND draft_id IS NULL THEN (SELECT i.display_supplier_reference FROM portal_import_bookings i WHERE i.id=page.id) END)) FROM page),'[]'::jsonb))
     "#
     );
+    let mut tx = crate::identity::business::begin(&state.pool).await?;
     let result: Value = sqlx::query_scalar(&sql)
         .bind(staff)
         .bind(&input.reader.external_user_id)
@@ -667,8 +706,11 @@ async fn dashboard(
         .bind((q.page - 1) * q.page_size)
         .bind(input.creator_ids)
         .bind(supplier_visible)
-        .fetch_one(&state.pool)
+        .bind(import_agency)
+        .bind(import_admin)
+        .fetch_one(&mut *tx)
         .await?;
+    tx.commit().await?;
     Ok(Json(result))
 }
 pub fn routes() -> Router<AppState> {

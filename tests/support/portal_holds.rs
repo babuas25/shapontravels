@@ -51,7 +51,7 @@ impl ReadSupplier for Mock {
                 return Ok(json!({"item1":{
                     "pnr":if mode == 4 {"FOREIGN"} else {"HOLDPN"},
                     "status":match mode {5 => "Cancelled", 6 => "Created", _ => "Booked"},
-                    "lastTicketTime":match mode {1 => Value::Null, 2 => json!("invalid-deadline"), _ => json!("09/28/2026 12:00:00")},
+                    "lastTicketTime":match mode {1 => Value::Null, 2 => json!("invalid-deadline"), 7 => json!("19 Sep 2026, 12:44 PM"), _ => json!("09/28/2026 12:00:00")},
                     "supplierSecret":"DO-NOT-EXPOSE",
                 },"item2":{"isSuccess":true}}));
             }
@@ -674,6 +674,10 @@ pub async fn verify(pool: &PgPool, admin: &str, machine: &str, base: &axum::Rout
             false
         );
         assert_eq!(result["booking"]["details"]["hasPnrReferences"], false);
+        assert_eq!(
+            result["booking"]["details"]["outcome"],
+            json!({"reason":"BOOKING_TIMEOUT","nextAction":"contact_support","automaticRetryAllowed":false})
+        );
     }
     assert_eq!(mock.calls.load(Ordering::SeqCst), 2);
     let (_, first_page) = call(
@@ -738,6 +742,10 @@ pub async fn verify(pool: &PgPool, admin: &str, machine: &str, base: &axum::Rout
         assert_eq!(result["booking"]["response"], Value::Null);
         let details = &result["booking"]["details"];
         assert_eq!(details["supplierReportedFailure"], true);
+        assert_eq!(
+            details["outcome"],
+            json!({"reason":"SUPPLIER_REPORTED_FAILURE","nextAction":"contact_support","automaticRetryAllowed":false})
+        );
         assert_eq!(details["hasPnrReferences"], false);
         assert_eq!(details["ticketingTimeLimit"], Value::Null);
         assert!(details["createdAt"].is_string());
@@ -762,6 +770,53 @@ pub async fn verify(pool: &PgPool, admin: &str, machine: &str, base: &axum::Rout
         mock.pnr_calls.load(Ordering::SeqCst),
         7,
         "No PNR read can be dispatched without saved references"
+    );
+    mock.pnr_mode.store(7, Ordering::SeqCst);
+    let (status, named) = call(&app, "POST", receipt_path, Some(admin), refresh).await;
+    assert_eq!(status, 200, "{named}");
+    assert_eq!(named["booking"]["details"]["outcome"], Value::Null);
+    assert_eq!(
+        named["booking"]["details"]["pnrObservation"]["lastTicketTimeIso"],
+        "2026-09-19T12:44:00+06:00"
+    );
+    assert_eq!(
+        named["booking"]["details"]["pnrObservation"]["lastTicketTimeZone"],
+        "Asia/Dhaka"
+    );
+    let held_id = Uuid::parse_str(named["booking"]["id"].as_str().unwrap()).unwrap();
+    let issue_id = Uuid::new_v4();
+    sqlx::query("INSERT INTO flight_ticket_issues(id,booking_id,client_id,idempotency_key,request_hash,state,request,preflight,created_at) SELECT $1,id,client_id,'portal-outcome-test',request_hash,'pending',request,'{}'::jsonb,clock_timestamp()-INTERVAL '6 minutes' FROM flight_bookings WHERE id=$2")
+        .bind(issue_id).bind(held_id).execute(pool).await.unwrap();
+    let (_, stale) = call(
+        &app,
+        "POST",
+        receipt_path,
+        Some(admin),
+        receipt_input.clone(),
+    )
+    .await;
+    assert_eq!(
+        stale["booking"]["ticket"]["outcome"],
+        json!({"reason":"TICKETING_STATUS_STALE","nextAction":"contact_support","automaticRetryAllowed":false})
+    );
+    sqlx::query(
+        "UPDATE flight_ticket_issues SET state='outcome_unknown',original_response=$2 WHERE id=$1",
+    )
+    .bind(issue_id)
+    .bind(json!({"item2":{"isSuccess":false,"message":"DO-NOT-EXPOSE"}}))
+    .execute(pool)
+    .await
+    .unwrap();
+    let (_, unknown) = call(&app, "POST", receipt_path, Some(admin), receipt_input).await;
+    assert_eq!(
+        unknown["booking"]["ticket"]["outcome"],
+        json!({"reason":"SUPPLIER_REPORTED_FAILURE","nextAction":"contact_support","automaticRetryAllowed":false})
+    );
+    assert!(!unknown.to_string().contains("DO-NOT-EXPOSE"));
+    assert_eq!(
+        mock.calls.load(Ordering::SeqCst),
+        3,
+        "Receipt diagnostics never call Book or Issue"
     );
 }
 

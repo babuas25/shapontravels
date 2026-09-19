@@ -1,0 +1,86 @@
+{
+  "date": "2026-09-18",
+  "baseline_commit": "2d2c21f7ed346c906ddbe6f42267f83fa8335225",
+  "deployed": false,
+  "working_database_changed": false,
+  "new_migrations": false,
+  "regular_tests": {
+    "passed": 100,
+    "failed": 0,
+    "ignored": 35
+  },
+  "clippy_all_targets_warnings_denied": "passed",
+  "format_and_diff_checks": "passed",
+  "fresh_database_suite": "passed including final booking diagnostics",
+  "wallet_suite": "passed",
+  "security_regression_probe": "passed",
+  "contract_validation": {
+    "responses": 54,
+    "reconciled_fare_breakdowns": 396,
+    "failures": []
+  },
+  "post_fix_uat": {
+    "minimum_departure_days_ahead": 30,
+    "oneway_offers_per_run": 9,
+    "return_offers_per_run": 90,
+    "book_dispatches": 2,
+    "issue_dispatches": 0,
+    "wallet_ledger_entries": 0,
+    "replay_additional_dispatches": 0,
+    "book_results": [
+      "supplier_duplicate_reported",
+      "response_deadline_elapsed"
+    ],
+    "timeout_outcome_seconds": "60.022",
+    "timeout_read_only_followup": {
+      "global_search_http": 200,
+      "report_http": 200,
+      "transaction_identity_match": true,
+      "passenger_identity_match": true,
+      "supplier_status": "Failed",
+      "supplier_status_for": "Booking",
+      "supplier_completed": true,
+      "pnr_present": false,
+      "tickets_present": false,
+      "upstream_internal_timeout": "00:01:00"
+    },
+    "open_jaw_multicity_status": 503,
+    "fresh_successful_issue_verified": false
+  },
+  "release_decision": "blocked on supplier booking reliability and target deployment verification",
+  "raw_evidence_committed": false,
+  "backups": {
+    "fix-uat-evidence": {
+      "sha256": "5f0bb929fe0bdab3a8918e25c294c754d98f13c97b44bd765a972dc4f453dfbe",
+      "archive_listing_verified": true,
+      "restore_tested": false
+    },
+    "fix-unique-uat-evidence": {
+      "sha256": "a8fd771efe1722d063da346347aa9445bb72db9761c2281684ac988ec8232890",
+      "archive_listing_verified": true,
+      "restore_tested": false
+    }
+  },
+  "source_sha256": {
+    "scripts/validate-client-contract.py": "e9cbbdae1a9c062efe1652583eaf5114eff785c8941ff25c6bd55b457c88c9c3",
+    "src/admin_bookings.rs": "9d5a752b4cf47d553a1c1be8bcefc5eba35d407f82527bf535284fe5658b75b8",
+    "src/api_docs.rs": "cfe6b099f8139213c37d323a98ac40800fbdd730c1f98ef489d728415ddce2fc",
+    "src/auth.rs": "49703994854e24b87196077b0bfb34ecdd14823abd28d2a2cc574eb6de353915",
+    "src/auth_admission.rs": "5a3453eaffecb3409ae5935818ed47f4cb07612610fb3586f0998e5f1d3193e7",
+    "src/booking.rs": "17a9cd8a9c329093c0883ed1e9b01cdaa586d61649d91684a52ed9710dd5cbc9",
+    "src/booking/direct.rs": "b4d6ed529f84d810e9da697f8610c914a3887d098b6561305fc5f0b134236b26",
+    "src/booking/outcome.rs": "dfbc473441c069bec59c9acfee5a9335aa1f4f90a7a80eb0c1d112633acf39fc",
+    "src/booking/ticketing.rs": "5e07d650e45a060c3b4ec9e91fca92f800bb076ddaf7c92c644bd10d82018d10",
+    "src/client_contract.rs": "51bb01af126708ee6bc688d95196efe569989f23c22e588fdfa2752e645ee937",
+    "src/client_schemas.json": "0e7d1db245fe47a1c7298984b1c4ab82ad3446d1745dcb6f7d5aa2f5f7115da2",
+    "src/http_errors.rs": "e6fcfe9e5ba815d618d53b1b0fbe9a0aa01458133f3fa09d9c8615e513f5bac0",
+    "src/lib.rs": "0b579647420800bc86539fbae8c960ea5b93717003940f812494736def5f2c2c",
+    "src/main.rs": "b0ef52b90432ff1fb60d73e9346a7fe01a7d11e10acdd17c775b193d8a2e3da9",
+    "src/reprice.rs": "f51525bf7022b0b829221a3525838942ba16ddb5ebcbdf9ce34cfdeb783b6777",
+    "src/reprice_admission.rs": "7d640005899aa9d3da3e45327a1ef03233092c593f4b12504ab586802e752f0d",
+    "src/search.rs": "83d7bda4c947072d7ce46461538318ccd8a5486e9d736a17c6dcdbf8a04832a7",
+    "tests/client_api_audit.rs": "d4d2255d991b7eb3e48b5c09ef32064f3bb5a42f8c79e14d34f49718fb141f9a",
+    "tests/foundation.rs": "c4c22661c0649551c64c7b36c8dddd7a88b3edc34694454f6f1313ebdd1baaf1",
+    "tests/support/booking.rs": "fc353d409ebeaa938ea5183142bc4f5152892a8dac19fba992be42ce1032d5ce"
+  }
+}

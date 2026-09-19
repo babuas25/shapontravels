@@ -110,7 +110,33 @@ async fn openapi_and_swagger_are_served_locally() {
     assert_eq!(response.status(), StatusCode::OK);
     let doc: serde_json::Value =
         serde_json::from_slice(&response.into_body().collect().await.unwrap().to_bytes()).unwrap();
+    if let Ok(path) = std::env::var("CLIENT_CONTRACT_EXPORT") {
+        std::fs::write(path, serde_json::to_vec_pretty(&doc).unwrap()).unwrap();
+    }
     assert!(doc["info"]["title"].as_str().unwrap().contains("test"));
+    fn check_references(value: &serde_json::Value, doc: &serde_json::Value) {
+        match value {
+            serde_json::Value::Object(map) => {
+                if let Some(reference) = map.get("$ref").and_then(|v| v.as_str()) {
+                    assert!(reference.starts_with("#/"));
+                    assert!(
+                        doc.pointer(&reference[1..]).is_some(),
+                        "unresolved {reference}"
+                    );
+                }
+                for child in map.values() {
+                    check_references(child, doc);
+                }
+            }
+            serde_json::Value::Array(values) => {
+                for child in values {
+                    check_references(child, doc);
+                }
+            }
+            _ => {}
+        }
+    }
+    check_references(&doc, &doc);
     // Swagger resolves requests by operationId; duplicates can target another endpoint.
     let mut operation_ids = std::collections::HashSet::new();
     for (_, path) in doc["paths"].as_object().unwrap() {
@@ -126,6 +152,10 @@ async fn openapi_and_swagger_are_served_locally() {
                 .as_str()
                 .expect("operation ID missing");
             assert!(operation_ids.insert(id), "duplicate operationId: {id}");
+            for (status, response) in operation["responses"].as_object().unwrap() {
+                let schema = &response["content"]["application/json"]["schema"];
+                assert!(schema.get("$ref").is_some(), "untyped {method} {status}");
+            }
         }
     }
     assert!(
@@ -175,6 +205,90 @@ async fn openapi_and_swagger_are_served_locally() {
     assert_eq!(response.status(), StatusCode::OK);
     let html = response.into_body().collect().await.unwrap().to_bytes();
     assert!(String::from_utf8_lossy(&html).contains("swagger-ui"));
+}
+
+#[tokio::test]
+async fn framework_rejections_use_the_public_error_contract() {
+    let app = router(unavailable_state());
+    for (method, path, content_type, body, status, error) in [
+        (
+            "POST",
+            "/auth/token",
+            "application/json",
+            "{".into(),
+            400,
+            "INVALID_REQUEST",
+        ),
+        (
+            "POST",
+            "/auth/token",
+            "application/json",
+            "{}".into(),
+            422,
+            "INVALID_REQUEST",
+        ),
+        (
+            "POST",
+            "/auth/token",
+            "text/plain",
+            "{}".into(),
+            415,
+            "UNSUPPORTED_MEDIA_TYPE",
+        ),
+        (
+            "POST",
+            "/auth/token",
+            "application/json",
+            " ".repeat(2 * 1024 * 1024 + 1),
+            413,
+            "REQUEST_TOO_LARGE",
+        ),
+        (
+            "GET",
+            "/auth/token",
+            "application/json",
+            String::new(),
+            405,
+            "METHOD_NOT_ALLOWED",
+        ),
+        (
+            "GET",
+            "/unknown-route",
+            "application/json",
+            String::new(),
+            404,
+            "NOT_FOUND",
+        ),
+    ] {
+        let response = app
+            .clone()
+            .oneshot(
+                Request::builder()
+                    .method(method)
+                    .uri(path)
+                    .header("content-type", content_type)
+                    .body(Body::from(body))
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(response.status().as_u16(), status, "{method} {path}");
+        assert_eq!(response.headers()["content-type"], "application/json");
+        assert_eq!(response.headers()["cache-control"], "no-store");
+        assert!(response.headers().contains_key("x-request-id"));
+        if status == 405 {
+            assert!(
+                response.headers()["allow"]
+                    .to_str()
+                    .unwrap()
+                    .contains("POST")
+            );
+        }
+        let body: serde_json::Value =
+            serde_json::from_slice(&response.into_body().collect().await.unwrap().to_bytes())
+                .unwrap();
+        assert_eq!(body, serde_json::json!({"error":error}));
+    }
 }
 
 #[tokio::test]

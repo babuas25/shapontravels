@@ -31,6 +31,8 @@ async fn run() -> Result<(), String> {
         return Err("usage: shapontravels-api [serve|migrate|bootstrap-admin]".into());
     }
     let config = Config::from_env()?;
+    let auth_proxy =
+        shapontravels_api::auth_admission::ProxyPolicy::from_lookup(|key| std::env::var(key).ok())?;
     let pool = connect(&config)
         .await
         .map_err(|_| "database connection failed")?;
@@ -122,14 +124,18 @@ async fn run() -> Result<(), String> {
         ))
     });
     let mut app = router_with_search_limits(state, config.search_limits)
+        .layer(axum::Extension(auth_proxy))
         .layer(axum::Extension(shapontravels_api::identity::rollout::Guard))
         .layer(axum::Extension(identity_maintenance));
     if let Some(runtime) = identity_runtime {
         app = app.layer(axum::Extension(runtime));
     }
-    let result = axum::serve(listener, app)
-        .with_graceful_shutdown(shutdown())
-        .await;
+    let result = axum::serve(
+        listener,
+        app.into_make_service_with_connect_info::<std::net::SocketAddr>(),
+    )
+    .with_graceful_shutdown(shutdown())
+    .await;
     let _ = identity_stop.send(());
     if let Some(worker) = identity_worker {
         let _ = worker.await;

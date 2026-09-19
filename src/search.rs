@@ -39,6 +39,9 @@ pub trait ReadSupplier: Send + Sync {
         Box::pin(async { Err(SupplierError::Configuration) })
     }
 
+    fn import_report<'a>(&'a self, _transaction: &'a str, _filter: &'a str) -> ReadFuture<'a> {
+        Box::pin(async { Err(SupplierError::Configuration) })
+    }
     fn ticket_report<'a>(&'a self, _transaction: &'a str) -> ReadFuture<'a> {
         Box::pin(async { Err(SupplierError::Configuration) })
     }
@@ -68,6 +71,9 @@ impl ReadSupplier for SupplierAdapter {
         Box::pin(SupplierAdapter::cancel_held(self, payload))
     }
 
+    fn import_report<'a>(&'a self, transaction: &'a str, filter: &'a str) -> ReadFuture<'a> {
+        Box::pin(SupplierAdapter::import_report(self, transaction, filter))
+    }
     fn ticket_report<'a>(&'a self, transaction: &'a str) -> ReadFuture<'a> {
         Box::pin(SupplierAdapter::ticket_report(self, transaction))
     }
@@ -131,7 +137,7 @@ impl SearchRequest {
             || self.adults > 9
             || self.childs > 8
             || self.infants > self.adults
-            || self.adults + self.childs > 9
+            || self.adults + self.childs + self.infants > 9
             || self.children_ages.len() != self.childs as usize
             || self.children_ages.iter().any(|a| !(2..12).contains(a))
             || !(1..=5).contains(&self.cabin_class)
@@ -326,16 +332,55 @@ pub(crate) fn bind_references(value: &mut Value, map: &mut serde_json::Map<Strin
     }
 }
 
-#[utoipa::path(post,path="/api/Search",tag="Flights",security(("machine_token"=[])),request_body(content=SearchRequest,example=json!({"routes":[{"origin":"DAC","destination":"CXB","departureDate":"2026-09-29"}],"adults":1,"childs":0,"infants":0,"cabinClass":1,"preferredCarriers":[],"prohibitedCarriers":[],"childrenAges":[]})),responses((status=200,body=Object,description="Supplier-compatible item1/item2 envelope. Equivalent evidenced offers select the lowest original supplier total before markup; ties prefer Takeoff, Firsttrip, Triplover. bookingClass/RBD matching permits missing cabinClass; explicit cabin conflicts stay separate. Unknown fare equivalence stays separate. X-Search-Partial reports failed active connections. X-Search-Summary-Scope: retained-selling-offers; net prices and counts summarize returned selling offers."),(status=422,description="Pricing, currency or scope configuration incomplete; SUPPLIER_SUMMARY_UNSUPPORTED for unsupported summary metadata"),(status=503,description="SEARCH_BUSY with Retry-After: 1 when Search capacity/queue wait is exhausted; otherwise no active suppliers or all active connections failed")))]
+#[utoipa::path(post,path="/api/Search",tag="Flights",security(("machine_token"=[])),request_body(content=SearchRequest,example=json!({"routes":[{"origin":"DAC","destination":"CXB","departureDate":"2026-09-29"}],"adults":1,"childs":0,"infants":0,"cabinClass":1,"preferredCarriers":[],"prohibitedCarriers":[],"childrenAges":[]})),responses((status=200,body=Object,description="Supplier-compatible item1/item2 envelope. Equivalent evidenced offers select the lowest original supplier total before markup; ties prefer Takeoff, Firsttrip, Triplover. bookingClass/RBD matching permits missing cabinClass; explicit cabin conflicts stay separate. Unknown fare equivalence stays separate. X-Search-Partial reports failed active connections. X-Search-Summary-Scope: retained-selling-offers; prices and counts summarize returned offers; B2B legacy totals are published base+tax gross, while fareBreakdown/pricing payable is the final charge."),(status=422,description="Pricing, currency or scope configuration incomplete; SUPPLIER_SUMMARY_UNSUPPORTED for unsupported summary metadata"),(status=503,description="SEARCH_BUSY with Retry-After: 1 when Search capacity/queue wait is exhausted; otherwise no active suppliers or all active connections failed")))]
 async fn search(
     machine: Machine,
+    authority: Option<Extension<crate::identity::business::SearchAuthority>>,
     Extension(admission): Extension<crate::search_admission::Admission>,
     State(state): State<AppState>,
     Json(request): Json<SearchRequest>,
 ) -> Result<Response, ApiError> {
-    let started = std::time::Instant::now();
     machine.require("search:read")?;
     request.validate()?;
+    let started = std::time::Instant::now();
+    let usage = crate::search_controls::start(
+        &state.pool,
+        &machine,
+        authority.map(|a| a.0.0.subject),
+        json!(request.routes),
+    )
+    .await?;
+    let result = search_tracked(machine, admission, &state, request, &usage).await;
+    let (status, code) = match &result {
+        Ok(response) => (
+            response.status(),
+            if response.status() == StatusCode::SERVICE_UNAVAILABLE {
+                Some("SEARCH_BUSY")
+            } else {
+                None
+            },
+        ),
+        Err(e) => (e.0, Some(e.1)),
+    };
+    crate::search_controls::finish(
+        &state.pool,
+        usage.id,
+        status,
+        code,
+        started.elapsed().as_millis(),
+    )
+    .await?;
+    result
+}
+async fn search_tracked(
+    machine: Machine,
+    admission: crate::search_admission::Admission,
+    state: &AppState,
+    request: SearchRequest,
+    usage: &crate::search_controls::Usage,
+) -> Result<Response, ApiError> {
+    let started = std::time::Instant::now();
+    crate::search_controls::check_user(&state.pool, usage).await?;
     let permit = match admission.acquire().await {
         Ok(permit) => permit,
         Err(busy) => return Ok(busy.into_response()),
@@ -378,7 +423,19 @@ async fn search(
     }
     let payload = serde_json::to_value(&request).map_err(|_| error("INVALID_SEARCH_REQUEST"))?;
     let mut tasks = tokio::task::JoinSet::new();
+    let mut blocked = 0;
+    let mut last_block = None;
     for connection in active {
+        if let Err(e) = crate::search_controls::claim(&state.pool, usage, &connection.id).await {
+            if e.0 == StatusCode::TOO_MANY_REQUESTS || e.0 == StatusCode::FORBIDDEN {
+                blocked += 1;
+                last_block = Some(e);
+                continue;
+            }
+            return Err(e);
+        }
+        let pool = state.pool.clone();
+        let usage_id = usage.id;
         let transport = state.suppliers[&connection.id].transport.clone();
         let payload = payload.clone();
         tasks.spawn(async move {
@@ -387,21 +444,46 @@ async fn search(
                 transport.read(ReadOperation::Search, &payload),
             )
             .await;
-            (connection, result)
+            let successful = match &result {
+                Ok(Ok(body)) => {
+                    body.pointer("/item1/airSearchResponses")
+                        .is_some_and(Value::is_array)
+                        && match &body["item2"] {
+                            Value::Array(items) => items.iter().any(|s| s["isSuccess"] == true),
+                            Value::Object(_) => body["item2"]["isSuccess"] == true,
+                            _ => false,
+                        }
+                }
+                _ => false,
+            };
+            let recorded = crate::search_controls::supplier_finished(
+                &pool,
+                usage_id,
+                &connection.id,
+                successful,
+            )
+            .await;
+            (connection, result, recorded)
         });
     }
-    let mut failures = 0;
+    if tasks.is_empty()
+        && let Some(e) = last_block
+    {
+        return Err(e);
+    }
+    let mut failures = blocked;
     let mut successes = 0;
     let mut batches = Vec::new();
     while let Some(task) = tasks.join_next().await {
         let (connection, mut body) = match task {
-            Ok((connection, Ok(Ok(body)))) => (connection, body),
-            Ok((connection, Ok(Err(error)))) => {
+            Ok((_, _, Err(e))) => return Err(e),
+            Ok((connection, Ok(Ok(body)), Ok(()))) => (connection, body),
+            Ok((connection, Ok(Err(error)), Ok(()))) => {
                 tracing::warn!(supplier = %connection.id, ?error, "supplier search failed");
                 failures += 1;
                 continue;
             }
-            Ok((connection, Err(_))) => {
+            Ok((connection, Err(_), Ok(()))) => {
                 tracing::warn!(supplier = %connection.id, "supplier search timed out");
                 failures += 1;
                 continue;
@@ -1078,6 +1160,22 @@ mod tests {
         let input = json!({"routes":[{"origin":"DAC","destination":"CXB","departureDate":(chrono::Utc::now()+chrono::Duration::days(21)).format("%Y-%m-%d").to_string()}],"adults":1,"childs":0,"infants":0,"cabinClass":5,"preferredCarriers":[],"prohibitedCarriers":[],"childrenAges":[]});
         let request: SearchRequest = serde_json::from_value(input.clone()).unwrap();
         assert!(request.validate().is_ok());
+        let mut group = input.clone();
+        group["adults"] = json!(8);
+        group["infants"] = json!(1);
+        assert!(
+            serde_json::from_value::<SearchRequest>(group.clone())
+                .unwrap()
+                .validate()
+                .is_ok()
+        );
+        group["adults"] = json!(9);
+        assert!(
+            serde_json::from_value::<SearchRequest>(group)
+                .unwrap()
+                .validate()
+                .is_err()
+        );
         let mut spoofed = input.clone();
         spoofed["agent_id"] = json!(Uuid::new_v4().to_string());
         assert!(serde_json::from_value::<SearchRequest>(spoofed).is_err());

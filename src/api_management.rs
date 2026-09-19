@@ -126,6 +126,8 @@ async fn update(
                 "ticketing",
                 "cancellation",
                 "wallet:read",
+                "ticket-management:read",
+                "ticket-management:write",
             ]
             .contains(&p.as_str())
         })

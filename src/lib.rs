@@ -2,22 +2,30 @@ pub mod admin_bookings;
 pub mod api_docs;
 pub mod api_management;
 pub mod auth;
+pub mod auth_admission;
 pub mod booking;
 pub mod cleanup;
+mod client_contract;
 pub mod config;
 pub mod connections;
 pub mod fare_breakdown;
+mod http_errors;
 pub mod identity;
 pub mod markup;
 pub mod passengers;
 pub mod portal;
 pub mod portal_holds;
+pub mod portal_imports;
 pub mod pricing;
 pub mod projection;
 pub mod reprice;
+mod reprice_admission;
+pub mod sales_reports;
 pub mod search;
 pub mod search_admission;
+pub mod search_controls;
 mod selection;
+pub mod site_content;
 pub mod supplier;
 pub mod tier;
 pub mod wallet;
@@ -125,8 +133,12 @@ pub(crate) fn openapi_document(environment: &str) -> utoipa::openapi::OpenApi {
     doc.merge(wallet::PortalWalletDoc::openapi());
     doc.merge(wallet::NotificationDoc::openapi());
     doc.merge(wallet::NonissuanceDoc::openapi());
+    doc.merge(wallet::ticket_management::TicketManagementDoc::openapi());
+    doc.merge(wallet::ticket_management::client::ClientTicketManagementDoc::openapi());
     doc.merge(connections::ConnectionDoc::openapi());
     doc.merge(markup::MarkupDoc::openapi());
+    doc.merge(search_controls::SearchControlDoc::openapi());
+    doc.merge(site_content::SiteContentDoc::openapi());
     doc.merge(search::SearchDoc::openapi());
     doc.merge(reprice::RepriceDoc::openapi());
     doc.merge(booking::BookingDoc::openapi());
@@ -181,6 +193,10 @@ pub fn router_with_search_limits(
         .merge(wallet::routes())
         .merge(connections::routes())
         .merge(markup::routes())
+        .merge(search_controls::routes())
+        .merge(site_content::routes())
+        .merge(sales_reports::routes())
+        .merge(portal_imports::routes())
         .merge(search::routes())
         .merge(reprice::routes())
         .merge(booking::routes())
@@ -195,12 +211,12 @@ pub fn router_with_search_limits(
         )
         .layer(middleware::from_fn(search_admission::retain_response))
         .layer(axum::Extension(search_admission::Admission::new(limits)))
-        .layer(middleware::from_fn(correlation))
         .layer(middleware::from_fn(identity::maintenance::gate))
         .layer(middleware::from_fn_with_state(
             state.clone(),
             identity::rollout::gate,
         ))
+        .layer(middleware::from_fn(correlation))
         .with_state(state)
 }
 
@@ -208,7 +224,7 @@ async fn correlation(request: Request, next: Next) -> Response {
     // Generate our own ID; do not log untrusted headers, query strings, bodies, or URLs.
     let id = uuid::Uuid::new_v4().to_string();
     let started = Instant::now();
-    let mut response = next.run(request).await;
+    let mut response = http_errors::normalize(next.run(request).await);
     response
         .headers_mut()
         .insert("cache-control", HeaderValue::from_static("no-store"));

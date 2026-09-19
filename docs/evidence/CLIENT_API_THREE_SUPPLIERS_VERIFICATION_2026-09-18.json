@@ -1,0 +1,305 @@
+{
+  "date": "2026-09-18",
+  "runs": {
+    "production-three-suppliers": [
+      {
+        "date": "2026-10-18",
+        "http": 200,
+        "partial": "false",
+        "reportedSupplierCount": 3,
+        "retainedBySupplier": [
+          [
+            "firsttrip",
+            14
+          ],
+          [
+            "takeoff",
+            21
+          ],
+          [
+            "triplover",
+            9
+          ]
+        ],
+        "returnedOffers": 44,
+        "route": "DAC-CGP",
+        "raw_by_supplier": {
+          "triplover": {
+            "success": true,
+            "raw_offers": 24
+          },
+          "firsttrip": {
+            "success": true,
+            "raw_offers": 24
+          },
+          "takeoff": {
+            "success": true,
+            "raw_offers": 28
+          }
+        }
+      },
+      {
+        "date": "2026-10-18",
+        "http": 200,
+        "partial": "false",
+        "reportedSupplierCount": 3,
+        "retainedBySupplier": [
+          [
+            "firsttrip",
+            11
+          ],
+          [
+            "takeoff",
+            24
+          ],
+          [
+            "triplover",
+            15
+          ]
+        ],
+        "returnedOffers": 50,
+        "route": "DAC-CXB",
+        "raw_by_supplier": {
+          "triplover": {
+            "success": true,
+            "raw_offers": 29
+          },
+          "firsttrip": {
+            "success": true,
+            "raw_offers": 29
+          },
+          "takeoff": {
+            "success": true,
+            "raw_offers": 33
+          }
+        }
+      },
+      {
+        "date": "2026-10-21",
+        "http": 200,
+        "partial": "false",
+        "reportedSupplierCount": 3,
+        "retainedBySupplier": [
+          [
+            "firsttrip",
+            123
+          ],
+          [
+            "takeoff",
+            93
+          ],
+          [
+            "triplover",
+            161
+          ]
+        ],
+        "returnedOffers": 377,
+        "route": "DAC-SIN",
+        "raw_by_supplier": {
+          "triplover": {
+            "success": true,
+            "raw_offers": 166
+          },
+          "firsttrip": {
+            "success": true,
+            "raw_offers": 124
+          },
+          "takeoff": {
+            "success": true,
+            "raw_offers": 93
+          }
+        }
+      }
+    ],
+    "production-three-suppliers-recheck": [
+      {
+        "date": "2026-10-18",
+        "http": 200,
+        "partial": "false",
+        "reportedSupplierCount": 3,
+        "retainedBySupplier": [
+          [
+            "firsttrip",
+            14
+          ],
+          [
+            "takeoff",
+            21
+          ],
+          [
+            "triplover",
+            9
+          ]
+        ],
+        "returnedOffers": 44,
+        "route": "DAC-CGP",
+        "raw_by_supplier": {
+          "triplover": {
+            "success": true,
+            "raw_offers": 24
+          },
+          "firsttrip": {
+            "success": true,
+            "raw_offers": 24
+          },
+          "takeoff": {
+            "success": true,
+            "raw_offers": 28
+          }
+        }
+      },
+      {
+        "date": "2026-10-18",
+        "http": 200,
+        "partial": "false",
+        "reportedSupplierCount": 3,
+        "retainedBySupplier": [
+          [
+            "firsttrip",
+            11
+          ],
+          [
+            "takeoff",
+            24
+          ],
+          [
+            "triplover",
+            15
+          ]
+        ],
+        "returnedOffers": 50,
+        "route": "DAC-CXB",
+        "raw_by_supplier": {
+          "triplover": {
+            "success": true,
+            "raw_offers": 29
+          },
+          "firsttrip": {
+            "success": true,
+            "raw_offers": 29
+          },
+          "takeoff": {
+            "success": true,
+            "raw_offers": 33
+          }
+        }
+      },
+      {
+        "date": "2026-10-21",
+        "http": 200,
+        "partial": "false",
+        "reportedSupplierCount": 3,
+        "retainedBySupplier": [
+          [
+            "firsttrip",
+            123
+          ],
+          [
+            "takeoff",
+            93
+          ],
+          [
+            "triplover",
+            160
+          ]
+        ],
+        "returnedOffers": 376,
+        "route": "DAC-SIN",
+        "raw_by_supplier": {
+          "triplover": {
+            "success": true,
+            "raw_offers": 165
+          },
+          "firsttrip": {
+            "success": true,
+            "raw_offers": 124
+          },
+          "takeoff": {
+            "success": true,
+            "raw_offers": 93
+          }
+        }
+      }
+    ]
+  },
+  "total_supplier_search_calls": 18,
+  "new_live_book_calls": 0,
+  "live_issue_calls": 0,
+  "live_cancel_calls": 0,
+  "live_pnr_refresh_calls": 1,
+  "pnr_refresh": {
+    "http": 200,
+    "status": "Booked",
+    "lastTicketTime": "19 Sep 2026, 12:44 PM",
+    "lastTicketTimeIso": "2026-09-19T12:44:00+06:00",
+    "lastTicketTimeZone": "Asia/Dhaka",
+    "saved_deadline_equals_verified_pnr": true,
+    "original_book_reply_preserved": true
+  },
+  "env_recheck": {
+    "parse_errors": [],
+    "application_dotenv_parse": "passed; intentional unsupported CLI argument reached usage check",
+    "credentials_file_changed_by_agent": false
+  },
+  "regular_tests": {
+    "passed": 106,
+    "failed": 0,
+    "ignored_at_run": 39
+  },
+  "fresh_database_suite": "passed; 50.94 seconds",
+  "all_target_clippy_warnings_denied": "passed",
+  "format_and_diff_checks": "passed",
+  "contract_validation": {
+    "responses": 18,
+    "reconciled_fare_breakdowns": 956,
+    "failures": []
+  },
+  "archives": {
+    "production-three-suppliers": {
+      "file": "isolated-database.dump",
+      "sha256": "9aee6b0c8da0be0220ac8a24451d1b9fa19b6347531fadeff89bd8ea167e65a9",
+      "archive_listing_verified": true,
+      "restore_tested": false
+    },
+    "production-three-suppliers-recheck": {
+      "file": "isolated-database.dump",
+      "sha256": "12d2e60aabcec7fde576942a6532184b3f7b6fcfcc09848c84e12c396dbe29ee",
+      "archive_listing_verified": true,
+      "restore_tested": false
+    },
+    "production-hold-evidence": {
+      "file": "post-pnr-refresh.dump",
+      "sha256": "7b4e303dd34fa1f5af65fa5b4f0f6be9c9721577dc68cf53cc76c6e8fc6f0820",
+      "archive_listing_verified": true,
+      "restore_tested": false
+    }
+  },
+  "source_sha256": {
+    "scripts/validate-client-contract.py": "e9cbbdae1a9c062efe1652583eaf5114eff785c8941ff25c6bd55b457c88c9c3",
+    "src/admin_bookings.rs": "9d5a752b4cf47d553a1c1be8bcefc5eba35d407f82527bf535284fe5658b75b8",
+    "src/api_docs.rs": "cfe6b099f8139213c37d323a98ac40800fbdd730c1f98ef489d728415ddce2fc",
+    "src/auth.rs": "49703994854e24b87196077b0bfb34ecdd14823abd28d2a2cc574eb6de353915",
+    "src/auth_admission.rs": "5a3453eaffecb3409ae5935818ed47f4cb07612610fb3586f0998e5f1d3193e7",
+    "src/booking.rs": "58bfedaa50ee34c1cd1ba3676aac6524b2ca8fedf2bc845dfce40bdff355b58b",
+    "src/booking/direct.rs": "b4d6ed529f84d810e9da697f8610c914a3887d098b6561305fc5f0b134236b26",
+    "src/booking/outcome.rs": "dfbc473441c069bec59c9acfee5a9335aa1f4f90a7a80eb0c1d112633acf39fc",
+    "src/booking/ticketing.rs": "44c764630989b2f28fbd5e6a29be2791ea27ea1475c82a717f06fdf3f8b2f809",
+    "src/client_contract.rs": "51bb01af126708ee6bc688d95196efe569989f23c22e588fdfa2752e645ee937",
+    "src/client_schemas.json": "7c387085e1b1cab23004a6a91bca5114da34401d4da43185f7b7c7099ff50ba2",
+    "src/http_errors.rs": "e6fcfe9e5ba815d618d53b1b0fbe9a0aa01458133f3fa09d9c8615e513f5bac0",
+    "src/lib.rs": "0b579647420800bc86539fbae8c960ea5b93717003940f812494736def5f2c2c",
+    "src/main.rs": "b0ef52b90432ff1fb60d73e9346a7fe01a7d11e10acdd17c775b193d8a2e3da9",
+    "src/reprice.rs": "f51525bf7022b0b829221a3525838942ba16ddb5ebcbdf9ce34cfdeb783b6777",
+    "src/reprice_admission.rs": "7d640005899aa9d3da3e45327a1ef03233092c593f4b12504ab586802e752f0d",
+    "src/search.rs": "83d7bda4c947072d7ce46461538318ccd8a5486e9d736a17c6dcdbf8a04832a7",
+    "tests/client_api_audit.rs": "38bce470084c1bc4688bfed385ff6735760e21d16688ef01c2a43b23fc22a188",
+    "tests/foundation.rs": "c4c22661c0649551c64c7b36c8dddd7a88b3edc34694454f6f1313ebdd1baaf1",
+    "tests/support/booking.rs": "db43b3f229dfe0ea0f100d5c2a8b6dabde628444f98fa7496afff78dfb8e4b1d",
+    "src/booking/deadline.rs": "76eab01bcb6d4cc2f1ea70ef5c5533de27cb59104f4b1996360ae182dd78f5e7"
+  },
+  "new_migrations": false,
+  "deployed": false,
+  "working_database_changed": false,
+  "scope": "local production-mode client router with live suppliers; separate deployed server not checked",
+  "isolated_test_cluster_stopped": true
+}

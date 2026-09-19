@@ -1,0 +1,281 @@
+{
+  "date": "2026-09-18",
+  "sourceCommit": "2d2c21f7ed346c906ddbe6f42267f83fa8335225",
+  "environment": "Triplover UAT; isolated local PostgreSQL",
+  "productionMutations": 0,
+  "regularSuite": {
+    "passed": 94,
+    "failed": 0,
+    "ignored": 32
+  },
+  "databaseIntegration": "passed",
+  "walletIntegration": "passed",
+  "offlineSecurityProbe": "passed: reproduced weaknesses",
+  "findings": [
+    {
+      "id": "F1",
+      "priority": "P1",
+      "title": "Queued Book dispatches after booking permission removal commits",
+      "observed": {
+        "http": 202,
+        "supplierBookCalls": 1
+      }
+    },
+    {
+      "id": "F2",
+      "priority": "P1",
+      "title": "Reprice transactions exhaust shared DB pool",
+      "observed": {
+        "http": 503,
+        "error": "DATABASE_UNAVAILABLE",
+        "poolConnections": 2
+      }
+    },
+    {
+      "id": "F3",
+      "priority": "P1",
+      "title": "Unauthenticated requests exhaust shared login quota",
+      "observed": {
+        "validAdminBefore": 200,
+        "validAdminAfter": 429,
+        "oversizedSecretRequests": 120
+      }
+    },
+    {
+      "id": "F4",
+      "priority": "P2",
+      "title": "Schema validation returns plain text while business errors return JSON"
+    },
+    {
+      "id": "F5",
+      "priority": "P2",
+      "title": "OpenAPI core success responses are untyped objects"
+    },
+    {
+      "id": "F6",
+      "priority": "P2",
+      "title": "Primary Search guide conflicts with current B2B prices and held Issue capability"
+    }
+  ],
+  "uatMutationCounts": {
+    "book": 1,
+    "issue": 1,
+    "capturedWalletEntries": 1
+  },
+  "uatPayment": {
+    "currency": "BDT",
+    "legacyGross": "5349.00",
+    "acceptedPayable": "5658.00",
+    "capturedMinor": "565800",
+    "finalHoldMinor": "0",
+    "finalAvailableMinor": "99434200"
+  },
+  "uatOperations": [
+    {
+      "case": "book-replay",
+      "group": "uat-evidence",
+      "status": 200,
+      "error": null,
+      "sha256": "ddaca38735374b9fd940a8020a3b945621e22a54f517f511ab1cfaaf19495421"
+    },
+    {
+      "case": "book",
+      "group": "uat-evidence",
+      "status": 200,
+      "error": null,
+      "sha256": "ddaca38735374b9fd940a8020a3b945621e22a54f517f511ab1cfaaf19495421"
+    },
+    {
+      "case": "booking-saved",
+      "group": "uat-evidence",
+      "status": 200,
+      "error": null,
+      "sha256": "ddaca38735374b9fd940a8020a3b945621e22a54f517f511ab1cfaaf19495421"
+    },
+    {
+      "case": "issue-replay",
+      "group": "uat-evidence",
+      "status": 200,
+      "error": null,
+      "sha256": "8fef0f8f9907593a3ea8f7a59fa2bbc13d0a2135c1a8aedab8f972cabe31e4c9"
+    },
+    {
+      "case": "issue",
+      "group": "uat-evidence",
+      "status": 200,
+      "error": null,
+      "sha256": "8fef0f8f9907593a3ea8f7a59fa2bbc13d0a2135c1a8aedab8f972cabe31e4c9"
+    },
+    {
+      "case": "multicity-search",
+      "group": "uat-evidence",
+      "status": 503,
+      "error": "ALL_SUPPLIERS_FAILED",
+      "sha256": "9f08290816c38eaaf9480db1832b7b202675fd33573d99acdb94b4b9fe34c1cf"
+    },
+    {
+      "case": "oneway-0-reprice",
+      "group": "uat-evidence",
+      "status": 200,
+      "error": null,
+      "sha256": "9374d424a6bc92ff762ab10d894718f29532259720242f05f585ee26cfd57264"
+    },
+    {
+      "case": "oneway-0-rules",
+      "group": "uat-evidence",
+      "status": 200,
+      "error": null,
+      "sha256": "b3b563c1196aa7b88f7739316bf8aa4b41a118aa818882325051ed695b189f5c"
+    },
+    {
+      "case": "oneway-accept",
+      "group": "uat-evidence",
+      "status": 200,
+      "error": null,
+      "sha256": "0ca8135b1e8c66baf60c2530579a97cc3b805a205901a376cb3715b82acddd87"
+    },
+    {
+      "case": "oneway-search",
+      "group": "uat-evidence",
+      "status": 200,
+      "error": null,
+      "sha256": "612d55edc4b3360a052a77def83149cf536dc1572ea5432bebccae612bdf6c90",
+      "offers": 9
+    },
+    {
+      "case": "pnr",
+      "group": "uat-evidence",
+      "status": 200,
+      "error": null,
+      "sha256": "8e7c6da02b20f59a667e07e131f1fd23cf37abb6ba16a78fedc3c0d9ea1c4ad0"
+    },
+    {
+      "case": "return-0-reprice",
+      "group": "uat-evidence",
+      "status": 200,
+      "error": null,
+      "sha256": "d4fbfdf358b0d9d94bb0bfe6dbeb8c1e1fa57c855fcf10f897690144ba23ac58"
+    },
+    {
+      "case": "return-0-rules",
+      "group": "uat-evidence",
+      "status": 200,
+      "error": null,
+      "sha256": "e8cbbce9cf5df48bbd28c2703c69734adb4a0acba7da3e28c0947155054036b2"
+    },
+    {
+      "case": "return-accept",
+      "group": "uat-evidence",
+      "status": 200,
+      "error": null,
+      "sha256": "1767a238002b33c78cf3ad0f1657d45ff96027727ab5afcdddd04e6966cc0871"
+    },
+    {
+      "case": "return-search",
+      "group": "uat-evidence",
+      "status": 200,
+      "error": null,
+      "sha256": "67092546327d3efbd0375408dc4ee0e264e5a685ce17deafc467e9517f98c354",
+      "offers": 90
+    },
+    {
+      "case": "ticket-report",
+      "group": "uat-evidence",
+      "status": 200,
+      "error": null,
+      "sha256": "94d1199f033bc2c28c2eaf37720318d0a25b037476a0d8cdd346510b007cedee"
+    },
+    {
+      "case": "ticket-saved",
+      "group": "uat-evidence",
+      "status": 200,
+      "error": null,
+      "sha256": "8fef0f8f9907593a3ea8f7a59fa2bbc13d0a2135c1a8aedab8f972cabe31e4c9"
+    },
+    {
+      "case": "bg-multicity-0-reprice",
+      "group": "alternate-evidence",
+      "status": 200,
+      "error": null,
+      "sha256": "edec08115c8041c862760f9178623bb2730793f5ae3759b918125031b2a68c46"
+    },
+    {
+      "case": "bg-multicity-0-rules",
+      "group": "alternate-evidence",
+      "status": 200,
+      "error": null,
+      "sha256": "4ca49fa01b6a633d5165101c5ffd3fa6f5015bba4aba7dc74b7665a3b017a8f3"
+    },
+    {
+      "case": "bg-multicity-accept",
+      "group": "alternate-evidence",
+      "status": 200,
+      "error": null,
+      "sha256": "9212ee6d2ba8ad09e22ab929a498b0f459dc6553dd935de959f1b8b3e6d2de4d"
+    },
+    {
+      "case": "bg-multicity-search",
+      "group": "alternate-evidence",
+      "status": 200,
+      "error": null,
+      "sha256": "bd2885861423b1f0e1f763a6b9b6cf880e7eff76993b2354083050b12dbac83d",
+      "offers": 3
+    },
+    {
+      "case": "bs-family-return-0-reprice",
+      "group": "alternate-evidence",
+      "status": 200,
+      "error": null,
+      "sha256": "8dcf6c5618d0ec20dfbe090e7c417ff693cb82f7fd4da197f9881574a10d15a8"
+    },
+    {
+      "case": "bs-family-return-0-rules",
+      "group": "alternate-evidence",
+      "status": 200,
+      "error": null,
+      "sha256": "4f3cbed9f3bfbd3e1754fbc66e7c78884d92efe4b6187247cd79269de4e9783d"
+    },
+    {
+      "case": "bs-family-return-accept",
+      "group": "alternate-evidence",
+      "status": 200,
+      "error": null,
+      "sha256": "d164c4f68b776ba243307fb5effac6fdbf909bca1fd1b4103fb8101487d12255"
+    },
+    {
+      "case": "bs-family-return-search",
+      "group": "alternate-evidence",
+      "status": 200,
+      "error": null,
+      "sha256": "9caa700d635f9eb9a4846beae27e52688c7bbb083600908d6d89eeabfc56c8df",
+      "offers": 72
+    },
+    {
+      "case": "tg-multicity-search",
+      "group": "alternate-evidence",
+      "status": 503,
+      "error": "ALL_SUPPLIERS_FAILED",
+      "sha256": "9f08290816c38eaaf9480db1832b7b202675fd33573d99acdb94b4b9fe34c1cf"
+    }
+  ],
+  "incompleteCoverage": [
+    "Production deployment/proxy",
+    "Live Firsttrip and Takeoff",
+    "Live cancellation and direct issue",
+    "Dependency advisories",
+    "Full portal identity rollout"
+  ],
+  "qualityChecks": {
+    "cargoFmt": "passed",
+    "targetedClippy": "passed",
+    "gitDiffCheck": "passed"
+  },
+  "fareBreakdownsVerified": 184,
+  "uatAlternateProbe": "completed",
+  "uatSupplierTimeoutEvidence": {
+    "case": "tg-multicity",
+    "transportError": "Timeout",
+    "publicStatus": 503,
+    "publicError": "ALL_SUPPLIERS_FAILED"
+  }
+}

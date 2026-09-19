@@ -312,6 +312,8 @@ systemctl reload nginx
 
 `nginx -t` fail হলে reload করবে না। Symlink আগে থাকলে আবার তৈরি করবে না।
 
+এই local Nginx deployment-এ backend environment-এ `AUTH_TRUSTED_PROXY_IPS=127.0.0.1,::1` সেট করে backend restart করবে। উপরের `proxy_set_header X-Real-IP $remote_addr` রাখতে হবে: এটি caller-এর পাঠানো header overwrite করে। Backend কেবল তালিকার exact proxy peer থেকে একটি valid `X-Real-IP` গ্রহণ করে; অন্য peer-এর forwarding header উপেক্ষা করে। সেটিং ফাঁকা থাকলে socket IP-তেই login source limit হয়, ফলে proxy-এর সব ব্যবহারকারী একই source quota পাবে। CIDR বা ইচ্ছেমতো public IP trust করবে না। অন্য edge proxy থাকলে তার client-IP configuration আলাদাভাবে যাচাই করবে। Proxy-generated errors (যেমন Nginx body-limit 413) backend JSON contract-এর বাইরে; client HTTP status-ও সামলাবে।
+
 ## 9. HTTPS certificate
 
 নিজের domain-এর DNS এই VPS-এ পৌঁছানোর পরে, domain বদলে চালাও:

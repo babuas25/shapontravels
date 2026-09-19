@@ -1,0 +1,79 @@
+{
+  "date": "2026-09-18",
+  "environment": "real Triplover production through local production-mode client router",
+  "hosts": [
+    "https://api.triplover.com/",
+    "https://apiv2.triplover.com/"
+  ],
+  "route": "DAC-CGP",
+  "departure": "2026-10-18",
+  "flight": "BS 103",
+  "one_calendar_month_ahead": true,
+  "booking_id": "f67ebb85-4ae9-4804-8348-ab3914056e54",
+  "public_booking_reference": "STR0AD74R0AD74R",
+  "client_payable_bdt": "4144.61",
+  "search_offers": 7,
+  "http": {
+    "search": 200,
+    "fare_rules": 200,
+    "reprice": 200,
+    "acceptance": 200,
+    "book": 200,
+    "book_replay": 200,
+    "saved_booking": 200,
+    "pnr": 200,
+    "supplier_global": 200,
+    "supplier_report": 200
+  },
+  "supplier_booking_status": "Created",
+  "pnr_status": "Booked",
+  "supplier_report_status": "Booked",
+  "supplier_report_status_for": "Booking",
+  "supplier_ticket_number_present": false,
+  "book_dispatches": 1,
+  "issue_dispatches": 0,
+  "cancel_dispatches": 0,
+  "additional_replay_dispatches": 0,
+  "local_wallet_entries": 0,
+  "book_replay_and_saved_reply_equal": true,
+  "raw_deadlines": {
+    "book": "19/09/2026 14:44:35",
+    "pnr": "19 Sep 2026, 12:44 PM",
+    "report": null,
+    "timezone_provided": false,
+    "effective_deadline_confirmed": false
+  },
+  "env_validation": {
+    "parse_error_lines": [
+      8,
+      14
+    ],
+    "normal_startup_check": "could not parse .env",
+    "file_changed": false,
+    "audit_process_ticketing_enabled": false
+  },
+  "verification": {
+    "production_prebooking_probe": "passed",
+    "production_hold_probe": "passed",
+    "offline_issue_direct_cancel_prohibition": "passed",
+    "targeted_clippy_warnings_denied": "passed",
+    "format_and_diff": "passed",
+    "contract_responses": 11,
+    "reconciled_fare_breakdowns": 15,
+    "contract_failures": []
+  },
+  "backup": {
+    "sha256": "ba1d92b7a0daad17dc8b861c51c27bc02dad5ea86618b520a627f435d8ae20d0",
+    "archive_listing_verified": true,
+    "restore_tested": false
+  },
+  "source_sha256": {
+    "tests/client_api_audit.rs": "f7039fa9d5c60b2bf72cfe59c2159ccf3b7d92fbdb3572ae49c732ce8488fd89"
+  },
+  "application_source_changed_since_previous_verification": false,
+  "new_migrations": false,
+  "deployed": false,
+  "working_database_changed": false,
+  "supplier_hold_cancelled": false,
+  "isolated_test_cluster_stopped": true
+}

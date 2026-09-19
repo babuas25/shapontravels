@@ -29,9 +29,13 @@ When configured, the Supabase client additionally denies identity tables and all
 
 The Clerk auth-email relay and wallet scheduler retain their own signature/bearer authentication rather than interactive session authentication. Their routes are specifically allowlisted; other old workers are blocked in preview.
 
+## Search Control added after the identity migration
+
+Flight Search Control now uses Rust usage records, atomic daily budgets, audited versioned changes and canonical Super Admin access. See [Search Control](SEARCH_CONTROLS.md). It does not use legacy Supabase search controls.
+
 ## Features outside the identity migration
 
-Marketing content, announcements, promotional popups, search-history suggestions, supplier configuration, markup/search controls, manual/imported legacy bookings, legacy booking reconciliation, ticket-management void/refund/reissue, and unrelated media settings still have legacy dependencies. The canonical preview uses the existing dashboard shell with only ported navigation. It does not silently fall back to these old identity/business writers. Native Rust Search → Reprice → Hold checkout routes are allowed; legacy checkout attempts without a Rust hold draft show an access/setup state.
+Marketing content, announcements, promotional popups, search-history suggestions, supplier configuration, manual/imported legacy bookings, legacy booking reconciliation, ticket-management void/refund/reissue, and unrelated media settings still have legacy dependencies. The canonical preview uses the existing dashboard shell with only ported navigation. It does not silently fall back to these old identity/business writers. Native Rust Search → Reprice → Hold checkout routes are allowed; legacy checkout attempts without a Rust hold draft show an access/setup state.
 
 Existing native Rust restrictions remain deliberate: staff/sub-user booking submission is not expanded to legacy booking workflows, a new B2B account does not gain machine API permissions, and funds/history are not transferred by an email/name match. These are not a full migration of the unrelated legacy booking subsystem.
 

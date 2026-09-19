@@ -19,7 +19,13 @@ assert(config.env.PORTAL_IDENTITY_MODE==='canonical'&&config.env.APP_BIND==='127
 assert(config.env.PORTAL_IDENTITY_CLERK_SECRET_KEY?.startsWith('sk_test_'),'Clerk test instance required');
 assert(!config.env.PORTAL_IDENTITY_OPERATOR_TOKEN&&!config.env.PORTAL_IDENTITY_OPERATOR_ID,'Operator credentials must not be retained in serving configuration');
 const existing=await fetch('http://127.0.0.1:18081/health/live',{signal:AbortSignal.timeout(1500)}).then(r=>r.ok).catch(()=>false);
-assert(!existing,'Port 18081 is already serving. Stop that backend before restarting.');
+if (existing) {
+  const ready=await fetch('http://127.0.0.1:18081/health/ready',{signal:AbortSignal.timeout(3000)}).then(r=>r.ok).catch(()=>false);
+  console.log('Backend is already running at http://127.0.0.1:18081.');
+  console.log(ready ? 'Health check passed. You can use the frontend; no second backend is needed.' : 'The process is running, but its readiness check failed. Check the running backend logs.');
+  console.log('To rebuild and restart, stop its original launcher first, then run this command again.');
+  process.exit(ready ? 0 : 1);
+}
 const pg=path.join(root,'.local/pgsql/bin');
 if(spawnSync(path.join(pg,'pg_isready'),['-h','127.0.0.1','-p','55439'],{stdio:'ignore'}).status!==0) {
   const started=spawnSync(path.join(pg,'pg_ctl'),['-D',path.join(root,'.local/tier-check/data'),'-l',path.join(root,'.local/tier-check/postgres.log'),'-o','-h 127.0.0.1 -p 55439','-w','start'],{stdio:'inherit'});

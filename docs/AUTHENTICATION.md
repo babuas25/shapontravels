@@ -10,7 +10,13 @@ Tokens contain 32 random bytes encoded using base64url. Only their SHA-256 diges
 
 Every authenticated machine request joins current client and credential state and reads current permissions/pricing context. Secret reset rotates immediately, retires the old credential and invalidates tokens minted from it; there is no overlap. Revoke disables the credential. Client disable deletes outstanding tokens so re-enable cannot resurrect them. Already accepted in-flight work is not represented as cancelled; later transaction workflows must enforce their execution gates.
 
-All machine requests have a PostgreSQL-backed per-client, 60-second rate window (default 60 requests). Token exchange/admin login also have shared global protection (120 attempts/minute) and identity protection (10 attempts/minute), including successful attempts. No forwarded IP headers are trusted. Return 429 on exhaustion; the client should back off for 60 seconds. Password hashing runs outside async workers with concurrency capped at four. This implementation's global login cap is conservative and should be tuned with deployment traffic evidence.
+All authenticated machine requests have a PostgreSQL-backed per-client, 60-second rate window (default 60 requests). Token exchange and admin login use **separate** quotas: 120 attempts/minute per source IP and 10 attempts/minute per identity, including successes. Blank/oversized credentials are rejected before consuming login quota. Exhaustion returns 429 `RATE_LIMITED` with `Retry-After: 60`.
+
+Sources come from the socket peer. Forwarding headers are ignored unless that exact peer IP is listed in `AUTH_TRUSTED_PROXY_IPS`. A trusted proxy must overwrite `X-Real-IP` with one valid address; missing, duplicate or invalid values return 400 `INVALID_CLIENT_ADDRESS`. `X-Forwarded-For` is not trusted. Follow the [Nginx setup](SERVER_SETUP.md) when deploying behind a proxy; otherwise all callers behind it share its source bucket.
+
+Password verification runs outside async workers with separate machine/admin capacity (two concurrent verifications each). Full capacity fails immediately with 503 `AUTHENTICATION_BUSY`, `Retry-After: 1`; there is no password-verification wait queue. Secret provisioning uses its separate four-slot hashing pool. These bounds do not claim complete network/DDoS isolation.
+
+Book rechecks current client active state, booking permission and managed API eligibility after acquiring its reservation/authority lock. Direct-intent reservations also check ticketing permission. Held Issue rechecks its current execution grants under the reservation lock. A committed permission removal while Book is waiting returns 403 `CLIENT_BOOKING_DISABLED` with no new supplier dispatch. Credential validity is checked on authentication; work whose reservation has already committed is not cancelled by a later revoke.
 
 ## Human administration
 
@@ -24,7 +30,7 @@ The resource ownership helper checks opaque resource ID, owner client and resour
 
 ## Responses and documentation
 
-Swagger provides independent `machine_token` and `admin_session` security schemes. Token/secret responses and other HTTP responses use `Cache-Control: no-store`. Platform errors have `{"error":"CODE"}`; they are distinct from the future supplier-compatible flight response envelope. Invalid JSON/schema input currently uses Axum's 400/415/422 rejection; auth rejection is 401, permission denial 403, absence 404, conflict 409, rate limit 429 and database failure 503. Each response has a generated `x-request-id`.
+Swagger provides independent `machine_token` and `admin_session` security schemes. Token/secret responses and other HTTP responses use `Cache-Control: no-store`. Platform errors, including framework JSON/body/path/query rejections, have `{"error":"CODE"}`. Invalid JSON/schema input uses JSON 400/415/422 responses; oversized bodies return JSON 413; unknown routes/methods return JSON 404/405. Flight successes retain their documented envelopes. auth rejection is 401, permission denial 403, absence 404, conflict 409, rate limit 429 and database failure 503. Each response has a generated `x-request-id`.
 
 Use separate least-privilege PostgreSQL roles for migration and runtime in deployment. Deployment secret rotation, expired-session/rate-bucket cleanup scheduling, external audit export, backups and retention remain deployment work; the service does not claim tamper resistance against a PostgreSQL owner/superuser.
 
@@ -39,3 +45,5 @@ Use separate least-privilege PostgreSQL roles for migration and runtime in deplo
 `GET /auth/me` includes the trusted `tier` (`basic`, `professional`, `enterprise`; null for B2C). New/existing B2B clients default to Basic under migration 0021. Existing client edits preserve tier. Only a human Superadmin can assign another tier through `PUT /admin/clients/{id}/tier`; human Admin can read it through GET. Machine credentials cannot assign a tier. See [B2B tiers and frontend pricing](B2B_TIERS.md).
 
 `/auth/me` also exposes the current `commission_share_percent`, captured atomically with tier. Human Admin/Superadmin can configure the global shares via `GET/PUT /admin/tier-policy`; only Superadmin can assign a client tier. Existing tokens use current configuration on subsequent requests.
+
+Ticket-management requests use distinct `ticket-management:read` / `ticket-management:write` permissions (migration 0052; no automatic grants). Only machine tokens are accepted on these routes. They recheck token/credential validity, current client permission and wallet-owner status under the authority barrier, then restrict every booking/request to the exact client ID as well as its wallet owner. These permissions authorize agency-to-staff requests and customer quotation decisions, never supplier execution or staff settlement.

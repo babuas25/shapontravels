@@ -299,7 +299,7 @@ async fn inbox_mail_queue_worker_and_barrier() {
         .await
         .is_err()
     );
-    // Onboarding enqueues recipient + archive exactly once, no passwords/mail bodies.
+    // Onboarding enqueues only the recipient, exactly once. Archive delivery is removed.
     assert_eq!(
         request(
             &router,
@@ -322,11 +322,12 @@ async fn inbox_mail_queue_worker_and_barrier() {
         .0,
         200
     );
-    assert_eq!(count(&pool, "portal_identity_mail").await, 2);
+    assert_eq!(count(&pool, "portal_identity_mail").await, 1);
+    sqlx::query("INSERT INTO portal_identity_mail(id,kind,audience,user_id) SELECT $1,'account','recipient',id FROM portal_users WHERE clerk_user_id='user_mail'").bind(Uuid::new_v4()).execute(&pool).await.unwrap();
     let (a, b) = tokio::join!(mail::claim(&pool), mail::claim(&pool));
     let d = a.unwrap().unwrap();
-    let archive = b.unwrap().unwrap();
-    assert_ne!(d.id, archive.id);
+    let second = b.unwrap().unwrap();
+    assert_ne!(d.id, second.id);
     mail::start(&pool, d.id, d.token, d.fence).await.unwrap();
     assert!(mail::start(&pool, d.id, d.token, d.fence).await.is_err());
     mail::finish(&pool, &d, mail::Outcome::Unknown)
@@ -340,15 +341,15 @@ async fn inbox_mail_queue_worker_and_barrier() {
             .await
             .is_err()
     );
-    mail::finish(&pool, &archive, mail::Outcome::NotSent)
+    mail::finish(&pool, &second, mail::Outcome::NotSent)
         .await
         .unwrap();
     assert!(mail::claim(&pool).await.unwrap().is_none());
-    sqlx::query("UPDATE portal_identity_mail SET next_attempt_at=clock_timestamp()-interval '1 second' WHERE id=$1").bind(archive.id).execute(&pool).await.unwrap();
+    sqlx::query("UPDATE portal_identity_mail SET next_attempt_at=clock_timestamp()-interval '1 second' WHERE id=$1").bind(second.id).execute(&pool).await.unwrap();
     let retry = mail::claim(&pool).await.unwrap().unwrap();
-    assert_eq!(retry.fence, archive.fence + 1);
+    assert_eq!(retry.fence, second.fence + 1);
     assert!(
-        mail::finish(&pool, &archive, mail::Outcome::Sent)
+        mail::finish(&pool, &second, mail::Outcome::Sent)
             .await
             .is_err()
     );
@@ -527,7 +528,7 @@ async fn inbox_mail_queue_worker_and_barrier() {
     worker.tick(&pool, &active_runtime).await.unwrap();
     worker.tick(&pool, &active_runtime).await.unwrap();
     assert_eq!(effects.writes.load(Ordering::SeqCst), 2);
-    assert_eq!(mailer.calls.load(Ordering::SeqCst), 2);
+    assert_eq!(mailer.calls.load(Ordering::SeqCst), 1);
     // Fresh zero wallet can be deleted while preserving the wallet and clients.
     let owner = seed(&pool, "user_zero", "customer").await;
     let wo = Uuid::new_v4();

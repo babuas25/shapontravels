@@ -1,4 +1,4 @@
-# Public Search and FareRules — initial direct-flight release
+# Public Search and FareRules
 
 ## Setup in Swagger
 
@@ -9,7 +9,7 @@
 
 ```json
 {
-  "routes": [{"origin": "DAC", "destination": "CXB", "departureDate": "2026-09-29"}],
+  "routes": [{"origin": "DAC", "destination": "CXB", "departureDate": "2026-10-18"}],
   "adults": 1,
   "childs": 0,
   "infants": 0,
@@ -20,21 +20,21 @@
 }
 ```
 
-Search accepts documented cabin classes 1–5. The initial request bounds are 1–9 seated passengers, at least one adult, at most one infant per adult, and at most six requested routes. Child ages must match the child count and lie in 2–11. Only the observed optional fareType `1` is supported until more supplier enum evidence exists. Unknown fields such as client-supplied agent/audience overrides are rejected.
+Search accepts documented cabin classes 1–5. The initial request bounds are 1–9 total passengers including infants, at least one adult, at most one infant per adult, and at most six requested routes. Child ages must match the child count and lie in 2–11. Only the observed optional fareType `1` is supported until more supplier enum evidence exists. Unknown fields such as client-supplied agent/audience overrides are rejected.
 
 ## Response and pricing
 
-Results are at `item1.airSearchResponses[]`. Each offer's `totalPrice` is the count-aggregated selling total after the applicable active rule and approved per-passenger two-decimal half-up rounding. Passenger/component discount values derive from the rounded selling totals. Original pricing snapshots and rule IDs/versions remain private in PostgreSQL.
+Results are at `item1.airSearchResponses[]`. For B2B, each offer's `totalPrice` is count-aggregated **published gross (original base + taxes)**, excluding separate AIT. It is not the final payable. Read `fareBreakdown.payable` or the owner-scoped pricing API for the exact tier payable. For B2C, legacy totals retain the marked-up selling projection. Two-decimal per-passenger rounding precedes count aggregation. Original supplier pricing and rule versions remain private. See [the client guide](CLIENT_API_GUIDE.md) and [tier arithmetic](B2B_TIERS.md).
 
-Search summary/filter metadata is aggregated **after supplier selection and markup**, from the final `item1.airSearchResponses` only. `X-Search-Summary-Scope: retained-selling-offers` identifies this contract. Aggregation is separate from markup; the offer projection still changes only its permitted pricing fields.
+Search summary/filter metadata is aggregated **after supplier selection and public price projection**, from the final `item1.airSearchResponses` only. `X-Search-Summary-Scope: retained-selling-offers` identifies this contract. Aggregation is separate from markup; the offer projection still changes only its permitted pricing fields.
 
 | Existing field | Aggregate meaning |
 | --- | --- |
 | `totalFlights` | Number of returned fare offers, including distinct fare classes; not unique physical flights or direction combinations. |
 | `supplierCount` | Number of supplier connections represented by retained offers; excludes failed, disabled and entirely discarded sources. |
-| `minMaxPrice.minNetPrice` / `maxNetPrice` | Minimum/maximum final group selling `totalPrice`; AIT is already included. |
-| `minNetPriceAit` / `maxNetPriceAit` | Count-aggregated AIT of the corresponding net-price extremum offer. Do not add it again. Tied minima use the first retained offer; tied maxima use the last. |
-| `minMaxPrice.minPrice` / `maxPrice` | Independent extrema of gross Base+Tax+AIT, aggregated by passenger count; gross is not the payable selling price and receives no markup. |
+| `minMaxPrice.minNetPrice` / `maxNetPrice` | Minimum/maximum returned group `totalPrice`: published base+tax gross for B2B; selling total for B2C. These are not B2B payable filters. |
+| `minNetPriceAit` / `maxNetPriceAit` | Count-aggregated AIT of the corresponding price extremum offer, retained as evidence. Use final payable directly; do not add this field to it. Tied minima use the first retained offer; tied maxima use the last. |
+| `minMaxPrice.minPrice` / `maxPrice` | Independent extrema of Base+Tax+AIT evidence, aggregated by passenger count; gross is not the payable selling price and receives no markup. |
 | `airlineFilters[]` | One row per retained `platingCarrier`, sorted by carrier code. Counts and minimum net/gross fields use only that airline's retained fares. |
 | `stops` | Sorted distinct supplier-reported direction stop counts across every route and selectable direction. Counts are not summed across a roundtrip/multicity itinerary. |
 | `totalPages` | If numeric, 1 for a nonempty complete response or 0 for empty. Existing null stays null. No public pagination endpoint is provided. |
@@ -51,7 +51,7 @@ Headers:
 
 Only returned offers with matching passenger counts, reconciled single-component pricing and no unverified ancillary/service charge are projected. Nonempty branded-fare mapping is deferred. Missing markup configuration fails with `PRICING_CONFIGURATION_ERROR`; unsupported mapping/coverage fails rather than exposing a partially marked-up offer.
 
-**Supplier selection precedes markup.** For conservatively equivalent offers, Search chooses the lowest original supplier `totalPrice` across the active connections, using exact decimal comparison. This is the total for all passengers, excluding platform markup. Equal supplier totals prefer **Takeoff → Firsttrip → Triplover**, as approved on 2026-09-09. Each retained class/fare option then receives its applicable markup; the public `totalPrice` remains the selling total. Even if passenger rounding makes the chosen selling total higher, supplier-total ranking is preserved.
+**Supplier selection precedes markup.** For conservatively equivalent offers, Search chooses the lowest original supplier `totalPrice` across the active connections, using exact decimal comparison. This is the total for all passengers, excluding platform markup. Equal supplier totals prefer **Takeoff → Firsttrip → Triplover**, as approved on 2026-09-09. Each retained class/fare option receives its applicable markup in its pricing snapshot; public B2B `totalPrice` remains published base+tax gross. Even if passenger rounding makes the chosen selling total higher, supplier-total ranking is preserved.
 
 Equivalence is deliberately strict: reported `bookingClass`/RBD (for example Q or V), `serviceClass`, fare basis, carriers, ordered routes/segments, dates/times, baggage and refundability must match. `cabinClass` is optional and is excluded from the main key: null/missing/empty labels can match a known label when all required attributes agree. Explicitly conflicting nonempty cabin labels on any corresponding segment keep the entire otherwise-matching group separate, so an unknown label cannot bridge Economy and Business. Unknown fields, base/tax/AIT breakdown, fee metadata and other non-reference attributes remain in the comparison. Only the evidenced source/transaction/item/segment/component references and quoted total/discount fields are removed from the private key; original and returned offer shapes are preserved. Different display metadata, baggage representations or base/tax breakdowns may therefore keep otherwise similar offers separate pending verified normalization. Identical offers from the same supplier tied at its lowest price retain their original order.
 
@@ -80,11 +80,11 @@ The server checks ownership, expiry and an exact complete-direction match, then 
 
 Both the offer and its parent Search must remain unexpired, including after the supplier responds. FareRules requires the saved supplier to remain enabled with the same availability epoch and configured currency. An availability change returns `409 NEW_SEARCH_REQUIRED`; currency mismatch returns `422 SUPPLIER_CURRENCY_MISMATCH`. The configured supplier timeout applies, and both adapter timeouts and elapsed deadlines return `504 SUPPLIER_TIMEOUT`. A success envelope must include a valid `fareRuleDetails` array; malformed rules return `502 UPSTREAM_FARE_RULES_ERROR`, without invalidating an otherwise usable price.
 
-Platform auth/configuration/validation errors currently retain the established platform error format `{"error":"CODE"}`; success pipeline responses use supplier item1/item2 envelopes. Full flight error/OpenAPI schema compatibility remains part of final contract work.
+Platform auth/configuration/validation errors currently retain the established platform error format `{"error":"CODE"}`; success pipeline responses use supplier item1/item2 envelopes. The public OpenAPI includes typed extensible flight, booking, ticket, pricing and wallet response schemas; unknown supplier metadata may remain present.
 
 ## Limits and validation
 
-- Public RePrice and local price acceptance are documented in [REPRICE_API.md](REPRICE_API.md). Hold Book/status/reconciliation are documented in [BOOKING_API.md](BOOKING_API.md); hold booking uses the approved no-payment policy; Cancel, NewTicket and ticket issue remain unavailable.
+- Public RePrice and local price acceptance are documented in [REPRICE_API.md](REPRICE_API.md). Hold Book/status/reconciliation are documented in [BOOKING_API.md](BOOKING_API.md); hold booking uses the approved no-payment policy; held-ticket `POST /api/ticket/NewTicket` is implemented subject to ticketing, supplier and wallet gates. Real Direct Issue and real held cancellation remain disabled.
 - Search response bodies have a 64 MiB cap; other supplier reads retain an 8 MiB cap. Connection timeouts come from admin configuration; the supplier adapter and whole request remain bounded.
 - Complete canonical equivalence, dynamic complex-route matching, branded fares and multiple components remain unfinished. Search and offer expiry indexes are present; temporary Search cleanup is described below.
 - The working database's clients/rules/supplier activation settings are not changed by integration tests. Explicit production smoke uses a separate empty local database with temporary test identities/default rule.
@@ -99,7 +99,7 @@ A rejected RePrice applies to the selected offer, not every offer from its airli
 Use the other offer's own item/selected segment references for FareRules and RePrice. If the Search or supplier session expired, run a new Search and replace all references together. See [prebooking flow](PREBOOKING_FLOW.md).
 
 
-FareRules supplier business/transport failures return HTTP 502 `{"error":"UPSTREAM_FARE_RULES_ERROR"}` without exposing raw supplier messages. The request deadline still returns 504 `SUPPLIER_TIMEOUT`. Show “Fare rules are currently unavailable” and allow customer-initiated RePrice for the selected offer; this error does not mark the fare unavailable or invalidate its price. Do not invent cancellation/refund rules. RePrice success still requires explicit local acceptance, and this flow stops before Book/Issue.
+FareRules supplier business/transport failures return HTTP 502 `{"error":"UPSTREAM_FARE_RULES_ERROR"}` without exposing raw supplier messages. The request deadline still returns 504 `SUPPLIER_TIMEOUT`. Show “Fare rules are currently unavailable” and allow customer-initiated RePrice for the selected offer; this error does not mark the fare unavailable or invalidate its price. Do not invent cancellation/refund rules. RePrice success still requires explicit local acceptance, and FareRules/RePrice alone do not Book/Issue; those require their own authorized operations.
 
 
 ## Processing and load measurement

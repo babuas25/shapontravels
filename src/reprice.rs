@@ -62,10 +62,16 @@ pub(crate) async fn reprice(
     machine.require("search:read")?;
     let id =
         Uuid::parse_str(&request.item_code_ref).map_err(|_| error("INVALID_OFFER_REFERENCE"))?;
+    let _permit = crate::reprice_admission::Permit::acquire(&state.pool, machine.client_id)?;
     // Serialize versions of one offer; acceptance takes the same lock.
     let mut tx = state.pool.begin().await?;
-    let row:Option<Offer>=sqlx::query_as("SELECT o.search_id,o.supplier_id,o.availability_epoch,o.original,o.selling,o.tier_pricing,o.reference_map,s.request,s.currency,(o.expires_at>clock_timestamp() AND s.expires_at>clock_timestamp()) AS valid FROM flight_offers o JOIN flight_searches s ON s.id=o.search_id WHERE o.id=$1 AND o.client_id=$2 FOR UPDATE OF o")
- .bind(id).bind(machine.client_id).fetch_optional(&mut *tx).await?;
+    sqlx::query("SET LOCAL lock_timeout='250ms'")
+        .execute(&mut *tx)
+        .await?;
+    // NOWAIT also rejects contention across processes; a second replica must
+    // not hold a connection waiting behind another replica's supplier call.
+    let row:Option<Offer>=sqlx::query_as("SELECT o.search_id,o.supplier_id,o.availability_epoch,o.original,o.selling,o.tier_pricing,o.reference_map,s.request,s.currency,(o.expires_at>clock_timestamp() AND s.expires_at>clock_timestamp()) AS valid FROM flight_offers o JOIN flight_searches s ON s.id=o.search_id WHERE o.id=$1 AND o.client_id=$2 FOR UPDATE OF o NOWAIT")
+ .bind(id).bind(machine.client_id).fetch_optional(&mut *tx).await.map_err(crate::reprice_admission::lock_error)?;
     let Some(row) = row else {
         return Err(crate::cleanup::missing_offer_error(&mut *tx, id, machine.client_id).await?);
     };

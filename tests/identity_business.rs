@@ -139,6 +139,54 @@ async fn canonical_business_wallet_passenger_client_matrix() {
     seed(&pool, "user_admin", "admin").await;
     seed(&pool, "user_customer", "customer").await;
     seed(&pool, "user_banned", "admin").await;
+    seed(&pool, "user_media", "staff_media").await;
+    for subject in [
+        "user_root",
+        "user_owner",
+        "user_sub",
+        "user_receiver",
+        "user_admin",
+    ] {
+        let (status, data) = call(
+            &app,
+            subject,
+            "/admin/portal-ticket-management",
+            "POST",
+            json!({"actor":{},"command":{"action":"list"}}),
+        )
+        .await;
+        assert_eq!(status, 200, "{data}");
+        assert_eq!(data, json!([]));
+    }
+    for (subject, body) in [
+        (
+            "user_owner",
+            json!({"actor":{"role":"superadmin"},"command":{"action":"list"}}),
+        ),
+        (
+            "user_sub",
+            json!({"actor":{"owner":{"owner_type":"agency","owner_key":"FOREIGN"}},"command":{"action":"list"}}),
+        ),
+        (
+            "user_media",
+            json!({"actor":{},"command":{"action":"list"}}),
+        ),
+        (
+            "user_banned",
+            json!({"actor":{},"command":{"action":"list"}}),
+        ),
+    ] {
+        let (status, data) = call(
+            &app,
+            subject,
+            "/admin/portal-ticket-management",
+            "POST",
+            body,
+        )
+        .await;
+        assert_eq!(status, 403, "{data}");
+    }
+
     let (s, summary) = wallet(
         &app,
         "user_owner",
@@ -246,7 +294,7 @@ async fn canonical_business_wallet_passenger_client_matrix() {
     let roster_query = json!({"clerk_user_id":"user_root","query":"","role":null,"status":null,"sort":"name","page":1,"limit":50,"from":null,"to":null});
     let (s, roster) = request(&app, "roster", Some(BRIDGE), roster_query.clone()).await;
     assert_eq!(s, 200, "{roster}");
-    assert_eq!(roster["summary"]["total"], 8);
+    assert_eq!(roster["summary"]["total"], 9);
     assert_eq!(roster["agencies"].as_array().unwrap().len(), 2);
     let mut own = roster_query.clone();
     own["clerk_user_id"] = json!("user_owner");

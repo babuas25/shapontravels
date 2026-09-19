@@ -221,6 +221,9 @@ impl ReadSupplier for Mock {
                 4 => body["item1"]["ticketInfoes"][0]["ticketNumbers"] = json!([]),
                 5 => body["item1"]["pnr"] = json!("WRONG"),
                 6 => body["item2"]["isSuccess"] = json!(false),
+                8 => {
+                    body = json!({"item1":null,"item2":{"isSuccess":false,"message":"Record locator not found."}})
+                }
                 _ => {}
             }
             Ok(body)
@@ -267,6 +270,15 @@ impl ReadSupplier for Mock {
                 10 => {
                     response["item1"]["status"] = json!("Ticketed");
                     response["item1"]["ticketNumbers"] = json!(["9999999999999"]);
+                }
+                17 => response["item1"]["lastTicketTime"] = json!("01 Jan 2000, 12:00 PM"),
+                18 => {
+                    response["item1"]["lastTicketTime"] = json!(
+                        (chrono::Utc::now() + chrono::Duration::days(1))
+                            .with_timezone(&chrono::FixedOffset::east_opt(21600).unwrap())
+                            .format("%d %b %Y, %I:%M %p")
+                            .to_string()
+                    )
                 }
                 _ => {}
             }
@@ -771,6 +783,17 @@ pub async fn verify(pool: &PgPool, token: &str, admin: &str) {
         let (status, result) = call(&app, token, &key, request.clone()).await;
         assert_eq!(status, 202);
         assert_eq!(result["state"], "outcome_unknown");
+        assert_eq!(
+            result["reason"],
+            match mode {
+                1 => "BOOKING_TIMEOUT",
+                2 => "SUPPLIER_REPORTED_FAILURE",
+                _ => "BOOKING_RESPONSE_UNVERIFIED",
+            }
+        );
+        assert_eq!(result["automaticRetryAllowed"], false);
+        assert_eq!(result["nextAction"], "contact_support");
+        assert!(!result.to_string().contains("private supplier error"));
         assert_eq!(
             call(&app, token, &key, request.clone()).await,
             (202, result.clone())
@@ -1418,8 +1441,8 @@ async fn verify_ticketing(app: &Router, pool: &PgPool, token: &str, admin: &str,
             .fetch_one(pool)
             .await
             .unwrap();
-    for mode in 1..=6 {
-        let (request, fare, _) = quote(pool).await;
+    for mode in [1, 2, 3, 4, 5, 6, 8] {
+        let (request, fare, supplier) = quote(pool).await;
         *mock.fare.lock().unwrap() = fare;
         let (code, held) = call(
             app,
@@ -1442,6 +1465,29 @@ async fn verify_ticketing(app: &Router, pool: &PgPool, token: &str, admin: &str,
         assert_eq!(result.0, 202);
         assert_eq!(result.1["state"], "outcome_unknown");
         assert_eq!(result.1["payment"]["state"], "reconciliation");
+        assert_eq!(result.1["automaticRetryAllowed"], false);
+        assert_eq!(result.1["nextAction"], "contact_support");
+        assert_eq!(
+            result.1["reason"],
+            match mode {
+                1 => "TICKETING_OUTCOME_UNKNOWN",
+                6 => "SUPPLIER_REPORTED_FAILURE",
+                8 if supplier == "triplover" => "SUPPLIER_RECORD_LOCATOR_NOT_FOUND",
+                8 => "SUPPLIER_REPORTED_FAILURE",
+                _ => "TICKETING_RESPONSE_UNVERIFIED",
+            }
+        );
+        let status_url = result.1["statusUrl"].as_str().unwrap();
+        assert_eq!(
+            super::call(app, "GET", status_url, Some(token), Value::Null).await,
+            result
+        );
+        assert_eq!(
+            super::call(app, "GET", status_url, Some(&foreign_token), Value::Null)
+                .await
+                .0,
+            404
+        );
         let count = mock.issue_calls.load(Ordering::SeqCst);
         assert_eq!(
             issue_call(app, token, "new-key-no-retry", input).await,
@@ -1548,6 +1594,9 @@ async fn verify_ticketing(app: &Router, pool: &PgPool, token: &str, admin: &str,
     );
     assert_eq!(failed_capture.1["payment"]["state"], "reserved");
     assert_eq!(failed_capture.1["requiresReconciliation"], true);
+    assert_eq!(failed_capture.1["reason"], "WALLET_SETTLEMENT_REQUIRED");
+    assert_eq!(failed_capture.1["nextAction"], "contact_support");
+    assert_eq!(failed_capture.1["automaticRetryAllowed"], false);
     let dispatches = mock.issue_calls.load(Ordering::SeqCst);
     assert_eq!(
         issue_call(app, token, "capture-crash-replay", crash_input).await,
@@ -1840,6 +1889,14 @@ async fn verify_issue_without_pnr(app: &Router, pool: &PgPool, token: &str, mock
         ("created-lookup", json!(""), Some(7), 14, 200),
         ("missing-pnr-deadline", json!(""), Some(2), 12, 200),
         ("bad-pnr-deadline", json!(""), Some(5), 13, 200),
+        ("bangladesh-pnr-expired", json!(future), Some(17), 12, 409),
+        (
+            "bangladesh-pnr-future",
+            json!("2000-01-01T00:00:00Z"),
+            Some(18),
+            13,
+            200,
+        ),
         ("already-ticketed", json!(""), Some(9), 14, 409),
         ("ticket-evidence", json!(""), Some(8), 12, 409),
         ("cancelled", json!(""), Some(11), 13, 409),
@@ -1859,6 +1916,23 @@ async fn verify_issue_without_pnr(app: &Router, pool: &PgPool, token: &str, mock
                 if [1, 4].contains(&mode) { 502 } else { 200 },
                 "{result:?}"
             );
+            if [17, 18].contains(&mode) {
+                assert_eq!(result.1["item1"]["lastTicketTimeZone"], "Asia/Dhaka");
+                assert!(
+                    result.1["item1"]["lastTicketTimeIso"]
+                        .as_str()
+                        .unwrap()
+                        .ends_with("+06:00")
+                );
+                let stored: String = sqlx::query_scalar(
+                    "SELECT ticketing_time_limit FROM flight_bookings WHERE id=$1",
+                )
+                .bind(id)
+                .fetch_one(pool)
+                .await
+                .unwrap();
+                assert_eq!(stored, result.1["item1"]["lastTicketTime"]);
+            }
             if mode == 7 {
                 let response = app
                     .clone()
@@ -1915,6 +1989,8 @@ async fn verify_issue_without_pnr(app: &Router, pool: &PgPool, token: &str, mock
                 evidence["deadlineCheck"],
                 if label == "future" {
                     "explicit_offset_checked"
+                } else if label == "bangladesh-pnr-future" {
+                    "bangladesh_pnr_checked"
                 } else {
                     "supplier_validation_required"
                 }
@@ -1943,7 +2019,7 @@ async fn verify_issue_without_pnr(app: &Router, pool: &PgPool, token: &str, mock
             assert!(!reserved);
             assert_eq!(
                 reply.1["error"],
-                if label == "expired" {
+                if ["expired", "bangladesh-pnr-expired"].contains(&label) {
                     "TICKETING_DEADLINE_UNSAFE"
                 } else {
                     "ISSUE_READINESS_NOT_VERIFIED"

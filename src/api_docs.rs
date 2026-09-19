@@ -73,7 +73,8 @@ pub fn commercial(full: &Value) -> Value {
     doc
 }
 pub fn routes(full: utoipa::openapi::OpenApi) -> Router<AppState> {
-    let private = serde_json::to_value(&full).expect("serializable OpenAPI");
+    let mut private = serde_json::to_value(&full).expect("serializable OpenAPI");
+    crate::client_contract::enrich(&mut private);
     let public: utoipa::openapi::OpenApi =
         serde_json::from_value(commercial(&private)).expect("commercial OpenAPI");
     Router::new()
@@ -85,4 +86,25 @@ pub fn routes(full: utoipa::openapi::OpenApi) -> Router<AppState> {
                 async move { Json(doc) }
             }),
         )
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn operation_ids_are_unique_across_public_and_admin_endpoints() {
+        let doc = serde_json::to_value(crate::openapi_document("test")).unwrap();
+        let mut ids = BTreeSet::new();
+        for (path, item) in doc["paths"].as_object().unwrap() {
+            for (method, operation) in item.as_object().unwrap() {
+                if let Some(id) = operation.get("operationId").and_then(Value::as_str) {
+                    assert!(
+                        ids.insert(id),
+                        "duplicate operationId {id}: {method} {path}"
+                    );
+                }
+            }
+        }
+    }
 }

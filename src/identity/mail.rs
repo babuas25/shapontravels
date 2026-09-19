@@ -34,7 +34,7 @@ pub(super) async fn enqueue(
     kind: &str,
     id: Uuid,
 ) -> Result<(), ApiError> {
-    for audience in ["recipient", "archive"] {
+    for audience in ["recipient"] {
         sqlx::query("INSERT INTO portal_identity_mail(id,kind,audience,invitation_id,user_id) VALUES($1,$2,$3,$4,$5) ON CONFLICT DO NOTHING").bind(Uuid::new_v4()).bind(kind).bind(audience).bind((kind=="invitation").then_some(id)).bind((kind!="invitation").then_some(id)).execute(&mut **tx).await?;
     }
     Ok(())
@@ -75,7 +75,7 @@ pub async fn claim(pool: &PgPool) -> Result<Option<Delivery>, ApiError> {
         )
         .await?;
     }
-    let rows:Vec<PendingMailRow>=sqlx::query_as("SELECT id,kind,audience,invitation_id,user_id FROM portal_identity_mail WHERE state='pending' AND attempts<5 AND next_attempt_at<=clock_timestamp() ORDER BY sequence LIMIT 25 FOR UPDATE").fetch_all(&mut *tx).await?;
+    let rows:Vec<PendingMailRow>=sqlx::query_as("SELECT id,kind,audience,invitation_id,user_id FROM portal_identity_mail WHERE state='pending' AND audience='recipient' AND attempts<5 AND next_attempt_at<=clock_timestamp() ORDER BY sequence LIMIT 25 FOR UPDATE").fetch_all(&mut *tx).await?;
     for (id, kind, audience, invite, user) in rows {
         let data: Option<(String, String, String, Option<String>)> = if let Some(invite) = invite {
             sqlx::query_as("SELECT i.email,''::text,i.role,i.provider_id FROM portal_identity_invitations i JOIN portal_users u ON u.id=i.issuer_user_id LEFT JOIN portal_agencies a ON a.id=i.agency_id WHERE i.id=$1 AND i.state='pending' AND NOT i.revocation_requested AND i.provider_id IS NOT NULL AND u.status='active' AND ((u.role='superadmin') OR (u.role='admin' AND i.role<>'superadmin') OR (u.role='b2b' AND i.role='b2b_sub' AND a.owner_user_id=u.id)) AND (i.agency_id IS NULL OR (a.status='active' AND a.version=i.agency_version))").bind(invite).fetch_optional(&mut *tx).await?

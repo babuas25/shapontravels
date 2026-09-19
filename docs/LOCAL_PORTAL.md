@@ -9,6 +9,8 @@ cd /Users/ashifbabu/Projects/shapontravels
 node scripts/portal-dev.mjs
 ```
 
+If the backend is already running, this command checks its readiness, prints its address and exits without starting another process. A passing check means you can use the frontend immediately. To rebuild Rust changes, stop the original launcher before running the command again.
+
 Keep this terminal open. After the 2026-09-17 identity cutover, the launcher detects private `.local/identity-local/config.json` and resumes **`portal_local_20260917_identity_test`** with canonical identity. It starts the existing local PostgreSQL cluster if needed, builds `local_identity` and serves port 18081. It does not migrate, import, bootstrap or reactivate automatically. Ctrl+C stops Rust; PostgreSQL stays available. Despite its test suffix, this selected database contains retained user/business data and must not be treated as disposable.
 
 The canonical launcher uses the private selected configuration, Rust `.env` supplier settings and `.local/pgsql` runtime. It does not print credentials or overwrite either project's environment file. It watches `.env`: a save reloads the Rust backend after in-flight requests finish, discards cached supplier logins, and invalidates previous offers. Run a fresh search after reload. If invalid settings prevent startup, correct the file and save again; the watcher retries. The old `api_portal_local_*` database and bridge-credentials file remain retained for evidence, not as an alternate identity authority. Do not remove canonical configuration to fall back to legacy. See [cutover evidence](evidence/RUST_IDENTITY_LOCAL_CUTOVER_2026-09-17.md).

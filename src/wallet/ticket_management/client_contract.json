@@ -1,0 +1,504 @@
+{
+  "TicketManagementResult": {
+    "type": "object",
+    "properties": {
+      "ok": {
+        "type": "boolean"
+      },
+      "requestId": {
+        "type": "string",
+        "format": "uuid"
+      },
+      "publicRef": {
+        "type": "string"
+      },
+      "status": {
+        "type": "string",
+        "enum": [
+          "requested",
+          "in-progress",
+          "awaiting-confirmation",
+          "approved",
+          "rejected",
+          "expired"
+        ]
+      },
+      "outcome": {
+        "type": [
+          "string",
+          "null"
+        ]
+      },
+      "version": {
+        "type": "integer",
+        "minimum": 0
+      },
+      "replay": {
+        "type": "boolean"
+      }
+    },
+    "required": [
+      "ok",
+      "requestId",
+      "publicRef",
+      "status",
+      "outcome",
+      "version"
+    ]
+  },
+  "TicketManagementRoute": {
+    "type": "object",
+    "properties": {
+      "routeIndex": {
+        "type": "integer",
+        "minimum": 0
+      },
+      "label": {
+        "type": "string"
+      },
+      "origin": {
+        "type": "string"
+      },
+      "destination": {
+        "type": "string"
+      },
+      "departureAt": {
+        "type": "string"
+      }
+    },
+    "required": [
+      "routeIndex",
+      "label",
+      "origin",
+      "destination",
+      "departureAt"
+    ]
+  },
+  "TicketManagementAvailability": {
+    "type": "object",
+    "properties": {
+      "passengers": {
+        "type": "array",
+        "items": {
+          "type": "object",
+          "properties": {
+            "passengerIndex": {
+              "type": "integer",
+              "minimum": 0
+            },
+            "available": {
+              "type": "boolean"
+            },
+            "reasonCode": {
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "message": {
+              "type": [
+                "string",
+                "null"
+              ]
+            }
+          },
+          "required": [
+            "passengerIndex",
+            "available",
+            "reasonCode",
+            "message"
+          ]
+        }
+      },
+      "routes": {
+        "type": "array",
+        "items": {
+          "$ref": "#/components/schemas/TicketManagementRoute"
+        }
+      },
+      "actions": {
+        "type": "array",
+        "items": {
+          "type": "string",
+          "enum": [
+            "refund",
+            "reissue",
+            "void"
+          ]
+        }
+      }
+    },
+    "required": [
+      "passengers",
+      "routes",
+      "actions"
+    ]
+  },
+  "TicketManagementPassenger": {
+    "type": "object",
+    "properties": {
+      "passengerIndex": {
+        "type": "integer",
+        "minimum": 0
+      },
+      "passengerName": {
+        "type": "string"
+      },
+      "passengerType": {
+        "type": "string"
+      },
+      "ticketNumber": {
+        "type": [
+          "string",
+          "null"
+        ]
+      }
+    },
+    "required": [
+      "passengerIndex",
+      "passengerName",
+      "passengerType",
+      "ticketNumber"
+    ]
+  },
+  "TicketManagementQuote": {
+    "type": "object",
+    "properties": {
+      "id": {
+        "type": "string",
+        "format": "uuid"
+      },
+      "quoteVersion": {
+        "type": "integer",
+        "minimum": 0
+      },
+      "currency": {
+        "type": "string",
+        "enum": [
+          "BDT",
+          "USD"
+        ]
+      },
+      "direction": {
+        "type": "string",
+        "enum": [
+          "debit",
+          "credit",
+          "none"
+        ]
+      },
+      "userPayableEntitlementAmount": {
+        "type": "integer",
+        "minimum": 0,
+        "maximum": 9007199254740991,
+        "description": "Exact minor units: 100 = BDT 1.00 or USD 1.00."
+      },
+      "fareDifference": {
+        "type": "integer",
+        "minimum": 0,
+        "maximum": 9007199254740991,
+        "description": "Exact minor units: 100 = BDT 1.00 or USD 1.00."
+      },
+      "airlineFee": {
+        "type": "integer",
+        "minimum": 0,
+        "maximum": 9007199254740991,
+        "description": "Exact minor units: 100 = BDT 1.00 or USD 1.00."
+      },
+      "voidFee": {
+        "type": "integer",
+        "minimum": 0,
+        "maximum": 9007199254740991,
+        "description": "Exact minor units: 100 = BDT 1.00 or USD 1.00."
+      },
+      "serviceFee": {
+        "type": "integer",
+        "minimum": 0,
+        "maximum": 9007199254740991,
+        "description": "Exact minor units: 100 = BDT 1.00 or USD 1.00."
+      },
+      "customerAmount": {
+        "type": "integer",
+        "minimum": 0,
+        "maximum": 9007199254740991,
+        "description": "Exact minor units: 100 = BDT 1.00 or USD 1.00."
+      },
+      "details": {
+        "type": [
+          "string",
+          "null"
+        ]
+      },
+      "confirmationDeadlineAt": {
+        "type": "string",
+        "format": "date-time"
+      },
+      "publishedAt": {
+        "type": "string",
+        "format": "date-time"
+      }
+    },
+    "required": [
+      "id",
+      "quoteVersion",
+      "currency",
+      "direction",
+      "userPayableEntitlementAmount",
+      "fareDifference",
+      "airlineFee",
+      "voidFee",
+      "serviceFee",
+      "customerAmount",
+      "details",
+      "confirmationDeadlineAt",
+      "publishedAt"
+    ]
+  },
+  "TicketManagementSummary": {
+    "type": "object",
+    "properties": {
+      "id": {
+        "type": "string",
+        "format": "uuid"
+      },
+      "publicRef": {
+        "type": "string"
+      },
+      "bookingReference": {
+        "type": "string"
+      },
+      "action": {
+        "type": "string",
+        "enum": [
+          "refund",
+          "reissue",
+          "void"
+        ]
+      },
+      "requestType": {
+        "type": "string",
+        "enum": [
+          "voluntary",
+          "involuntary"
+        ]
+      },
+      "status": {
+        "type": "string",
+        "enum": [
+          "requested",
+          "in-progress",
+          "awaiting-confirmation",
+          "approved",
+          "rejected",
+          "expired"
+        ]
+      },
+      "terminalOutcome": {
+        "type": [
+          "string",
+          "null"
+        ]
+      },
+      "version": {
+        "type": "integer",
+        "minimum": 0
+      },
+      "currency": {
+        "type": "string"
+      },
+      "activeQuoteId": {
+        "type": [
+          "string",
+          "null"
+        ],
+        "format": "uuid"
+      },
+      "approvedQuoteId": {
+        "type": [
+          "string",
+          "null"
+        ],
+        "format": "uuid"
+      },
+      "statusChangedAt": {
+        "type": "string",
+        "format": "date-time"
+      },
+      "createdAt": {
+        "type": "string",
+        "format": "date-time"
+      },
+      "updatedAt": {
+        "type": "string",
+        "format": "date-time"
+      }
+    },
+    "required": [
+      "id",
+      "publicRef",
+      "bookingReference",
+      "action",
+      "requestType",
+      "status",
+      "terminalOutcome",
+      "version",
+      "currency",
+      "activeQuoteId",
+      "approvedQuoteId",
+      "statusChangedAt",
+      "createdAt",
+      "updatedAt"
+    ]
+  },
+  "TicketManagementList": {
+    "type": "array",
+    "items": {
+      "$ref": "#/components/schemas/TicketManagementSummary"
+    }
+  },
+  "TicketManagementDetail": {
+    "allOf": [
+      {
+        "$ref": "#/components/schemas/TicketManagementSummary"
+      },
+      {
+        "type": "object",
+        "properties": {
+          "requestNote": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "passengers": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/TicketManagementPassenger"
+            }
+          },
+          "routes": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/TicketManagementRoute"
+            }
+          },
+          "reissuePreferences": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/ReissuePreference"
+            }
+          },
+          "quotes": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/TicketManagementQuote"
+            }
+          },
+          "decisions": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "decision": {
+                  "type": "string",
+                  "enum": [
+                    "approved",
+                    "rejected"
+                  ]
+                },
+                "quoteId": {
+                  "type": "string",
+                  "format": "uuid"
+                },
+                "decidedAt": {
+                  "type": "string",
+                  "format": "date-time"
+                }
+              },
+              "required": [
+                "decision",
+                "quoteId",
+                "decidedAt"
+              ]
+            }
+          },
+          "events": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "eventType": {
+                  "type": "string"
+                },
+                "fromStatus": {
+                  "type": [
+                    "string",
+                    "null"
+                  ]
+                },
+                "toStatus": {
+                  "type": "string",
+                  "enum": [
+                    "requested",
+                    "in-progress",
+                    "awaiting-confirmation",
+                    "approved",
+                    "rejected",
+                    "expired"
+                  ]
+                },
+                "effectiveAt": {
+                  "type": "string",
+                  "format": "date-time"
+                },
+                "metadata": {
+                  "type": "object"
+                }
+              },
+              "required": [
+                "eventType",
+                "fromStatus",
+                "toStatus",
+                "effectiveAt",
+                "metadata"
+              ]
+            }
+          },
+          "reissuedTickets": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "passengerIndex": {
+                  "type": "integer",
+                  "minimum": 0
+                },
+                "previousTicketNumber": {
+                  "type": "string"
+                },
+                "newTicketNumber": {
+                  "type": "string"
+                }
+              },
+              "required": [
+                "passengerIndex",
+                "previousTicketNumber",
+                "newTicketNumber"
+              ]
+            }
+          }
+        },
+        "required": [
+          "requestNote",
+          "passengers",
+          "routes",
+          "reissuePreferences",
+          "quotes",
+          "decisions",
+          "events",
+          "reissuedTickets"
+        ]
+      }
+    ]
+  }
+}

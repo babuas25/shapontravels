@@ -6,7 +6,7 @@ use crate::{
 use axum::{
     Json, Router,
     extract::{Path, State},
-    http::StatusCode,
+    http::{HeaderMap, StatusCode},
     routing::get,
 };
 use bigdecimal::{BigDecimal, RoundingMode};
@@ -290,7 +290,7 @@ async fn pricing(
     machine: Machine,
     State(state): State<AppState>,
     Path((kind, id)): Path<(String, Uuid)>,
-) -> Result<Json<Value>, ApiError> {
+) -> Result<(HeaderMap, Json<Value>), ApiError> {
     let query = match kind.as_str() {
         "offer" => {
             machine.require("search:read")?;
@@ -311,17 +311,27 @@ async fn pricing(
         .bind(machine.client_id)
         .fetch_optional(&state.pool)
         .await?;
+    if row.is_none()
+        && kind == "booking"
+        && let Some(imported) =
+            crate::portal_imports::api::load(&state.pool, machine.client_id, Some(id), None).await?
+    {
+        return Ok((imported.headers(), Json(imported.pricing()?)));
+    }
     let (original, value) = row.ok_or(ApiError(StatusCode::NOT_FOUND, "NOT_FOUND"))?;
     let mut value = value.ok_or(ApiError(
         StatusCode::CONFLICT,
         "PRICING_SNAPSHOT_UNAVAILABLE",
     ))?;
     crate::fare_breakdown::enrich(&mut value, &original);
-    Ok(Json(if machine.portal_staff {
-        staff_pricing(&original, value)?
-    } else {
-        value
-    }))
+    Ok((
+        HeaderMap::new(),
+        Json(if machine.portal_staff {
+            staff_pricing(&original, value)?
+        } else {
+            value
+        }),
+    ))
 }
 #[derive(Deserialize, ToSchema)]
 #[serde(deny_unknown_fields)]

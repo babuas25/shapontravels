@@ -288,6 +288,16 @@ impl SupplierAdapter {
     }
     /// Read-only report; supplier transaction is encoded as one URL path segment.
     pub async fn ticket_report(&self, transaction: &str) -> Result<Value, SupplierError> {
+        self.import_report(transaction, "Confirmed").await
+    }
+    pub async fn import_report(
+        &self,
+        transaction: &str,
+        filter: &str,
+    ) -> Result<Value, SupplierError> {
+        if !["Confirmed", "Cancelled", "Refunded", "Created", "Booked"].contains(&filter) {
+            return Err(SupplierError::Configuration);
+        }
         if transaction.is_empty()
             || transaction.len() > 4096
             || transaction.chars().any(char::is_control)
@@ -300,7 +310,7 @@ impl SupplierAdapter {
             .path_segments_mut()
             .map_err(|_| SupplierError::Configuration)?
             .push(transaction)
-            .push("Confirmed");
+            .push(filter);
         tokio::time::timeout(
             self.timeout,
             self.read_endpoint(endpoint, None, READ_RESPONSE_LIMIT),

@@ -358,7 +358,17 @@ async fn retrieve(
     id: Uuid,
 ) -> Result<(HeaderMap, Json<Value>), ApiError> {
     machine.require("ticketing")?;
-    let source:Source=sqlx::query_as("SELECT b.supplier_id,b.public_ref,b.request,t.request AS issue_request,COALESCE(v.public_response,CASE WHEN t.state='issued' THEN t.public_response END) AS ticket FROM flight_bookings b LEFT JOIN flight_ticket_issues t ON t.booking_id=b.id LEFT JOIN flight_ticket_verifications v ON v.issue_id=t.id WHERE b.id=$1 AND b.client_id=$2").bind(id).bind(machine.client_id).fetch_optional(&state.pool).await?.ok_or(not_found())?;
+    let source:Option<Source>=sqlx::query_as("SELECT b.supplier_id,b.public_ref,b.request,t.request AS issue_request,COALESCE(v.public_response,CASE WHEN t.state='issued' THEN t.public_response END) AS ticket FROM flight_bookings b LEFT JOIN flight_ticket_issues t ON t.booking_id=b.id LEFT JOIN flight_ticket_verifications v ON v.issue_id=t.id WHERE b.id=$1 AND b.client_id=$2").bind(id).bind(machine.client_id).fetch_optional(&state.pool).await?;
+    let source = match source {
+        Some(source) => source,
+        None => {
+            let imported =
+                crate::portal_imports::api::load(&state.pool, machine.client_id, Some(id), None)
+                    .await?
+                    .ok_or(not_found())?;
+            return Ok((imported.headers(), Json(imported.report()?)));
+        }
+    };
     if source.ticket.is_none() {
         return Err(conflict("VERIFIED_TICKET_REQUIRED"));
     }
@@ -420,7 +430,7 @@ async fn retrieve(
     }
     Ok((headers, Json(public)))
 }
-#[utoipa::path(get,path="/api/bookings/{id}/ticket/report",operation_id="ticket_report",tag="Flights",security(("machine_token"=[])),params(("id"=String,Path)),responses((status=200,body=Object,description="Live verified supplier report with accepted selling fares; no supplier mutation"),(status=403,description="Permission/servicing denied"),(status=404,description="Unknown or foreign booking"),(status=409,description="Verified ticket required"),(status=502,description="Report read or verification failed"),(status=504,description="Supplier timeout")))]
+#[utoipa::path(get,path="/api/bookings/{id}/ticket/report",operation_id="ticket_report",tag="Flights",security(("machine_token"=[])),params(("id"=String,Path)),responses((status=200,body=Object,description="Native bookings: live verified supplier report with accepted selling fares. Imports: saved ticket report with X-Evidence-Source: saved-import. No supplier mutation"),(status=403,description="Permission/servicing denied"),(status=404,description="Unknown or foreign booking"),(status=409,description="Verified ticket required"),(status=502,description="Report read or verification failed"),(status=504,description="Supplier timeout")))]
 async fn by_id(
     machine: Machine,
     State(state): State<AppState>,
@@ -447,9 +457,18 @@ async fn by_reference(
         "SELECT id FROM flight_bookings WHERE client_id=$1 AND public_ref=$2 LIMIT 2",
     )
     .bind(machine.client_id)
-    .bind(reference)
+    .bind(&reference)
     .fetch_all(&state.pool)
     .await?;
+    let imported =
+        crate::portal_imports::api::load(&state.pool, machine.client_id, None, Some(&reference))
+            .await?;
+    if rows.len() + usize::from(imported.is_some()) > 1 {
+        return Err(conflict("BOOKING_REFERENCE_AMBIGUOUS"));
+    }
+    if let Some(imported) = imported {
+        return Ok((imported.headers(), Json(imported.report()?)));
+    }
     let id = unique(rows)?;
     retrieve(machine, state, id).await
 }
@@ -471,6 +490,23 @@ async fn by_transaction(
         return Err(error("REPORT_STATUS_UNSUPPORTED"));
     }
     let rows:Vec<(Uuid,)>=sqlx::query_as("SELECT b.id FROM flight_bookings b JOIN flight_offers o ON o.id=b.offer_id WHERE b.client_id=$1 AND o.search_id=$2 LIMIT 2").bind(machine.client_id).bind(transaction).fetch_all(&state.pool).await?;
+    let import_id: Option<Uuid> = sqlx::query_scalar(
+        "SELECT booking_id FROM portal_import_api_references WHERE transaction_id=$1",
+    )
+    .bind(transaction)
+    .fetch_optional(&state.pool)
+    .await?;
+    let imported = if let Some(id) = import_id {
+        crate::portal_imports::api::load(&state.pool, machine.client_id, Some(id), None).await?
+    } else {
+        None
+    };
+    if rows.len() + usize::from(imported.is_some()) > 1 {
+        return Err(conflict("BOOKING_REFERENCE_AMBIGUOUS"));
+    }
+    if let Some(imported) = imported {
+        return Ok((imported.headers(), Json(imported.report()?)));
+    }
     let id = unique(rows)?;
     retrieve(machine, state, id).await
 }

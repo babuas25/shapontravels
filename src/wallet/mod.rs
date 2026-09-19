@@ -11,6 +11,7 @@ mod reads;
 mod reports;
 mod settings;
 pub(crate) mod ticket;
+pub mod ticket_management;
 mod workflows;
 pub use nonissuance::NonissuanceDoc;
 pub use notifications::NotificationDoc;
@@ -21,6 +22,7 @@ pub fn routes() -> axum::Router<crate::AppState> {
         .merge(portal::routes())
         .merge(notifications::routes())
         .merge(nonissuance::routes())
+        .merge(ticket_management::routes())
 }
 
 pub type Result<T> = std::result::Result<T, ApiError>;

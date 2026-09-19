@@ -1,0 +1,180 @@
+{
+  "date": "2026-09-18",
+  "route": "DAC-CGP",
+  "departure": "2026-10-30",
+  "minimum_departure_days_ahead": 42,
+  "independent_synthetic_travellers": 2,
+  "journeys": {
+    "bg": {
+      "booking": {
+        "id": "3649fa5b-f230-471a-b28c-21a0db1a4a98",
+        "state": "held",
+        "seconds": 22.805941
+      },
+      "issue": {
+        "id": "cf19ce3c-a6a0-47b6-a418-85b979fa1d3f",
+        "state": "outcome_unknown",
+        "seconds": 9.093599
+      },
+      "ledger": [
+        {
+          "transaction_type": "booking_hold",
+          "count": 1,
+          "total_minor": "555740"
+        },
+        {
+          "transaction_type": "deposit",
+          "count": 1,
+          "total_minor": "100000000"
+        }
+      ],
+      "balance": {
+        "available_minor": 99444260,
+        "hold_minor": 555740
+      },
+      "search_offers": 4,
+      "responses": {
+        "book": 200,
+        "issue": 202,
+        "ticket-saved": 202,
+        "ticket-report": 409,
+        "pnr": 502,
+        "readback-ticket-saved": 202
+      },
+      "book_dispatches": 1,
+      "issue_dispatches": 1,
+      "additional_replay_dispatches": 0,
+      "issue_references_match_saved_book": true,
+      "local_readback_supplier_calls": 0,
+      "local_readback_additional_ledger_entries": 0,
+      "supplier_read_only_report": {
+        "http": 200,
+        "status": "Ordered",
+        "status_for": "Ticket",
+        "completed": true,
+        "pnr_present": true,
+        "ticket_number_present": false
+      }
+    },
+    "bs": {
+      "booking": {
+        "id": "f5d2c220-f110-4e25-b7e2-93609077ff2f",
+        "state": "held",
+        "seconds": 62.847384
+      },
+      "issue": {
+        "id": "f6132ea9-07d8-4271-973e-a345253e84fd",
+        "state": "issued",
+        "seconds": 15.52251
+      },
+      "ledger": [
+        {
+          "transaction_type": "booking_hold",
+          "count": 1,
+          "total_minor": "485620"
+        },
+        {
+          "transaction_type": "booking_confirm",
+          "count": 1,
+          "total_minor": "485620"
+        },
+        {
+          "transaction_type": "deposit",
+          "count": 1,
+          "total_minor": "100000000"
+        }
+      ],
+      "balance": {
+        "available_minor": 99514380,
+        "hold_minor": 0
+      },
+      "search_offers": 8,
+      "responses": {
+        "book": 200,
+        "issue": 200,
+        "ticket-saved": 200,
+        "ticket-report": 200,
+        "pnr": 200,
+        "readback-ticket-saved": 200
+      },
+      "book_dispatches": 1,
+      "issue_dispatches": 1,
+      "additional_replay_dispatches": 0,
+      "issue_references_match_saved_book": true,
+      "local_readback_supplier_calls": 0,
+      "local_readback_additional_ledger_entries": 0,
+      "supplier_read_only_report": {
+        "http": 200,
+        "status": "Issued",
+        "status_for": "Ticket",
+        "completed": true,
+        "pnr_present": true,
+        "ticket_number_present": true
+      }
+    }
+  },
+  "regular_tests": {
+    "passed": 102,
+    "failed": 0,
+    "ignored": 36
+  },
+  "fresh_database_suite": "passed; 45.99 seconds",
+  "clippy_all_targets_warnings_denied": "passed",
+  "format_and_diff_checks": "passed",
+  "new_diagnostic_regressions": [
+    "processing vs stale",
+    "supplier-specific message classification",
+    "supplier-text redaction",
+    "received unverified vs absent response",
+    "owned status and foreign 404",
+    "saved-status/replay equality with no redispatch",
+    "wallet settlement recovery retains ticket proof"
+  ],
+  "contract_validation": {
+    "responses": 40,
+    "reconciled_fare_breakdowns": 40,
+    "failures": []
+  },
+  "live_calls_preceded_issue_diagnostic_change": true,
+  "post_change_verification": "local read/replay of both live evidence databases with no real supplier adapter",
+  "new_migrations": false,
+  "deployed": false,
+  "working_database_changed": false,
+  "supplier_case_sent": false,
+  "backups": {
+    "bg": {
+      "sha256": "d280bbe32cb01e73c1ea3ea67dd699784b3a61f029ae52bcd9661ec2d1fcdf59",
+      "archive_listing_verified": true,
+      "restore_tested": false
+    },
+    "bs": {
+      "sha256": "cc497de364ebc327f6cc90b4ea300724d7f392a66b9ae1cdce087a13e23a3691",
+      "archive_listing_verified": true,
+      "restore_tested": false
+    }
+  },
+  "source_sha256": {
+    "scripts/validate-client-contract.py": "e9cbbdae1a9c062efe1652583eaf5114eff785c8941ff25c6bd55b457c88c9c3",
+    "src/admin_bookings.rs": "9d5a752b4cf47d553a1c1be8bcefc5eba35d407f82527bf535284fe5658b75b8",
+    "src/api_docs.rs": "cfe6b099f8139213c37d323a98ac40800fbdd730c1f98ef489d728415ddce2fc",
+    "src/auth.rs": "49703994854e24b87196077b0bfb34ecdd14823abd28d2a2cc574eb6de353915",
+    "src/auth_admission.rs": "5a3453eaffecb3409ae5935818ed47f4cb07612610fb3586f0998e5f1d3193e7",
+    "src/booking.rs": "17a9cd8a9c329093c0883ed1e9b01cdaa586d61649d91684a52ed9710dd5cbc9",
+    "src/booking/direct.rs": "b4d6ed529f84d810e9da697f8610c914a3887d098b6561305fc5f0b134236b26",
+    "src/booking/outcome.rs": "dfbc473441c069bec59c9acfee5a9335aa1f4f90a7a80eb0c1d112633acf39fc",
+    "src/booking/ticketing.rs": "efe1b1398f5e35f284ec3a98cc3c6534d4c08ed14ac32e7ea7a89791f23bc194",
+    "src/client_contract.rs": "51bb01af126708ee6bc688d95196efe569989f23c22e588fdfa2752e645ee937",
+    "src/client_schemas.json": "99b6ba3d01e474819864c050e58212f6259b1616462e537a6437bb4f1c23d544",
+    "src/http_errors.rs": "e6fcfe9e5ba815d618d53b1b0fbe9a0aa01458133f3fa09d9c8615e513f5bac0",
+    "src/lib.rs": "0b579647420800bc86539fbae8c960ea5b93717003940f812494736def5f2c2c",
+    "src/main.rs": "b0ef52b90432ff1fb60d73e9346a7fe01a7d11e10acdd17c775b193d8a2e3da9",
+    "src/reprice.rs": "f51525bf7022b0b829221a3525838942ba16ddb5ebcbdf9ce34cfdeb783b6777",
+    "src/reprice_admission.rs": "7d640005899aa9d3da3e45327a1ef03233092c593f4b12504ab586802e752f0d",
+    "src/search.rs": "83d7bda4c947072d7ce46461538318ccd8a5486e9d736a17c6dcdbf8a04832a7",
+    "tests/client_api_audit.rs": "895125675980faba15e02660b3d9837f2d1fb5b0ca63bf0730444ccabcb5ee5e",
+    "tests/foundation.rs": "c4c22661c0649551c64c7b36c8dddd7a88b3edc34694454f6f1313ebdd1baaf1",
+    "tests/support/booking.rs": "a3f0a89061a847abf33f39b54f67c3996a0593e2ef5efb72afa74fa82bbb95e9"
+  },
+  "release_decision": "BS fresh UAT success verified; unrestricted rollout blocked on BG Issue/PNR inconsistency and target deployment verification",
+  "isolated_test_cluster_stopped": true
+}

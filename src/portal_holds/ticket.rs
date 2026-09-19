@@ -33,10 +33,21 @@ pub(super) async fn snapshot(
     booking: Uuid,
     client: Uuid,
 ) -> Result<Value, ApiError> {
-    let row: Option<Value> = sqlx::query_scalar(
-        "SELECT jsonb_build_object('id',t.id,'state',(SELECT state FROM flight_ticket_outcomes s WHERE s.id=t.id),'response',COALESCE(v.public_response,t.public_response),'createdAt',t.created_at,'updatedAt',(SELECT updated_at FROM flight_ticket_outcomes s WHERE s.id=t.id),'payment',jsonb_build_object('required',t.wallet_required,'state',COALESCE(w.state,'not_attached'),'operationId',w.id)) FROM flight_ticket_issues t LEFT JOIN flight_ticket_verifications v ON v.issue_id=t.id LEFT JOIN wallet_operations w ON w.subject_kind='ticket_issue' AND w.subject_id=t.id WHERE t.booking_id=$1 AND t.client_id=$2"
+    let row: Option<(Value, String, Option<Value>, bool, bool)> = sqlx::query_as(
+        "SELECT jsonb_build_object('id',t.id,'state',(SELECT state FROM flight_ticket_outcomes s WHERE s.id=t.id),'response',COALESCE(v.public_response,t.public_response),'createdAt',t.created_at,'updatedAt',(SELECT updated_at FROM flight_ticket_outcomes s WHERE s.id=t.id),'payment',jsonb_build_object('required',t.wallet_required,'state',COALESCE(w.state,'not_attached'),'operationId',w.id)) || COALESCE((SELECT metadata FROM ticket_management_receipts WHERE booking_id=b.id),'{}'::jsonb),b.supplier_id,t.original_response->'item2',t.original_response IS NOT NULL,(t.created_at<clock_timestamp()-INTERVAL '5 minutes') FROM flight_ticket_issues t JOIN flight_bookings b ON b.id=t.booking_id LEFT JOIN flight_ticket_verifications v ON v.issue_id=t.id LEFT JOIN wallet_operations w ON w.subject_kind='ticket_issue' AND w.subject_id=t.id WHERE t.booking_id=$1 AND t.client_id=$2"
     ).bind(booking).bind(client).fetch_optional(&state.pool).await?;
-    Ok(row.unwrap_or(Value::Null))
+    Ok(row
+        .map(|(mut snapshot, supplier, result, has_response, stale)| {
+            snapshot["outcome"] = ticketing::portal_diagnostics(
+                &snapshot,
+                &supplier,
+                result.as_ref(),
+                has_response,
+                stale,
+            );
+            snapshot
+        })
+        .unwrap_or(Value::Null))
 }
 
 type OwnedBooking = (

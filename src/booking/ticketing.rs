@@ -12,9 +12,82 @@ struct Issue {
     request_hash: Vec<u8>,
     state: String,
     public_response: Option<Value>,
+    supplier_id: String,
+    supplier_result: Option<Value>,
+    has_supplier_response: bool,
+    pending_stale: bool,
     wallet_required: bool,
     payment_state: Option<String>,
     wallet_operation_id: Option<Uuid>,
+}
+fn unresolved_reason(row: &Issue) -> &'static str {
+    outcome_reason(
+        &row.state,
+        row.pending_stale,
+        &row.supplier_id,
+        row.supplier_result.as_ref(),
+        row.has_supplier_response,
+    )
+}
+pub(crate) fn portal_diagnostics(
+    snapshot: &Value,
+    supplier: &str,
+    result: Option<&Value>,
+    has_response: bool,
+    stale: bool,
+) -> Value {
+    let state = snapshot["state"].as_str().unwrap_or("");
+    if state == "not_issued" {
+        return Value::Null;
+    }
+    if state == "issued" {
+        return if snapshot["payment"]["required"] == true
+            && snapshot["payment"]["state"] != "captured"
+        {
+            super::outcome::actions("WALLET_SETTLEMENT_REQUIRED", false)
+        } else {
+            Value::Null
+        };
+    }
+    super::outcome::actions(
+        outcome_reason(state, stale, supplier, result, has_response),
+        state == "pending" && !stale,
+    )
+}
+fn outcome_reason(
+    state: &str,
+    stale: bool,
+    supplier: &str,
+    result: Option<&Value>,
+    has_response: bool,
+) -> &'static str {
+    if state == "pending" {
+        return if stale {
+            "TICKETING_STATUS_STALE"
+        } else {
+            "TICKETING_IN_PROGRESS"
+        };
+    }
+    if let Some(result) = result.filter(|r| r["isSuccess"] == false) {
+        if supplier == "triplover"
+            && result["message"].as_str().map(str::trim) == Some("Record locator not found.")
+        {
+            return "SUPPLIER_RECORD_LOCATOR_NOT_FOUND";
+        }
+        return "SUPPLIER_REPORTED_FAILURE";
+    }
+    if has_response {
+        "TICKETING_RESPONSE_UNVERIFIED"
+    } else {
+        // Historical issue transport errors were not retained. No response is
+        // not enough evidence to distinguish a timeout from other failures.
+        "TICKETING_OUTCOME_UNKNOWN"
+    }
+}
+fn diagnostics(booking: Uuid, reason: &str, waiting: bool) -> Value {
+    json!({"reason":reason,"automaticRetryAllowed":false,
+        "nextAction":if waiting {"check_saved_status"} else {"contact_support"},
+        "statusUrl":format!("/api/bookings/{booking}/ticket")})
 }
 fn issue_reply(row: Issue) -> (StatusCode, Json<Value>) {
     if row.state == "not_issued" {
@@ -25,12 +98,22 @@ fn issue_reply(row: Issue) -> (StatusCode, Json<Value>) {
             ),
         );
     }
+    let reason = unresolved_reason(&row);
+    let waiting = row.state == "pending" && !row.pending_stale;
     let settled = !row.wallet_required || row.payment_state.as_deref() == Some("captured");
     let payment = json!({"state":row.payment_state.as_deref().unwrap_or("not_attached"),"operationId":row.wallet_operation_id,"required":row.wallet_required});
     if let Some(mut body) = row.public_response.filter(|_| row.state == "issued") {
         if row.wallet_required {
             body["payment"] = payment;
             body["requiresReconciliation"] = json!(!settled);
+            if !settled {
+                body.as_object_mut().unwrap().extend(
+                    diagnostics(row.booking_id, "WALLET_SETTLEMENT_REQUIRED", false)
+                        .as_object()
+                        .unwrap()
+                        .clone(),
+                );
+            }
         }
         (
             if settled {
@@ -41,32 +124,44 @@ fn issue_reply(row: Issue) -> (StatusCode, Json<Value>) {
             Json(body),
         )
     } else {
-        (
-            StatusCode::ACCEPTED,
-            Json(
-                json!({"issueId":row.id,"bookingId":row.booking_id,"state":row.state,"payment":payment,"requiresReconciliation":true}),
-            ),
-        )
+        let mut body = json!({"issueId":row.id,"bookingId":row.booking_id,"state":row.state,"payment":payment,"requiresReconciliation":true});
+        body.as_object_mut().unwrap().extend(
+            diagnostics(row.booking_id, reason, waiting)
+                .as_object()
+                .unwrap()
+                .clone(),
+        );
+        (StatusCode::ACCEPTED, Json(body))
     }
 }
 fn conflict(code: &'static str) -> ApiError {
     ApiError(StatusCode::CONFLICT, code)
 }
 
-/// Book may omit its deadline or return an offset-free supplier-local value.
-/// Only an explicit offset establishes a UTC deadline we can enforce locally;
-/// otherwise NewTicket must validate the live hold/deadline at the supplier.
-fn deadline_check(raw: &Value, now: DateTime<Utc>, margin: i64) -> Result<&'static str, ApiError> {
-    let Some(deadline) = raw
-        .as_str()
-        .and_then(|s| DateTime::parse_from_rfc3339(s).ok())
+/// PNR named-month values use confirmed Asia/Dhaka time. Other offset-free
+/// formats still require supplier validation, especially original Book strings.
+fn deadline_check(
+    raw: &Value,
+    pnr: bool,
+    now: DateTime<Utc>,
+    margin: i64,
+) -> Result<&'static str, ApiError> {
+    let Some(text) = raw.as_str() else {
+        return Ok("supplier_validation_required");
+    };
+    let explicit = DateTime::parse_from_rfc3339(text).ok();
+    let Some(deadline) = explicit.or_else(|| pnr.then(|| super::deadline::instant(text)).flatten())
     else {
         return Ok("supplier_validation_required");
     };
     if deadline <= now + Duration::seconds(margin) {
         return Err(conflict("TICKETING_DEADLINE_UNSAFE"));
     }
-    Ok("explicit_offset_checked")
+    Ok(if explicit.is_some() {
+        "explicit_offset_checked"
+    } else {
+        "bangladesh_pnr_checked"
+    })
 }
 
 /// Local evidence only: issuing never fetches PNR. A previously verified lookup
@@ -107,7 +202,7 @@ pub(crate) fn issue_preflight(
     } else {
         (&original["item1"]["ticketingTimeLimit"], "booking")
     };
-    let checked = deadline_check(deadline, now, margin)?;
+    let checked = deadline_check(deadline, source == "saved_pnr", now, margin)?;
     Ok(json!({
         "source": "saved_booking",
         "booking": original,
@@ -363,12 +458,12 @@ pub(crate) async fn issue_as(
         ));
     }
     let mut tx = crate::identity::business::begin(&state.pool).await?;
-    let allowed: bool = sqlx::query_scalar("SELECT active AND CASE WHEN $2 THEN audience='b2b' AND 'search:read'=ANY(permissions) ELSE 'booking'=ANY(permissions) AND 'ticketing'=ANY(permissions) END FROM api_clients WHERE id=$1 FOR UPDATE")
+    let allowed: bool = sqlx::query_scalar("SELECT active AND CASE WHEN $2 THEN audience='b2b' AND 'search:read'=ANY(permissions) ELSE 'booking'=ANY(permissions) AND 'ticketing'=ANY(permissions) AND (external_user_id IS NULL OR (api_management_enabled AND tier='enterprise')) END FROM api_clients WHERE id=$1 FOR UPDATE")
         .bind(machine.client_id).bind(portal.is_some()).fetch_one(&mut *tx).await?;
     if !allowed {
         return Err(ApiError(StatusCode::FORBIDDEN, "CLIENT_TICKETING_DISABLED"));
     }
-    if let Some(old) = sqlx::query_as::<_,Issue>("SELECT id,booking_id,request_hash,wallet_required,(SELECT state FROM wallet_operations w WHERE w.subject_kind='ticket_issue' AND w.subject_id=flight_ticket_issues.id) AS payment_state,(SELECT id FROM wallet_operations w WHERE w.subject_kind='ticket_issue' AND w.subject_id=flight_ticket_issues.id) AS wallet_operation_id,(SELECT state FROM flight_ticket_outcomes s WHERE s.id=flight_ticket_issues.id) AS state,COALESCE((SELECT public_response FROM flight_ticket_verifications v WHERE v.issue_id=flight_ticket_issues.id),public_response) AS public_response FROM flight_ticket_issues WHERE client_id=$1 AND (idempotency_key=$2 OR booking_id=$3) ORDER BY (idempotency_key=$2) DESC LIMIT 1").bind(machine.client_id).bind(&key).bind(id).fetch_optional(&mut *tx).await? { return replay(old,&hash,id); }
+    if let Some(old) = sqlx::query_as::<_,Issue>("SELECT id,booking_id,request_hash,wallet_required,(SELECT supplier_id FROM flight_bookings b WHERE b.id=flight_ticket_issues.booking_id) AS supplier_id,original_response->'item2' AS supplier_result,(original_response IS NOT NULL) AS has_supplier_response,(created_at<clock_timestamp()-INTERVAL '5 minutes') AS pending_stale,(SELECT state FROM wallet_operations w WHERE w.subject_kind='ticket_issue' AND w.subject_id=flight_ticket_issues.id) AS payment_state,(SELECT id FROM wallet_operations w WHERE w.subject_kind='ticket_issue' AND w.subject_id=flight_ticket_issues.id) AS wallet_operation_id,(SELECT state FROM flight_ticket_outcomes s WHERE s.id=flight_ticket_issues.id) AS state,COALESCE((SELECT public_response FROM flight_ticket_verifications v WHERE v.issue_id=flight_ticket_issues.id),public_response) AS public_response FROM flight_ticket_issues WHERE client_id=$1 AND (idempotency_key=$2 OR booking_id=$3) ORDER BY (idempotency_key=$2) DESC LIMIT 1").bind(machine.client_id).bind(&key).bind(id).fetch_optional(&mut *tx).await? { return replay(old,&hash,id); }
     let (held,): (bool,) = sqlx::query_as(
         "SELECT state='held' AND execution_mode='hold' FROM flight_bookings WHERE id=$1 FOR UPDATE",
     )
@@ -431,7 +526,7 @@ pub(crate) async fn issue_as(
         if let Err(e)=crate::wallet::ticket::finalize(&pool,issue_id).await {
             tracing::error!(%issue_id,code=e.1,"ticket wallet finalization requires recovery");
         }
-        let row=sqlx::query_as::<_,Issue>("SELECT id,booking_id,request_hash,wallet_required,(SELECT state FROM wallet_operations w WHERE w.subject_kind='ticket_issue' AND w.subject_id=flight_ticket_issues.id) AS payment_state,(SELECT id FROM wallet_operations w WHERE w.subject_kind='ticket_issue' AND w.subject_id=flight_ticket_issues.id) AS wallet_operation_id,(SELECT state FROM flight_ticket_outcomes s WHERE s.id=flight_ticket_issues.id) AS state,COALESCE((SELECT public_response FROM flight_ticket_verifications v WHERE v.issue_id=flight_ticket_issues.id),public_response) AS public_response FROM flight_ticket_issues WHERE id=$1").bind(issue_id).fetch_one(&pool).await?;
+        let row=sqlx::query_as::<_,Issue>("SELECT id,booking_id,request_hash,wallet_required,(SELECT supplier_id FROM flight_bookings b WHERE b.id=flight_ticket_issues.booking_id) AS supplier_id,original_response->'item2' AS supplier_result,(original_response IS NOT NULL) AS has_supplier_response,(created_at<clock_timestamp()-INTERVAL '5 minutes') AS pending_stale,(SELECT state FROM wallet_operations w WHERE w.subject_kind='ticket_issue' AND w.subject_id=flight_ticket_issues.id) AS payment_state,(SELECT id FROM wallet_operations w WHERE w.subject_kind='ticket_issue' AND w.subject_id=flight_ticket_issues.id) AS wallet_operation_id,(SELECT state FROM flight_ticket_outcomes s WHERE s.id=flight_ticket_issues.id) AS state,COALESCE((SELECT public_response FROM flight_ticket_verifications v WHERE v.issue_id=flight_ticket_issues.id),public_response) AS public_response FROM flight_ticket_issues WHERE id=$1").bind(issue_id).fetch_one(&pool).await?;
         Ok::<_,ApiError>(row)
     }).await.map_err(|_|ApiError(StatusCode::SERVICE_UNAVAILABLE,"TICKETING_OUTCOME_UNKNOWN"))?.map(issue_reply)
 }
@@ -496,7 +591,7 @@ async fn existing(
     key: &str,
     id: Uuid,
 ) -> Result<Option<Issue>, ApiError> {
-    Ok(sqlx::query_as("SELECT id,booking_id,request_hash,wallet_required,(SELECT state FROM wallet_operations w WHERE w.subject_kind='ticket_issue' AND w.subject_id=flight_ticket_issues.id) AS payment_state,(SELECT id FROM wallet_operations w WHERE w.subject_kind='ticket_issue' AND w.subject_id=flight_ticket_issues.id) AS wallet_operation_id,(SELECT state FROM flight_ticket_outcomes s WHERE s.id=flight_ticket_issues.id) AS state,COALESCE((SELECT public_response FROM flight_ticket_verifications v WHERE v.issue_id=flight_ticket_issues.id),public_response) AS public_response FROM flight_ticket_issues WHERE client_id=$1 AND (idempotency_key=$2 OR booking_id=$3) ORDER BY (idempotency_key=$2) DESC LIMIT 1").bind(client).bind(key).bind(id).fetch_optional(pool).await?)
+    Ok(sqlx::query_as("SELECT id,booking_id,request_hash,wallet_required,(SELECT supplier_id FROM flight_bookings b WHERE b.id=flight_ticket_issues.booking_id) AS supplier_id,original_response->'item2' AS supplier_result,(original_response IS NOT NULL) AS has_supplier_response,(created_at<clock_timestamp()-INTERVAL '5 minutes') AS pending_stale,(SELECT state FROM wallet_operations w WHERE w.subject_kind='ticket_issue' AND w.subject_id=flight_ticket_issues.id) AS payment_state,(SELECT id FROM wallet_operations w WHERE w.subject_kind='ticket_issue' AND w.subject_id=flight_ticket_issues.id) AS wallet_operation_id,(SELECT state FROM flight_ticket_outcomes s WHERE s.id=flight_ticket_issues.id) AS state,COALESCE((SELECT public_response FROM flight_ticket_verifications v WHERE v.issue_id=flight_ticket_issues.id),public_response) AS public_response FROM flight_ticket_issues WHERE client_id=$1 AND (idempotency_key=$2 OR booking_id=$3) ORDER BY (idempotency_key=$2) DESC LIMIT 1").bind(client).bind(key).bind(id).fetch_optional(pool).await?)
 }
 fn replay(row: Issue, hash: &[u8], id: Uuid) -> Result<(StatusCode, Json<Value>), ApiError> {
     if row.booking_id != id || row.request_hash != hash {
@@ -504,29 +599,178 @@ fn replay(row: Issue, hash: &[u8], id: Uuid) -> Result<(StatusCode, Json<Value>)
     }
     Ok(issue_reply(row))
 }
-#[utoipa::path(get,path="/api/bookings/{id}/ticket",operation_id="held_ticket_status",tag="Flights",security(("machine_token"=[])),params(("id"=String,Path)),responses((status=200,body=Object),(status=202,body=Object),(status=404,description="Unknown, foreign or not issued")))]
 pub(super) async fn status(
     machine: Machine,
     State(state): State<AppState>,
     Path(id): Path<Uuid>,
 ) -> Result<(StatusCode, Json<Value>), ApiError> {
     machine.require("ticketing")?;
-    let row=sqlx::query_as::<_,Issue>("SELECT id,booking_id,request_hash,wallet_required,(SELECT state FROM wallet_operations w WHERE w.subject_kind='ticket_issue' AND w.subject_id=flight_ticket_issues.id) AS payment_state,(SELECT id FROM wallet_operations w WHERE w.subject_kind='ticket_issue' AND w.subject_id=flight_ticket_issues.id) AS wallet_operation_id,(SELECT state FROM flight_ticket_outcomes s WHERE s.id=flight_ticket_issues.id) AS state,COALESCE((SELECT public_response FROM flight_ticket_verifications v WHERE v.issue_id=flight_ticket_issues.id),public_response) AS public_response FROM flight_ticket_issues WHERE booking_id=$1 AND client_id=$2").bind(id).bind(machine.client_id).fetch_optional(&state.pool).await?.ok_or(ApiError(StatusCode::NOT_FOUND,"NOT_FOUND"))?;
+    let row=sqlx::query_as::<_,Issue>("SELECT id,booking_id,request_hash,wallet_required,(SELECT supplier_id FROM flight_bookings b WHERE b.id=flight_ticket_issues.booking_id) AS supplier_id,original_response->'item2' AS supplier_result,(original_response IS NOT NULL) AS has_supplier_response,(created_at<clock_timestamp()-INTERVAL '5 minutes') AS pending_stale,(SELECT state FROM wallet_operations w WHERE w.subject_kind='ticket_issue' AND w.subject_id=flight_ticket_issues.id) AS payment_state,(SELECT id FROM wallet_operations w WHERE w.subject_kind='ticket_issue' AND w.subject_id=flight_ticket_issues.id) AS wallet_operation_id,(SELECT state FROM flight_ticket_outcomes s WHERE s.id=flight_ticket_issues.id) AS state,COALESCE((SELECT public_response FROM flight_ticket_verifications v WHERE v.issue_id=flight_ticket_issues.id),public_response) AS public_response FROM flight_ticket_issues WHERE booking_id=$1 AND client_id=$2").bind(id).bind(machine.client_id).fetch_optional(&state.pool).await?;
+    let row = match row {
+        Some(row) => row,
+        None => {
+            let imported =
+                crate::portal_imports::api::load(&state.pool, machine.client_id, Some(id), None)
+                    .await?
+                    .ok_or(ApiError(StatusCode::NOT_FOUND, "NOT_FOUND"))?;
+            return Ok((StatusCode::OK, Json(imported.ticket()?)));
+        }
+    };
     Ok(issue_reply(row))
 }
+#[utoipa::path(get,path="/api/bookings/{id}/ticket",operation_id="held_ticket_status",tag="Flights",security(("machine_token"=[])),params(("id"=String,Path)),responses((status=200,body=Object),(status=202,body=Object),(status=404,description="Unknown, foreign or not issued")))]
+async fn saved_status(
+    machine: Machine,
+    State(state): State<AppState>,
+    Path(id): Path<Uuid>,
+) -> Result<(StatusCode, HeaderMap, Json<Value>), ApiError> {
+    machine.require("ticketing")?;
+    if let Some(imported) =
+        crate::portal_imports::api::load(&state.pool, machine.client_id, Some(id), None).await?
+    {
+        return Ok((StatusCode::OK, imported.headers(), Json(imported.ticket()?)));
+    }
+    let (status, body) = self::status(machine, State(state), Path(id)).await?;
+    Ok((status, HeaderMap::new(), body))
+}
 #[derive(OpenApi)]
-#[openapi(paths(issue, status, verify_saved))]
+#[openapi(paths(issue, saved_status, verify_saved))]
 pub struct TicketDoc;
 pub fn routes() -> Router<AppState> {
     Router::new()
         .route("/api/ticket/NewTicket", post(issue))
         .route("/api/bookings/{id}/ticket/verify", post(verify_saved))
-        .route("/api/bookings/{id}/ticket", get(status))
+        .route("/api/bookings/{id}/ticket", get(saved_status))
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn portal_outcomes_distinguish_wait_support_and_settlement() {
+        for (state, stale, required, payment, code, action) in [
+            (
+                "pending",
+                false,
+                true,
+                "reserved",
+                "TICKETING_IN_PROGRESS",
+                "check_saved_status",
+            ),
+            (
+                "pending",
+                true,
+                true,
+                "reserved",
+                "TICKETING_STATUS_STALE",
+                "contact_support",
+            ),
+            (
+                "outcome_unknown",
+                false,
+                true,
+                "reserved",
+                "TICKETING_OUTCOME_UNKNOWN",
+                "contact_support",
+            ),
+            (
+                "issued",
+                false,
+                true,
+                "reserved",
+                "WALLET_SETTLEMENT_REQUIRED",
+                "contact_support",
+            ),
+        ] {
+            let snapshot = json!({"state":state,"payment":{"required":required,"state":payment}});
+            let body = portal_diagnostics(&snapshot, "triplover", None, false, stale);
+            assert_eq!(body["reason"], code);
+            assert_eq!(body["nextAction"], action);
+            assert_eq!(body["automaticRetryAllowed"], false);
+        }
+        for snapshot in [
+            json!({"state":"not_issued"}),
+            json!({"state":"issued","payment":{"required":true,"state":"captured"}}),
+            json!({"state":"issued","payment":{"required":false}}),
+        ] {
+            assert_eq!(
+                portal_diagnostics(&snapshot, "triplover", None, false, false),
+                Value::Null
+            );
+        }
+    }
+    #[test]
+    fn issue_diagnostics_separate_processing_from_unresolved_evidence() {
+        let mut row = Issue {
+            id: Uuid::new_v4(),
+            booking_id: Uuid::new_v4(),
+            request_hash: vec![],
+            state: "pending".into(),
+            public_response: None,
+            supplier_id: "triplover".into(),
+            supplier_result: None,
+            has_supplier_response: false,
+            pending_stale: false,
+            wallet_required: true,
+            payment_state: Some("reconciliation".into()),
+            wallet_operation_id: Some(Uuid::new_v4()),
+        };
+        assert_eq!(unresolved_reason(&row), "TICKETING_IN_PROGRESS");
+        row.pending_stale = true;
+        assert_eq!(unresolved_reason(&row), "TICKETING_STATUS_STALE");
+        row.state = "outcome_unknown".into();
+        assert_eq!(unresolved_reason(&row), "TICKETING_OUTCOME_UNKNOWN");
+        row.has_supplier_response = true;
+        assert_eq!(unresolved_reason(&row), "TICKETING_RESPONSE_UNVERIFIED");
+        row.supplier_result =
+            Some(json!({"isSuccess":false,"message":"Record locator not found."}));
+        assert_eq!(unresolved_reason(&row), "SUPPLIER_RECORD_LOCATOR_NOT_FOUND");
+        row.supplier_id = "other".into();
+        assert_eq!(unresolved_reason(&row), "SUPPLIER_REPORTED_FAILURE");
+        row.supplier_id = "triplover".into();
+        row.supplier_result = Some(
+            json!({"isSuccess":false,"message":"Record locator not found. private passenger https://private.invalid"}),
+        );
+        let (status, Json(body)) = issue_reply(row);
+        assert_eq!(status, StatusCode::ACCEPTED);
+        assert_eq!(body["reason"], "SUPPLIER_REPORTED_FAILURE");
+        assert_eq!(body["nextAction"], "contact_support");
+        assert_eq!(body["automaticRetryAllowed"], false);
+        assert!(!body.to_string().contains("private"));
+    }
+    #[test]
+    fn issue_pending_staleness_controls_saved_status_action() {
+        for stale in [false, true] {
+            let booking_id = Uuid::new_v4();
+            let (_, Json(body)) = issue_reply(Issue {
+                id: Uuid::new_v4(),
+                booking_id,
+                request_hash: vec![],
+                state: "pending".into(),
+                public_response: None,
+                supplier_id: "triplover".into(),
+                supplier_result: None,
+                has_supplier_response: false,
+                pending_stale: stale,
+                wallet_required: true,
+                payment_state: Some("reserved".into()),
+                wallet_operation_id: Some(Uuid::new_v4()),
+            });
+            assert_eq!(
+                body["nextAction"],
+                if stale {
+                    "contact_support"
+                } else {
+                    "check_saved_status"
+                }
+            );
+            assert_eq!(
+                body["statusUrl"],
+                format!("/api/bookings/{booking_id}/ticket")
+            );
+            assert_eq!(body["automaticRetryAllowed"], false);
+        }
+    }
     #[test]
     fn surname_only_ticket_identity_matches_the_accepted_booking() {
         let booked =
@@ -556,6 +800,26 @@ mod tests {
         assert!(!passenger_matches(&expected, &actual, "triplover", true));
     }
     #[test]
+    fn bangladesh_pnr_deadline_takes_priority_over_later_book_deadline() {
+        let now = DateTime::parse_from_rfc3339("2026-09-19T06:43:00Z")
+            .unwrap()
+            .with_timezone(&Utc);
+        let book = json!({"item1":{"bookingStatus":"Created","ticketingTimeLimit":"2026-09-19T08:44:35Z"},"item2":{"isSuccess":true}});
+        let payload = json!({"PNR":"TESTPN"});
+        let pnr = json!({"item1":{"pnr":"TESTPN","status":"Booked","lastTicketTime":"19 Sep 2026, 12:44 PM"},"item2":{"isSuccess":true}});
+        assert!(issue_preflight(&book, &payload, None, now, 90).is_ok());
+        assert_eq!(
+            issue_preflight(&book, &payload, Some(&pnr), now, 90)
+                .unwrap_err()
+                .1,
+            "TICKETING_DEADLINE_UNSAFE"
+        );
+        let earlier = now - Duration::minutes(10);
+        let evidence = issue_preflight(&book, &payload, Some(&pnr), earlier, 90).unwrap();
+        assert_eq!(evidence["deadlineSource"], "saved_pnr");
+        assert_eq!(evidence["deadlineCheck"], "bangladesh_pnr_checked");
+    }
+    #[test]
     fn deadlines_enforce_explicit_offsets_and_defer_unknown_values_to_supplier() {
         let now = DateTime::parse_from_rfc3339("2026-09-11T12:00:00Z")
             .unwrap()
@@ -569,7 +833,7 @@ mod tests {
             json!("2026-09-15 12:30:00"),
         ] {
             assert_eq!(
-                deadline_check(&raw, now, 90).unwrap(),
+                deadline_check(&raw, false, now, 90).unwrap(),
                 "supplier_validation_required"
             );
         }
@@ -579,12 +843,12 @@ mod tests {
             "2026-09-11T18:01:00+06:00",
         ] {
             assert_eq!(
-                deadline_check(&json!(raw), now, 90).unwrap_err().1,
+                deadline_check(&json!(raw), false, now, 90).unwrap_err().1,
                 "TICKETING_DEADLINE_UNSAFE"
             );
         }
         assert_eq!(
-            deadline_check(&json!("2026-09-11T19:00:00+06:00"), now, 90).unwrap(),
+            deadline_check(&json!("2026-09-11T19:00:00+06:00"), false, now, 90).unwrap(),
             "explicit_offset_checked"
         );
     }

@@ -1,0 +1,64 @@
+{
+  "date": "2026-09-18",
+  "prior_verification": "CLIENT_API_REMEDIATION_VERIFICATION_2026-09-18.json",
+  "application_source_changed_since_prior_verification": false,
+  "journey": {
+    "carrier": "BG",
+    "route": "DAC-CGP",
+    "departure": "2026-10-23",
+    "departure_days_ahead": 35,
+    "search_http": 200,
+    "search_offers": 6,
+    "rules_reprice_acceptance_pricing_http": 200,
+    "book_http": 202,
+    "book_duration_seconds": "3.357127",
+    "book_state": "outcome_unknown",
+    "reason": "SUPPLIER_REPORTED_FAILURE",
+    "next_action": "contact_support",
+    "automatic_retry_allowed": false,
+    "book_dispatches": 1,
+    "issue_dispatches": 0,
+    "replay_equal": true,
+    "replay_additional_dispatches": 0,
+    "wallet_ledger_entries": 0
+  },
+  "supplier_read_only_followup": {
+    "global_http": 200,
+    "report_http": 200,
+    "status": "Failed",
+    "status_for": "Booking",
+    "completed": true,
+    "pnr_present": false,
+    "tickets_present": false,
+    "failure_class": "Amadeus Book invalid data; field unspecified"
+  },
+  "payload_verification": {
+    "supplier_reprice_references_match": true,
+    "unknown_type_required_max_length_violations": [],
+    "date_time_format_validated": false,
+    "root_cause_confirmed": false
+  },
+  "contract_validation": {
+    "additional_responses": 8,
+    "additional_fare_breakdowns": 8,
+    "failures": []
+  },
+  "tests": {
+    "opt_in_uat_audit": "passed; booking outcome unresolved",
+    "targeted_clippy_warnings_denied": "passed",
+    "format_diff_checks": "passed"
+  },
+  "backup": {
+    "sha256": "45b90f5cb89a4fb776746349cd562f55f69c854684e5c76149de359d4e67280d",
+    "archive_listing_verified": true,
+    "restore_tested": false
+  },
+  "source_sha256": {
+    "tests/client_api_audit.rs": "e6432708538cdfa07fa7dd96a4c0a5a8a9acb18ba5055d064ea0fd8e87f498e4"
+  },
+  "deployed": false,
+  "working_database_changed": false,
+  "supplier_case_sent": false,
+  "release_decision": "blocked on supplier booking reliability and target deployment verification",
+  "isolated_test_cluster_stopped": true
+}

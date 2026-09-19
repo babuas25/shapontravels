@@ -41,6 +41,9 @@ struct Context {
     clients: Vec<(Uuid, i64)>,
 }
 tokio::task_local! { static CONTEXT: Context; }
+pub(crate) fn current_principal() -> Result<Principal, ApiError> {
+    CONTEXT.try_with(|c| c.actor.clone()).map_err(|_| denied())
+}
 pub(crate) fn in_context() -> bool {
     CONTEXT.try_with(|_| ()).is_ok()
 }
@@ -64,7 +67,7 @@ fn denied() -> ApiError {
 fn bad() -> ApiError {
     ApiError(StatusCode::BAD_REQUEST, "IDENTITY_INVALID_REQUEST")
 }
-async fn principal(
+pub(crate) async fn principal(
     tx: &mut Transaction<'_, Postgres>,
     subject: &str,
 ) -> Result<Principal, ApiError> {
@@ -202,6 +205,56 @@ pub async fn execute(
         crate::auth::rate_limit(&state.pool, &format!("markup:{}", c.actor.id), 60).await?;
     }
     match (path, input.method.as_str()) {
+        ("/admin/portal-imports/receipt", "POST") => {
+            if !["superadmin", "b2b", "b2b_sub"].contains(&c.actor.role.as_str()) {
+                return Err(denied());
+            }
+            crate::auth::rate_limit(&state.pool, &format!("import-receipt:{}", c.actor.id), 120)
+                .await?;
+        }
+        ("/admin/portal-imports", "POST") => {
+            if c.actor.role != "superadmin" {
+                return Err(denied());
+            }
+            let target = if let Some(subject) = input.body["assigned_user"].as_str() {
+                Some(subject.to_owned())
+            } else if let Some(id) = input.body["quote_id"].as_str() {
+                let id = Uuid::parse_str(id).map_err(|_| bad())?;
+                sqlx::query_scalar("SELECT u.clerk_user_id FROM portal_import_quotes q JOIN portal_users u ON u.id=q.assigned_user_id WHERE q.id=$1 AND q.actor_id=$2").bind(id).bind(c.actor.id).fetch_optional(&mut *tx).await?
+            } else if input.body["action"] == "status" {
+                sqlx::query_scalar("SELECT u.clerk_user_id FROM portal_import_bookings b JOIN portal_users u ON u.id=b.assigned_user_id WHERE (b.public_ref=$1 OR b.booking_reference=$1)").bind(input.body["reference"].as_str()).fetch_optional(&mut *tx).await?
+            } else {
+                None
+            };
+            if let Some(subject) = target {
+                c.targets.push(principal(&mut tx, &subject).await?);
+            }
+            crate::auth::rate_limit(&state.pool, &format!("portal-imports:{}", c.actor.id), 60)
+                .await?;
+        }
+        ("/admin/sales-report", "POST") => {
+            if !["superadmin", "b2b"].contains(&c.actor.role.as_str()) {
+                return Err(denied());
+            }
+        }
+        ("/admin/site-content", "POST") => {
+            if c.actor.role != "superadmin" {
+                return Err(denied());
+            }
+            if input.body["action"] != "read" {
+                crate::auth::rate_limit(&state.pool, &format!("site-content:{}", c.actor.id), 60)
+                    .await?;
+            }
+        }
+        ("/admin/search-control", "POST") => {
+            if c.actor.role != "superadmin" {
+                return Err(denied());
+            }
+            if input.body["action"] != "report" {
+                crate::auth::rate_limit(&state.pool, &format!("search-control:{}", c.actor.id), 60)
+                    .await?;
+            }
+        }
         ("/admin/markup-rules", "GET" | "POST")
         | ("/admin/markup-agents", "GET")
         | ("/admin/markup-preview", "POST") => {
@@ -218,6 +271,31 @@ pub async fn execute(
             Uuid::parse_str(id).map_err(|_| bad())?;
             if tail.ends_with("/status") && input.method != "PUT" {
                 return Err(bad());
+            }
+        }
+        ("/admin/portal-ticket-management", "POST") => {
+            if c.actor.role == "staff_media" {
+                return Err(denied());
+            }
+            verify_actor(&input.body["actor"], &c.actor)?;
+            if input.body["actor"]
+                .get("owner")
+                .is_some_and(|v| *v != owner(&c.actor))
+            {
+                return Err(denied());
+            }
+            input.body["actor"] = json!({"external_user_id":c.actor.subject,"role":c.actor.role,"owner":owner(&c.actor),"display":{"name":c.actor.name}});
+            if input.body["command"]["action"] == "mutate"
+                && input.body["command"]["input"]["action"] == "assign"
+            {
+                let subject = input.body["command"]["input"]["assigneeUserId"]
+                    .as_str()
+                    .ok_or_else(bad)?;
+                let assignee = principal(&mut tx, subject).await?;
+                if !["staff_account", "admin", "superadmin"].contains(&assignee.role.as_str()) {
+                    return Err(denied());
+                }
+                c.targets.push(assignee);
             }
         }
         ("/admin/portal-wallet" | "/admin/portal-wallet/nonissuance", "POST") => {
@@ -576,6 +654,10 @@ pub async fn execute(
         .merge(crate::portal::routes())
         .merge(crate::tier::routes())
         .merge(crate::markup::routes())
+        .merge(crate::search_controls::routes())
+        .merge(crate::site_content::routes())
+        .merge(crate::sales_reports::routes())
+        .merge(crate::portal_imports::routes())
         .merge(crate::auth::routes())
         .merge(crate::api_docs::routes(crate::openapi_document(
             &state.environment,
@@ -627,6 +709,7 @@ pub async fn directory(
             "staff_media",
         ],
         "assignees" if ["superadmin", "admin"].contains(&actor.role.as_str()) => &["b2b"],
+        "import_assignees" if actor.role == "superadmin" => &["b2b", "b2b_sub"],
         "recipients" if ["superadmin", "admin", "staff_account"].contains(&actor.role.as_str()) => {
             &[
                 "superadmin",
@@ -906,7 +989,7 @@ pub(crate) async fn notification_worker(
 }
 
 #[derive(Clone)]
-pub(crate) struct SearchAuthority(Principal);
+pub(crate) struct SearchAuthority(pub(crate) Principal);
 pub(crate) async fn accept_search(
     guard: SearchAuthority,
     machine: crate::auth::Machine,

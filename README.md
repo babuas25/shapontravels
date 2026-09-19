@@ -2,6 +2,8 @@
 
 Rust/Axum backend for the flight aggregation and booking requirements in [REQUIREMENTS.md](REQUIREMENTS.md).
 
+[Client integration guide](docs/CLIENT_API_GUIDE.md): authentication, Search → RePrice → acceptance → Hold → Issue, money fields, retries and current capabilities.
+
 ## Local development
 
 **For this workspace's existing Next frontend:** run `node scripts/portal-dev.mjs` from this Rust project, and keep `npm run dev` running in the sibling `shopontravels` frontend. This resumes the existing local portal database and serves Rust on `127.0.0.1:18081`. See [local portal commands and troubleshooting](docs/LOCAL_PORTAL.md). The general setup below uses a separate database/listener.
@@ -76,7 +78,7 @@ See [Swagger walkthrough and API contract](docs/MARKUP_API.md). Create a draft, 
 
 [Saved passengers](docs/SAVED_PASSENGERS.md) now use local Rust storage through the existing frontend form and API contract. Migration 0026 retains owner-scoped profiles and immutable references; 103 original profiles were copied and verified locally. Booking/wallet integration remains separate.
 
-`POST /api/Search` and `POST /api/FareRules` now use machine tokens. [Setup, examples and initial-release limits](docs/SEARCH_API.md). Activate your own markup rule and selected supplier Search controls before testing. Search now selects the lowest original supplier total for conservatively equivalent fares before markup; equal totals prefer Takeoff, Firsttrip, Triplover. Summary counts, airline/stops filters and net selling-price ranges now derive from retained offers. Broader equivalence and complex-fare coverage remain partial. Hold Book/status/reconciliation and configured held-ticket Issue exist; [Direct Issue](docs/DIRECT_ISSUE.md) is deployed with real execution disabled; [held cancellation](docs/CANCELLATION_API.md) is deployed with real execution disabled.
+`POST /api/Search` and `POST /api/FareRules` now use machine tokens. [Setup, examples and initial-release limits](docs/SEARCH_API.md). Activate your own markup rule and selected supplier Search controls before testing. Search now selects the lowest original supplier total for conservatively equivalent fares before markup; equal totals prefer Takeoff, Firsttrip, Triplover. Summary counts, airline/stops filters and price ranges now derive from retained public offers (B2B published gross; exact payable is in tier pricing/fareBreakdown). Broader equivalence and complex-fare coverage remain partial. Hold Book/status/reconciliation and configured held-ticket Issue exist; [Direct Issue](docs/DIRECT_ISSUE.md) is deployed with real execution disabled; [held cancellation](docs/CANCELLATION_API.md) is deployed with real execution disabled.
 
 ## Deployment
 
