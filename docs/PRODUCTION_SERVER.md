@@ -1,6 +1,7 @@
 # Production server and branch deployments
 
-Target: `160.25.226.236`, `api.shapontravels.com`, Ubuntu 24.04 x86_64.
+Production target: `160.25.226.236`, `api.shapontravels.com`, Ubuntu 24.04 x86_64.
+Development target: the existing `160.25.226.72` server (`sendbox.shapontravels.com`).
 The operator requested a new empty database. Do not copy the development database,
 supplier credentials, user accounts, or identity activation settings into it.
 
@@ -32,15 +33,22 @@ to the other server. GitHub environment names are case-insensitive; an existing
 
 | Setting | Production | Development |
 | --- | --- | --- |
-| Host variable | `PRODUCTION_VPS_HOST=160.25.226.236` | `DEVELOPMENT_VPS_HOST=<verified development host>` |
+| Host variable | `PRODUCTION_VPS_HOST=160.25.226.236` | `DEVELOPMENT_VPS_HOST=160.25.226.72` |
 | Port variable | `PRODUCTION_VPS_PORT=22` | `DEVELOPMENT_VPS_PORT=22` |
 | SSH private key secret | `PRODUCTION_VPS_SSH_PRIVATE_KEY` | `DEVELOPMENT_VPS_SSH_PRIVATE_KEY` |
 | Verified host-key secret | `PRODUCTION_VPS_KNOWN_HOSTS` | `DEVELOPMENT_VPS_KNOWN_HOSTS` |
 
-Restrict each environment to its matching branch when configured. The previous
-workflow on remote `main` uses `VPS_DEPLOY_ENABLED` and old `VPS_*` values; local edits
-do not change that workflow. Retire the old switch when publishing branch routing.
-Do not repoint the old generic variables or secrets to the new production server.
+Each environment is restricted to its matching branch. The old
+`VPS_DEPLOY_ENABLED` switch is set to `false`, retiring deployment from historical
+`main` workflows. Do not turn that switch back on or repoint old generic `VPS_*`
+variables/secrets to the new production server. New routing uses only the prefixed
+settings above.
+
+Branch routing alone does not replace the development server's supplier accounts:
+the existing server reported `APP_ENV=production` during inspection. Configure
+reviewed UAT credentials and execution controls before testing supplier mutations
+there. Do not assume a `development` Git branch changes the application's runtime
+environment (supported values are `local`, `test`, `uat`, and `production`).
 
 ## Server files
 
@@ -74,6 +82,15 @@ Enable `shapontravels-backup.timer` for daily backups around 02:15 UTC. Backups 
 in `/var/backups/shapontravels` (postgres:postgres, mode 700), with seven-day local
 retention. An independent off-server backup destination and failure notifications
 still need configuration; local backups do not protect against losing this VPS.
+
+Migration `0061` qualifies the helper used by the generated import booking
+reference column so a dump can restore with PostgreSQL's empty `search_path`.
+Use a release containing this migration before relying on fresh backups. Verify
+restoration into a disposable database with `pg_restore --exit-on-error
+--no-owner --no-privileges`, check the applied migration count, and drop only the
+disposable database afterward. Listing a dump's contents alone does not test
+whether its schema and data can be restored. Never edit previously applied
+migrations; `build.rs` ensures new migration files rebuild the embedded migrator.
 
 ## Application activation
 

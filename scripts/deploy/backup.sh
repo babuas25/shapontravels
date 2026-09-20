@@ -2,6 +2,9 @@
 set -euo pipefail
 export PATH=/usr/sbin:/usr/bin:/sbin:/bin
 umask 077
+# Activation can be invoked from a root-only directory. Use a working directory
+# that the postgres account can traverse before find restores its initial cwd.
+cd /var/backups/shapontravels
 # Separate lock from deployment; prevents scheduled and pre-release dumps racing.
 exec 9>/var/backups/shapontravels/.backup.lock
 flock -w 300 9

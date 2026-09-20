@@ -19,6 +19,36 @@ async fn migrations_and_constraints() {
     MIGRATOR.run(&pool).await.unwrap();
     MIGRATOR.run(&pool).await.unwrap();
     assert!(schema_ready(&pool).await);
+    // pg_restore creates generated columns with an empty search_path. Exercise
+    // both table creation and value calculation, including unresolved evidence.
+    let mut restore = pool.begin().await.unwrap();
+    sqlx::query("SET LOCAL search_path = ''")
+        .execute(&mut *restore)
+        .await
+        .unwrap();
+    sqlx::query("CREATE TEMP TABLE restore_reference_probe (data JSONB, booking_reference TEXT GENERATED ALWAYS AS (public.import_booking_reference(data)) STORED)")
+        .execute(&mut *restore)
+        .await
+        .unwrap();
+    for (data, expected) in [
+        (
+            serde_json::json!({"pnr":"8FE94R","airlinesPnr":["KECOCE"]}),
+            Some("STR8FE94RKECOCE"),
+        ),
+        (
+            serde_json::json!({"pnr":"8FE94R","airlinesPnr":["KECOCE","ABCDEF"]}),
+            None,
+        ),
+        (serde_json::json!({}), None),
+    ] {
+        let actual: Option<String> = sqlx::query_scalar("INSERT INTO pg_temp.restore_reference_probe (data) VALUES ($1) RETURNING booking_reference")
+            .bind(data)
+            .fetch_one(&mut *restore)
+            .await
+            .unwrap();
+        assert_eq!(actual.as_deref(), expected);
+    }
+    restore.rollback().await.unwrap();
     let (total, active): (i64, i64) = sqlx::query_as("SELECT count(*), count(*) FILTER (WHERE search_enabled OR servicing_enabled OR booking_enabled OR ticketing_enabled) FROM supplier_connections").fetch_one(&pool).await.unwrap();
     assert_eq!((total, active), (3, 0));
     assert!(
