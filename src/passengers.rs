@@ -324,6 +324,10 @@ pub struct ListInput {
     pub actor: PassengerActor,
     pub limit: u32,
     pub passenger_type: Option<String>,
+    pub booking_passenger_type: Option<String>,
+    pub search: Option<String>,
+    pub born_from: Option<String>,
+    pub born_to: Option<String>,
 }
 #[derive(Deserialize, ToSchema)]
 #[serde(deny_unknown_fields)]
@@ -356,15 +360,36 @@ async fn list(
 ) -> Result<Json<Value>, ApiError> {
     authorize(&state, &admin, &input.actor, false).await?;
     let owner = profile_owner(&state, &input.actor).await?;
-    if input
-        .passenger_type
-        .as_ref()
-        .is_some_and(|t| !["ADT", "CHD", "CNN", "INF", "INS"].contains(&t.as_str()))
+    if [&input.passenger_type, &input.booking_passenger_type]
+        .into_iter()
+        .flatten()
+        .any(|t| !["ADT", "CHD", "CNN", "INF", "INS"].contains(&t.as_str()))
     {
         return Err(invalid());
     }
-    let rows: Vec<(Value,)> = sqlx::query_as("SELECT portal_passenger_json(p) FROM passenger_profiles p WHERE ($1 OR owner_user_id=$2) AND ($3::text IS NULL OR passenger_type=$3) ORDER BY created_at DESC,id DESC LIMIT $4")
-        .bind(input.actor.all()).bind(&owner).bind(input.passenger_type).bind(input.limit.clamp(1,100) as i64).fetch_all(&state.pool).await?;
+    let search = input.search.as_deref().unwrap_or("").trim();
+    if search.chars().count() > 120 {
+        return Err(invalid());
+    }
+    let born_from = date(input.born_from.as_deref().unwrap_or(""))?;
+    let born_to = date(input.born_to.as_deref().unwrap_or(""))?;
+    if matches!((born_from, born_to), (Some(from), Some(to)) if from > to) {
+        return Err(invalid());
+    }
+    let types: Option<Vec<&str>> = input
+        .booking_passenger_type
+        .as_deref()
+        .map(|kind| match kind {
+            "CHD" | "CNN" => vec!["CHD", "CNN"],
+            "INF" | "INS" => vec!["INF", "INS"],
+            _ => vec!["ADT"],
+        });
+    // Match each word literally, before LIMIT, while retaining owner/hold scope.
+    let terms: Vec<String> = search.split_whitespace().map(str::to_lowercase).collect();
+    let rows: Vec<(Value,)> = sqlx::query_as("SELECT portal_passenger_json(p) FROM passenger_profiles p WHERE ($1 OR owner_user_id=$2) AND ($3::text IS NULL OR passenger_type=$3) AND ($4::text[] IS NULL OR passenger_type=ANY($4)) AND ($5::date IS NULL OR date_of_birth IS NULL OR date_of_birth >= $5) AND ($6::date IS NULL OR date_of_birth IS NULL OR date_of_birth <= $6) AND NOT EXISTS (SELECT 1 FROM unnest($7::text[]) AS terms(term) WHERE strpos(lower(coalesce(given_name,'')),term)=0 AND strpos(lower(coalesce(surname,'')),term)=0 AND strpos(lower(public_ref),term)=0) ORDER BY created_at DESC,id DESC LIMIT $8")
+        .bind(input.actor.all()).bind(&owner).bind(input.passenger_type)
+        .bind(types).bind(born_from).bind(born_to).bind(terms)
+        .bind(input.limit.clamp(1,100) as i64).fetch_all(&state.pool).await?;
     Ok(Json(
         json!({"passengers":rows.into_iter().map(|r|r.0).collect::<Vec<_>>()}),
     ))

@@ -91,6 +91,60 @@ pub async fn verify(app: &Router, admin: &str, machine: &str, pool: &PgPool) {
     )
     .await;
     assert_eq!(rows["passengers"], json!([]));
+    for (filter, count) in [
+        (
+            json!({"search":"  teST Passenger ","booking_passenger_type":"ADT","born_from":"1980-01-01","born_to":"2000-01-01"}),
+            1,
+        ),
+        (json!({"search":saved["publicRef"]}), 1),
+        (json!({"search":"%_"}), 0),
+        (json!({"booking_passenger_type":"CNN"}), 0),
+        (json!({"born_from":"2000-01-01"}), 0),
+        (json!({"born_to":"1980-01-01"}), 0),
+    ] {
+        let mut input = json!({"actor":owner,"limit":1});
+        input
+            .as_object_mut()
+            .unwrap()
+            .extend(filter.as_object().unwrap().clone());
+        let (status, rows) = call(
+            app,
+            "POST",
+            "/admin/portal-passengers/list",
+            Some(admin),
+            input,
+        )
+        .await;
+        assert_eq!(status, 200, "{rows}");
+        assert_eq!(rows["passengers"].as_array().unwrap().len(), count);
+        if count == 1 {
+            assert_eq!(rows["passengers"][0]["id"], saved["id"]);
+        }
+    }
+    for filter in [
+        json!({"search":"x".repeat(121)}),
+        json!({"booking_passenger_type":"UNKNOWN"}),
+        json!({"born_from":"2026-02-30"}),
+        json!({"born_from":"2026-01-01","born_to":"2000-01-01"}),
+    ] {
+        let mut input = json!({"actor":owner,"limit":50});
+        input
+            .as_object_mut()
+            .unwrap()
+            .extend(filter.as_object().unwrap().clone());
+        assert_eq!(
+            call(
+                app,
+                "POST",
+                "/admin/portal-passengers/list",
+                Some(admin),
+                input
+            )
+            .await
+            .0,
+            400
+        );
+    }
     assert_eq!(
         call(
             app,
