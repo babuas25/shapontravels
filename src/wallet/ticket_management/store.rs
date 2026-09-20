@@ -9,6 +9,9 @@ use serde_json::{Value, json};
 use sqlx::{Postgres, Transaction};
 use uuid::Uuid;
 
+#[path = "imports.rs"]
+mod imports;
+
 type Tx<'a> = Transaction<'a, Postgres>;
 #[derive(sqlx::FromRow)]
 pub(super) struct Booking {
@@ -26,7 +29,7 @@ pub(super) struct Booking {
     owner_type: String,
     owner_key: String,
     display: Value,
-    execution_mode: String,
+    import_data: Option<Value>,
 }
 #[derive(sqlx::FromRow)]
 pub(super) struct Request {
@@ -86,14 +89,19 @@ pub(super) async fn booking_scoped(
     {
         return Err(invalid("INVALID_BOOKING_REFERENCE"));
     }
-    // Inner joins intentionally reject unpaid/imported/historical tickets. A
-    // missing charge cannot be substituted with the displayed gross fare.
-    let mut matches: Vec<Booking> = sqlx::query_as("SELECT b.id,b.public_ref,w.wallet_account_id,w.id operation_id,w.amount,w.currency,b.request,COALESCE(v.public_response,t.public_response) ticket,r.tier_pricing pricing,r.selling,CASE WHEN v.issue_id IS NOT NULL THEN t.created_at ELSE t.updated_at END issued_at,o.owner_type,o.owner_key,jsonb_build_object('name',COALESCE(NULLIF(trim(profile.fields->>'agencyName'),''),NULLIF(trim(concat_ws(' ',owner.first_name,owner.last_name)),''),o.display->>'name')) display,b.execution_mode FROM flight_bookings b JOIN flight_ticket_issues t ON t.booking_id=b.id JOIN flight_reprices r ON r.id=b.price_id AND r.client_id=b.client_id LEFT JOIN flight_ticket_verifications v ON v.issue_id=t.id JOIN wallet_operations w ON w.subject_kind='ticket_issue' AND w.subject_id=t.id AND w.booking_id=b.id JOIN wallet_accounts a ON a.id=w.wallet_account_id JOIN wallet_owners o ON o.id=a.owner_id LEFT JOIN portal_agencies agency ON o.owner_type='agency' AND agency.agency_code=o.owner_key LEFT JOIN portal_users owner ON owner.id=agency.owner_user_id LEFT JOIN portal_identity_profiles profile ON profile.user_id=owner.id AND profile.kind='profile' WHERE b.public_ref=$1 AND ($5::uuid IS NULL OR b.client_id=$5) AND r.accepted_at IS NOT NULL AND w.state='captured' AND (t.state='issued' OR v.issue_id IS NOT NULL) AND ($2 OR (o.owner_type=$3 AND o.owner_key=$4)) ORDER BY b.id LIMIT 2 FOR UPDATE OF b")
+    // Both sources require a verified captured charge. The source adapter
+    // retains imported evidence without fabricating native supplier bookings.
+    let mut matches: Vec<Booking> = sqlx::query_as("SELECT b.id,b.public_ref,w.wallet_account_id,w.id operation_id,w.amount,w.currency,b.request,COALESCE(v.public_response,t.public_response) ticket,r.tier_pricing pricing,r.selling,CASE WHEN v.issue_id IS NOT NULL THEN t.created_at ELSE t.updated_at END issued_at,o.owner_type,o.owner_key,jsonb_build_object('name',COALESCE(NULLIF(trim(profile.fields->>'agencyName'),''),NULLIF(trim(concat_ws(' ',owner.first_name,owner.last_name)),''),o.display->>'name')) display,NULL::jsonb import_data FROM flight_bookings b JOIN flight_ticket_issues t ON t.booking_id=b.id JOIN flight_reprices r ON r.id=b.price_id AND r.client_id=b.client_id LEFT JOIN flight_ticket_verifications v ON v.issue_id=t.id JOIN wallet_operations w ON w.subject_kind='ticket_issue' AND w.subject_id=t.id AND w.booking_id=b.id JOIN wallet_accounts a ON a.id=w.wallet_account_id JOIN wallet_owners o ON o.id=a.owner_id LEFT JOIN portal_agencies agency ON o.owner_type='agency' AND agency.agency_code=o.owner_key LEFT JOIN portal_users owner ON owner.id=agency.owner_user_id LEFT JOIN portal_identity_profiles profile ON profile.user_id=owner.id AND profile.kind='profile' WHERE b.public_ref=$1 AND ($5::uuid IS NULL OR b.client_id=$5) AND r.accepted_at IS NOT NULL AND w.state='captured' AND (t.state='issued' OR v.issue_id IS NOT NULL) AND ($2 OR (o.owner_type=$3 AND o.owner_key=$4)) ORDER BY b.id LIMIT 2 FOR UPDATE OF b")
         .bind(reference).bind(actor.staff_read()).bind(actor.owner.as_ref().map(|o| &o.owner_type)).bind(actor.owner.as_ref().map(|o| &o.owner_key)).bind(client).fetch_all(&mut **tx).await?;
+    matches.extend(imports::bookings(tx, actor, reference, client).await?);
     if matches.len() > 1 {
         return Err(conflict("AMBIGUOUS_BOOKING_REFERENCE"));
     }
     let b = matches.pop().ok_or_else(missing)?;
+    sqlx::query("SELECT id FROM booking_financial_subjects WHERE id=$1 FOR UPDATE")
+        .bind(b.id)
+        .execute(&mut **tx)
+        .await?;
     rules::minor(b.amount)?;
     if b.ticket.is_null() || b.pricing.is_null() {
         return Err(conflict("TICKET_ENTITLEMENT_UNAVAILABLE"));
@@ -109,9 +117,9 @@ pub(super) async fn request_scoped(
     id: Uuid,
     client: Option<Uuid>,
 ) -> Result<Request> {
-    let booking: Uuid = sqlx::query_scalar("SELECT r.booking_id FROM ticket_management_requests r JOIN wallet_accounts a ON a.id=r.wallet_account_id JOIN wallet_owners o ON o.id=a.owner_id WHERE r.id=$1 AND ($5::uuid IS NULL OR EXISTS(SELECT 1 FROM flight_bookings b WHERE b.id=r.booking_id AND b.client_id=$5)) AND ($2 OR (o.owner_type=$3 AND o.owner_key=$4))")
+    let booking: Uuid = sqlx::query_scalar("SELECT r.booking_id FROM ticket_management_requests r JOIN wallet_accounts a ON a.id=r.wallet_account_id JOIN wallet_owners o ON o.id=a.owner_id WHERE r.id=$1 AND ($5::uuid IS NULL OR EXISTS(SELECT 1 FROM flight_bookings b WHERE b.id=r.booking_id AND b.client_id=$5) OR EXISTS(SELECT 1 FROM portal_import_bookings b JOIN portal_agencies ag ON ag.agency_code=b.agency_code JOIN portal_users u ON u.id=ag.owner_user_id JOIN api_clients c ON c.external_user_id=u.clerk_user_id WHERE b.id=r.booking_id AND c.id=$5 AND c.active AND c.audience='b2b' AND ag.status='active' AND u.status='active' AND u.role='b2b')) AND ($2 OR (o.owner_type=$3 AND o.owner_key=$4))")
         .bind(id).bind(actor.staff_read()).bind(actor.owner.as_ref().map(|o| &o.owner_type)).bind(actor.owner.as_ref().map(|o| &o.owner_key)).bind(client).fetch_optional(&mut **tx).await?.ok_or_else(missing)?;
-    sqlx::query("SELECT id FROM flight_bookings WHERE id=$1 FOR UPDATE")
+    sqlx::query("SELECT id FROM booking_financial_subjects WHERE id=$1 FOR UPDATE")
         .bind(booking)
         .execute(&mut **tx)
         .await?;
@@ -159,12 +167,21 @@ async fn initialize(tx: &mut Tx<'_>, b: &Booking) -> Result<()> {
     if !entitlements(tx, b.id).await?.is_empty() {
         return Ok(());
     }
-    let initial = rules::allocate_initial(
-        &b.request["passengerInfoes"],
-        &b.ticket["item1"]["ticketInfoes"],
-        &b.pricing,
-        b.amount,
-    )?;
+    let initial = if let Some(data) = &b.import_data {
+        imports::allocate(
+            data,
+            &b.request["passengerInfoes"],
+            &b.ticket["item1"]["ticketInfoes"],
+            b.amount,
+        )?
+    } else {
+        rules::allocate_initial(
+            &b.request["passengerInfoes"],
+            &b.ticket["item1"]["ticketInfoes"],
+            &b.pricing,
+            b.amount,
+        )?
+    };
     for e in initial {
         sqlx::query("INSERT INTO ticket_management_entitlements(id,booking_id,wallet_account_id,passenger_index,passenger_name,passenger_type,ticket_number,currency,amount,funding) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10)")
             .bind(Uuid::new_v4()).bind(b.id).bind(b.wallet_account_id).bind(e.passenger_index as i32).bind(e.passenger_name).bind(e.passenger_type).bind(e.ticket_number).bind(&b.currency).bind(e.amount_minor).bind(json!([Funding { operation_id:b.operation_id, amount:e.amount_minor }])).execute(&mut **tx).await?;
@@ -212,7 +229,7 @@ pub(super) async fn availability(tx: &mut Tx<'_>, b: &Booking) -> Result<Value> 
         json!({"passengerIndex":i,"available":reason.is_none(),"reasonCode":reason,"message":reason.map(|r| match r { "ACTIVE_REQUEST"=>"This ticket already has an active request.","REFUNDED"=>"This ticket was refunded.","VOIDED"=>"This ticket was voided.",_=>"This ticket is unavailable." })})
     }).collect::<Vec<_>>();
     Ok(
-        json!({"passengers":passengers,"routes":routes(b)?,"actions":if b.execution_mode == "hold" { if rules::void_open(b.issued_at, Utc::now()) {vec!["refund","reissue","void"]} else {vec!["refund","reissue"]} } else {vec!["reissue"]}}),
+        json!({"passengers":passengers,"routes":routes(b)?,"actions":if rules::void_open(b.issued_at, Utc::now()) {vec!["refund","reissue","void"]} else {vec!["refund","reissue"]}}),
     )
 }
 #[allow(clippy::too_many_arguments)]
@@ -284,9 +301,6 @@ pub(super) async fn create_with_preferences(
     now: DateTime<Utc>,
 ) -> Result<Value> {
     rules::text(note, 2000, false)?;
-    if b.execution_mode != "hold" && action != Action::Reissue {
-        return Err(conflict("TICKET_MANAGEMENT_ACTION_UNAVAILABLE"));
-    }
     if action == Action::Void && !rules::void_open(b.issued_at, now) {
         return Err(conflict("VOID_REQUEST_WINDOW_CLOSED"));
     }
@@ -937,7 +951,7 @@ pub(super) async fn list_scoped(
     }
     // Expiry must precede filtering so an elapsed quote never looks actionable.
     // Process the caller's scoped records; never leak a foreign booking ID.
-    let ids:Vec<Uuid>=sqlx::query_scalar("SELECT r.id FROM ticket_management_requests r JOIN wallet_accounts a ON a.id=r.wallet_account_id JOIN wallet_owners o ON o.id=a.owner_id WHERE ($9::uuid IS NULL OR EXISTS(SELECT 1 FROM flight_bookings b WHERE b.id=r.booking_id AND b.client_id=$9)) AND ($1 OR (o.owner_type=$2 AND o.owner_key=$3)) AND ($4::text IS NULL OR r.snapshot->>'bookingReference'=$4) AND ($5::text IS NULL OR r.action=$5) AND ($6::text IS NULL OR r.request_type=$6) AND ($7::text IS NULL OR (CASE WHEN r.status='awaiting-confirmation' AND EXISTS(SELECT 1 FROM ticket_management_quotes q WHERE q.id=r.active_quote_id AND q.confirmation_deadline_at<=clock_timestamp()) THEN 'expired' ELSE r.status END)=$7) ORDER BY r.created_at DESC,r.id DESC LIMIT $8")
+    let ids:Vec<Uuid>=sqlx::query_scalar("SELECT r.id FROM ticket_management_requests r JOIN wallet_accounts a ON a.id=r.wallet_account_id JOIN wallet_owners o ON o.id=a.owner_id WHERE ($9::uuid IS NULL OR EXISTS(SELECT 1 FROM flight_bookings b WHERE b.id=r.booking_id AND b.client_id=$9) OR EXISTS(SELECT 1 FROM portal_import_bookings b JOIN portal_agencies ag ON ag.agency_code=b.agency_code JOIN portal_users u ON u.id=ag.owner_user_id JOIN api_clients c ON c.external_user_id=u.clerk_user_id WHERE b.id=r.booking_id AND c.id=$9 AND c.active AND c.audience='b2b' AND ag.status='active' AND u.status='active' AND u.role='b2b')) AND ($1 OR (o.owner_type=$2 AND o.owner_key=$3)) AND ($4::text IS NULL OR r.snapshot->>'bookingReference'=$4) AND ($5::text IS NULL OR r.action=$5) AND ($6::text IS NULL OR r.request_type=$6) AND ($7::text IS NULL OR (CASE WHEN r.status='awaiting-confirmation' AND EXISTS(SELECT 1 FROM ticket_management_quotes q WHERE q.id=r.active_quote_id AND q.confirmation_deadline_at<=clock_timestamp()) THEN 'expired' ELSE r.status END)=$7) ORDER BY r.created_at DESC,r.id DESC LIMIT $8")
         .bind(actor.staff_read()).bind(actor.owner.as_ref().map(|o|&o.owner_type)).bind(actor.owner.as_ref().map(|o|&o.owner_key)).bind(reference).bind(action.as_ref().map(label)).bind(request_type.as_ref().map(label)).bind(status.as_ref().map(label)).bind(limit).bind(client).fetch_all(&mut **tx).await?;
     let mut items = Vec::new();
     for id in ids {

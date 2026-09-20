@@ -3,6 +3,8 @@
 pub mod client;
 #[cfg(test)]
 mod client_tests;
+#[cfg(test)]
+mod import_tests;
 pub mod rules;
 mod store;
 #[cfg(test)]

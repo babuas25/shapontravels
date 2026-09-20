@@ -12,6 +12,9 @@ use std::{collections::HashMap, sync::Arc, time::Duration};
 use tower::ServiceExt;
 use uuid::Uuid;
 
+#[path = "support/wallet_deposit_controls.rs"]
+mod deposit_controls;
+
 async fn get(app: &axum::Router, token: &str, path: &str) -> (u16, Value) {
     let response = app
         .clone()
@@ -394,6 +397,7 @@ async fn wallet_integrity_and_public_reads() {
     );
     workflows(&pool, &app).await;
     runtime_permissions(&pool, account).await;
+    deposit_controls::verify(&pool, &app).await;
 }
 
 async fn command(app: &axum::Router, token: &str, actor: Value, command: Value) -> (u16, Value) {

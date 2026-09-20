@@ -1,5 +1,5 @@
 use super::{
-    Result, conflict, core, forbidden, integer_strings, invalid, missing, money,
+    Result, conflict, core, db_error, forbidden, integer_strings, invalid, missing, money,
     portal::{Actor, audit},
     settings,
 };
@@ -68,7 +68,7 @@ fn remarks(value: &str, required: bool) -> Result<()> {
     Ok(())
 }
 
-pub(super) const REQUEST_ROW: &str = "SELECT (to_jsonb(r)-'request_hash') || jsonb_build_object('owner_type',o.owner_type,'owner_key',o.owner_key,'owner_display',o.display) AS value FROM wallet_requests r JOIN wallet_accounts a ON a.id=r.wallet_account_id JOIN wallet_owners o ON o.id=a.owner_id";
+pub(super) const REQUEST_ROW: &str = "SELECT (to_jsonb(r)-'request_hash') || jsonb_build_object('owner_type',o.owner_type,'owner_key',o.owner_key,'owner_display',o.display,'reversible_amount',CASE WHEN r.kind='deposit' AND r.status='approved' THEN (r.amount::numeric-(SELECT COALESCE(sum(x.amount),0) FROM wallet_requests x WHERE x.reversal_of=r.id AND x.status='approved'))::text ELSE NULL END,'reversal_deposit_ref',(SELECT d.public_ref FROM wallet_requests d WHERE d.id=r.reversal_of)) AS value FROM wallet_requests r JOIN wallet_accounts a ON a.id=r.wallet_account_id JOIN wallet_owners o ON o.id=a.owner_id";
 fn request_wire(v: Value) -> Value {
     integer_strings(v, &["amount"])
 }
@@ -359,6 +359,55 @@ pub(super) async fn adjustment(
     Ok(v)
 }
 
+/// A correction is a separately reviewed debit, bound to the original net
+/// credit. Never rewrite the approved deposit or use its pre-fee gross amount.
+pub(super) async fn reverse_deposit(
+    pool: &PgPool,
+    actor: &Actor,
+    id: Uuid,
+    deposit: Uuid,
+    amount: &str,
+    reason: &str,
+) -> Result<Value> {
+    actor.finance()?;
+    remarks(reason, true)?;
+    let amount = money::major_to_minor(amount)?;
+    if amount <= 0 || amount > 10_000_000_000 {
+        return Err(invalid("INVALID_WALLET_AMOUNT"));
+    }
+    let hash = digest(&json!(["reverse_deposit", deposit, amount, reason]).to_string());
+    let mut tx = crate::identity::business::begin(pool).await?;
+    sqlx::query("SELECT pg_advisory_xact_lock(hashtextextended($1,0))")
+        .bind(format!("wallet-request:{id}"))
+        .execute(&mut *tx)
+        .await?;
+    if let Some(value) = existing(&mut tx, id, &hash, actor).await? {
+        tx.commit().await?;
+        return Ok(value);
+    }
+    let source: Option<(Uuid, String)> = sqlx::query_as(
+        "SELECT wallet_account_id,currency FROM wallet_requests WHERE id=$1 AND kind='deposit' AND status='approved' AND ledger_entry_id IS NOT NULL"
+    ).bind(deposit).fetch_optional(&mut *tx).await?;
+    let (account, currency) = source.ok_or_else(|| conflict("INVALID_DEPOSIT_REVERSAL"))?;
+    let public_ref = reference(&mut tx, "adjustment").await?;
+    sqlx::query("INSERT INTO wallet_requests(id,kind,public_ref,wallet_account_id,amount,currency,details,request_hash,requested_by_user_id,requested_by_role,reversal_of) VALUES($1,'adjustment',$2,$3,$4,$5,$6,$7,$8,$9,$10)")
+        .bind(id).bind(public_ref).bind(account).bind(amount).bind(currency)
+        .bind(json!({"adjustment_type":"debit","reason":reason})).bind(hash)
+        .bind(&actor.external_user_id).bind(&actor.role).bind(deposit)
+        .execute(&mut *tx).await.map_err(db_error)?;
+    audit(
+        &mut tx,
+        actor,
+        "deposit.reversal_requested",
+        id,
+        json!({"depositId":deposit,"accountId":account}),
+    )
+    .await?;
+    let value = request(&mut tx, id).await?;
+    tx.commit().await?;
+    Ok(value)
+}
+
 pub(super) async fn review(
     pool: &PgPool,
     actor: &Actor,
@@ -410,11 +459,38 @@ pub(super) async fn review(
         let amount = r["amount"]
             .as_i64()
             .ok_or_else(|| invalid("INVALID_WALLET_AMOUNT"))?;
-        let result=core::post(&mut tx,core::Posting{account,kind:posting,amount,operation:None,booking:None,key:&format!("request:{id}"),actor:&actor.external_user_id,role:&actor.role,remarks:note,metadata:json!({"requestId":id,"publicRef":r["public_ref"],"requester":r["requested_by_user_id"]})}).await?;
+        let mut metadata = json!({"requestId":id,"publicRef":r["public_ref"],"requester":r["requested_by_user_id"]});
+        if let Some(original) = r["reversal_of"].as_str() {
+            let original =
+                Uuid::parse_str(original).map_err(|_| conflict("INVALID_DEPOSIT_REVERSAL"))?;
+            let entry: Uuid =
+                sqlx::query_scalar("SELECT ledger_entry_id FROM wallet_requests WHERE id=$1")
+                    .bind(original)
+                    .fetch_one(&mut *tx)
+                    .await?;
+            metadata["reversalOfDepositId"] = json!(original);
+            metadata["reversalOfLedgerEntryId"] = json!(entry);
+        }
+        let result = core::post(
+            &mut tx,
+            core::Posting {
+                account,
+                kind: posting,
+                amount,
+                operation: None,
+                booking: None,
+                key: &format!("request:{id}"),
+                actor: &actor.external_user_id,
+                role: &actor.role,
+                remarks: note,
+                metadata,
+            },
+        )
+        .await?;
         ledger = Some(Uuid::parse_str(result["id"].as_str().unwrap_or("")).map_err(|_| missing())?);
     }
     sqlx::query("UPDATE wallet_requests SET status=$2,reviewed_by_user_id=$3,review_remarks=$4,ledger_entry_id=$5,reviewed_at=clock_timestamp(),updated_at=clock_timestamp() WHERE id=$1")
-        .bind(id).bind(decision).bind(&actor.external_user_id).bind(note).bind(ledger).execute(&mut *tx).await?;
+        .bind(id).bind(decision).bind(&actor.external_user_id).bind(note).bind(ledger).execute(&mut *tx).await.map_err(db_error)?;
     if kind == "deposit" {
         enqueue(&mut tx, id, &format!("deposit_{decision}")).await?;
     }

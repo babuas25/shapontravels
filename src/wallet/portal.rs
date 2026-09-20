@@ -150,6 +150,12 @@ enum Command {
         adjustment_type: String,
         reason: String,
     },
+    ReverseDeposit {
+        id: Uuid,
+        deposit_id: Uuid,
+        amount: String,
+        reason: String,
+    },
     Review {
         id: Uuid,
         decision: String,
@@ -277,6 +283,15 @@ async fn portal(
                 &reason,
             )
             .await?
+        }
+        Command::ReverseDeposit {
+            id,
+            deposit_id,
+            amount,
+            reason,
+        } => {
+            super::workflows::reverse_deposit(&state.pool, &actor, id, deposit_id, &amount, &reason)
+                .await?
         }
         Command::Review {
             id,

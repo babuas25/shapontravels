@@ -21,7 +21,7 @@ User direction (18 September 2026): preserve the UI and workflow in `/Users/ashi
 - Refund: quotation uses the selected tickets' user-payable entitlement minus airline/service fees. Settle only the accepted amount to the original charged wallet, consuming the matching ticket entitlement exactly once.
 - Reissue: retain per-passenger fare-difference allocations, fees, customer approval, additional-payment reservation, capture/release, and predecessor/successor ticket numbers. Supplier execution remains manual in the reference flow.
 - VOID: preserve the existing eligibility/time window and entitlement-minus-fees calculation, including credit, debit or no wallet movement as applicable. Preserve debit-hold release/reopen only under the supported not-performed conditions.
-- Retain action restrictions for direct/imported/manual tickets from `lib/ticket-management/booking-actions.ts`; historical records without a corresponding current-ledger charge must never be assigned invented financial entitlement.
+- Updated user direction (20 September 2026): native, direct, imported and manual tickets use the same Rust servicing actions. Refund, Reissue and VOID share the existing workflow and issue-day VOID cutoff. Every source still requires a corresponding captured wallet charge; no credit is invented from ticket face value. The legacy reference helper remains unchanged outside Rust mode.
 
 ## Rust implementation sequence
 

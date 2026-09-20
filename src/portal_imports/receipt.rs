@@ -88,7 +88,7 @@ fn ticket_fare(data: &Value, gross_minor: i64, counts: &serde_json::Map<String, 
     json!({"totalPrice":gross_minor as f64/100.0,"fares":build().unwrap_or_default()})
 }
 
-pub(super) async fn document(
+pub(crate) async fn document(
     tx: &mut Transaction<'_, Postgres>,
     reference: &str,
     agency: Option<&str>,
@@ -97,6 +97,11 @@ pub(super) async fn document(
         "SELECT to_jsonb(b)||jsonb_build_object('data',b.data||jsonb_build_object('itinerary',coalesce((SELECT d.itinerary FROM portal_import_itinerary_details d WHERE d.booking_id=b.id ORDER BY d.created_at DESC,d.id DESC LIMIT 1),b.data->'itinerary')),'agency_name',coalesce(nullif(p.fields->>'agencyName',''),nullif(trim(concat_ws(' ',u.first_name,u.last_name)),''),b.agency_code),'agency_email',coalesce(u.email,'')) FROM portal_import_bookings b JOIN portal_agencies a ON a.agency_code=b.agency_code JOIN portal_users u ON u.id=a.owner_user_id LEFT JOIN portal_identity_profiles p ON p.user_id=u.id AND p.kind='profile' WHERE (b.public_ref=$1 OR b.booking_reference=$1) AND ($2::text IS NULL OR b.agency_code=$2)",
     ).bind(reference).bind(agency).fetch_optional(&mut **tx).await?
         .ok_or(ApiError(StatusCode::NOT_FOUND, "IMPORT_NOT_FOUND"))?;
+    let metadata: Value =
+        sqlx::query_scalar("SELECT metadata FROM ticket_management_receipts WHERE booking_id=$1")
+            .bind(serde_json::from_value::<Uuid>(row["id"].clone()).map_err(|_| invalid())?)
+            .fetch_one(&mut **tx)
+            .await?;
     let data = &row["data"];
     let travellers: Vec<Value> = data["passengers"]["travellers"]
         .as_array()
@@ -224,13 +229,20 @@ pub(super) async fn document(
         .filter_map(|f| f["serviceMargin"].as_f64())
         .sum::<f64>();
     let confirmed = row["status"] == "confirmed";
-    let tickets = data["ticketNumbers"]
+    let mut tickets = data["ticketNumbers"]
         .as_array()
         .cloned()
         .unwrap_or_default();
+    for current in metadata["management"].as_array().into_iter().flatten() {
+        if let Some(index) = current["passengerIndex"].as_u64().map(|n| n as usize)
+            && let Some(ticket) = tickets.get_mut(index)
+        {
+            *ticket = current["ticketNumber"].clone();
+        }
+    }
     let booking = json!({
         "bookingId":row["id"], "publicRef":row.get("booking_reference").filter(|v| !v.is_null()).unwrap_or(&row["public_ref"]), "status":row["status"], "statusMessage":null,
-        "paymentState":if row["operation_id"].is_null(){"unpaid"}else{"captured"},
+        "paymentState":if row["operation_id"].is_null(){json!("unpaid")}else{metadata["managementPaymentState"].clone()},
         "currency":row["currency"], "totalPrice":payable_minor as f64/100.0, "serviceMargin":service_margin,
         "ticketFare":ticket_fare,
         "passengerCounts":counts, "travelDate":data["travelDate"].as_str().unwrap_or(""),
@@ -245,7 +257,7 @@ pub(super) async fn document(
         "cancelledAt":if row["status"]=="cancelled"{row["updated_at"].clone()}else{Value::Null},
     });
     Ok(
-        json!({"booking":booking,"travellers":travellers,"source":row["source"],"version":row["version"]}),
+        json!({"booking":booking,"travellers":travellers,"source":row["source"],"version":row["version"],"requestReferences":metadata["requestReferences"]}),
     )
 }
 

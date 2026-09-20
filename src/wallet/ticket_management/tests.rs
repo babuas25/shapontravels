@@ -85,7 +85,7 @@ pub(super) async fn fixture_dated(
     tx.commit().await.unwrap();
     reference.into()
 }
-async fn create_request(
+pub(super) async fn create_request(
     pool: &PgPool,
     a: &Actor,
     reference: &str,
@@ -136,7 +136,7 @@ pub(super) async fn amounts(pool: &PgPool, account: Uuid) -> (i64, i64) {
         .await
         .unwrap()
 }
-async fn approve(pool: &PgPool, owner: &Actor, staff: &Actor, id: Uuid, q: Quote) {
+pub(super) async fn approve(pool: &PgPool, owner: &Actor, staff: &Actor, id: Uuid, q: Quote) {
     apply(
         pool,
         staff,
@@ -165,6 +165,44 @@ async fn approve(pool: &PgPool, owner: &Actor, staff: &Actor, id: Uuid, q: Quote
     )
     .await
     .unwrap();
+}
+
+pub(super) async fn assert_payment_report(
+    pool: &PgPool,
+    reference: &str,
+    captured: i64,
+    refunded: i64,
+    held: i64,
+    released: i64,
+) {
+    let rows: Vec<Value> = sqlx::query_scalar(include_str!("../booking_payments.sql"))
+        .bind("booking_payments")
+        .bind(None::<Uuid>)
+        .bind(None::<Uuid>)
+        .bind(100_i64)
+        .fetch_all(pool)
+        .await
+        .unwrap();
+    let row = rows
+        .iter()
+        .find(|r| r["booking_reference"] == reference)
+        .unwrap();
+    assert_eq!(row["captured_amount"], captured.to_string());
+    assert_eq!(row["refunded_amount"], refunded.to_string());
+    assert_eq!(row["held_amount"], held.to_string());
+    assert_eq!(row["released_amount"], released.to_string());
+    assert_eq!(
+        row["payment_state"],
+        if refunded == 0 {
+            "captured"
+        } else if refunded == captured {
+            "refunded"
+        } else {
+            "partially-refunded"
+        }
+    );
+    // Backwards-compatible quote field retains the original accepted payable.
+    assert_eq!(row["payable"], "150.03");
 }
 pub(super) fn quote(entitlement: i64, amount: i64, direction: rules::Direction) -> Quote {
     Quote {
@@ -396,6 +434,7 @@ async fn database_journeys_and_financial_invariants() {
     let before = amounts(&pool, account).await;
     approve(&pool, &owner, &support, reissue, q.clone()).await;
     assert_eq!(amounts(&pool, account).await, (before.0 - 1600, 1600));
+    assert_payment_report(&pool, &reference, 15003, 9000, 1600, 0).await;
     assert!(
         apply(
             &pool,
@@ -419,6 +458,7 @@ async fn database_journeys_and_financial_invariants() {
     .await
     .unwrap();
     assert_eq!(amounts(&pool, account).await, before);
+    assert_payment_report(&pool, &reference, 15003, 9000, 0, 1600).await;
     apply(
         &pool,
         &support,
@@ -457,6 +497,7 @@ async fn database_journeys_and_financial_invariants() {
     .await
     .unwrap();
     assert_eq!(amounts(&pool, account).await, (before.0 - 1600, 0));
+    assert_payment_report(&pool, &reference, 16603, 9000, 0, 1600).await;
     let refund = create_request(&pool, &owner, &reference, Action::Refund, 1).await;
     let d = read(&pool, &admin, refund).await;
     assert_eq!(d["passengers"][0]["ticketNumber"], "1234567890999");
@@ -478,6 +519,7 @@ async fn database_journeys_and_financial_invariants() {
     .await
     .unwrap();
     assert_eq!(amounts(&pool, account).await, (before.0 - 1600 + 6236, 0));
+    assert_payment_report(&pool, &reference, 16603, 15236, 0, 1600).await;
     let receipt:Value=sqlx::query_scalar("SELECT metadata FROM ticket_management_receipts WHERE booking_id=(SELECT booking_id FROM ticket_management_requests WHERE id=$1)").bind(refund).fetch_one(&pool).await.unwrap();
     assert_eq!(receipt["management"][1]["ticketNumber"], "1234567890999");
     assert_eq!(receipt["management"][1]["state"], "refunded");
@@ -549,6 +591,24 @@ async fn database_journeys_and_financial_invariants() {
                 0
             )
         );
+        assert_payment_report(
+            &pool,
+            &reference,
+            15003
+                + if direction == rules::Direction::Debit {
+                    net
+                } else {
+                    0
+                },
+            if direction == rules::Direction::Credit {
+                net
+            } else {
+                0
+            },
+            0,
+            0,
+        )
+        .await;
     }
     // Expiry frees the ticket claim, preserves immutable history and prevents
     // a customer from accepting the expired quotation.
@@ -682,4 +742,5 @@ async fn database_journeys_and_financial_invariants() {
     assert!(replay(&mut tx, &owner, key, b"changed").await.is_err());
     tx.commit().await.unwrap();
     super::client_tests::journey(&pool, account).await;
+    super::import_tests::journey(&pool, account).await;
 }

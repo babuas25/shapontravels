@@ -54,6 +54,9 @@ pub(crate) fn db_error(e: sqlx::Error) -> ApiError {
             "WALLET_RESERVATION_MISMATCH",
             "REFUND_EXCEEDS_CAPTURE",
             "INVALID_WALLET_POSTING",
+            "DEPOSIT_PAYMENT_ALREADY_CREDITED",
+            "INVALID_DEPOSIT_REVERSAL",
+            "DEPOSIT_REVERSAL_EXCEEDS_CREDIT",
         ] {
             if error.message() == code {
                 return conflict(code);

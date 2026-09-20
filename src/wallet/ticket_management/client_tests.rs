@@ -64,6 +64,73 @@ async fn client_id(pool: &PgPool, reference: &str) -> Uuid {
         .await
         .unwrap()
 }
+pub(super) async fn imported_journey(pool: &PgPool, account: Uuid) {
+    let reference = super::import_tests::fixture(pool, account, "IMAPI1", "SUPPLIER_API").await;
+    let app = crate::router(crate::AppState {
+        pool: pool.clone(),
+        suppliers: std::sync::Arc::new(Default::default()),
+        environment: "test".into(),
+        db_timeout: std::time::Duration::from_secs(2),
+    });
+    let own_id = Uuid::new_v4();
+    let other_id = Uuid::new_v4();
+    let mut tx = crate::identity::begin_authority_transaction(pool)
+        .await
+        .unwrap();
+    sqlx::query("INSERT INTO api_clients(id,name,audience,tier,external_user_id,api_management_enabled) VALUES($1,'Imported own','b2b','enterprise','user_owner',true),($2,'Other client','b2b','enterprise',NULL,true)").bind(own_id).bind(other_id).execute(&mut *tx).await.unwrap();
+    crate::wallet::core::link_client(&mut tx, own_id, account)
+        .await
+        .unwrap();
+    crate::wallet::core::link_client(&mut tx, other_id, account)
+        .await
+        .unwrap();
+    tx.commit().await.unwrap();
+    let permissions = ["ticket-management:read", "ticket-management:write"];
+    let own = token(pool, own_id, &permissions).await;
+    let other = token(pool, other_id, &permissions).await;
+    let base = "/api/ticket-management";
+    let avail = format!("{base}/availability?bookingReference={reference}");
+    let (code, value) = call(&app, "GET", &avail, Some(&own), Value::Null).await;
+    assert_eq!(code, 200, "{value}");
+    assert!(
+        value["actions"]
+            .as_array()
+            .unwrap()
+            .contains(&json!("refund"))
+    );
+    assert_eq!(
+        call(&app, "GET", &avail, Some(&other), Value::Null).await.0,
+        404
+    );
+    let id = Uuid::new_v4();
+    let body = json!({"bookingReference":reference,"requestId":id,"action":"refund","requestType":"voluntary","passengerIndexes":[0],"routeIndexes":[0]});
+    let (code, value) = call(&app, "POST", base, Some(&own), body.clone()).await;
+    assert_eq!(code, 201, "{value}");
+    assert_eq!(
+        call(&app, "POST", base, Some(&own), body.clone()).await.0,
+        200
+    );
+    let mut foreign_body = body;
+    foreign_body["requestId"] = json!(Uuid::new_v4());
+    assert_eq!(
+        call(&app, "POST", base, Some(&other), foreign_body).await.0,
+        404
+    );
+    let path = format!("{base}/{id}");
+    assert_eq!(
+        call(&app, "GET", &path, Some(&own), Value::Null).await.0,
+        200
+    );
+    assert_eq!(
+        call(&app, "GET", &path, Some(&other), Value::Null).await.0,
+        404
+    );
+    let path = format!("{base}?bookingReference={reference}");
+    let (_, list) = call(&app, "GET", &path, Some(&own), Value::Null).await;
+    assert_eq!(list.as_array().unwrap().len(), 1);
+    let (_, list) = call(&app, "GET", &path, Some(&other), Value::Null).await;
+    assert!(list.as_array().unwrap().is_empty());
+}
 pub(super) async fn journey(pool: &PgPool, account: Uuid) {
     let app = crate::router(crate::AppState {
         pool: pool.clone(),

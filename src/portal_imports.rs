@@ -3,7 +3,7 @@
 pub(crate) mod api;
 mod itinerary;
 mod pricing;
-mod receipt;
+pub(crate) mod receipt;
 use crate::{
     AppState,
     auth::{ApiError, digest},
@@ -222,7 +222,7 @@ async fn result(
     id: Uuid,
     replay: bool,
 ) -> Result<Value, ApiError> {
-    let mut v:Value=sqlx::query_scalar("SELECT jsonb_build_object('ok',true,'success',true,'referenceNo',coalesce(booking_reference,public_ref),'supplierReference',display_supplier_reference,'bookingOrderUrl','/dashboard/bookings/import/'||coalesce(booking_reference,public_ref),'status',status,'paymentState',CASE WHEN operation_id IS NULL THEN 'unpaid' ELSE 'captured' END,'walletCharged',operation_id IS NOT NULL,'chargedAmount',CASE WHEN operation_id IS NULL THEN 0 ELSE payable_minor END,'currency',currency,'version',version) FROM portal_import_bookings WHERE id=$1").bind(id).fetch_one(&mut **tx).await?;
+    let mut v:Value=sqlx::query_scalar("SELECT jsonb_build_object('ok',true,'success',true,'referenceNo',coalesce(booking_reference,public_ref),'supplierReference',display_supplier_reference,'bookingOrderUrl','/dashboard/bookings/import/'||coalesce(booking_reference,public_ref),'status',status,'paymentState',CASE WHEN operation_id IS NULL THEN 'unpaid' ELSE (SELECT metadata->>'managementPaymentState' FROM ticket_management_receipts WHERE booking_id=portal_import_bookings.id) END,'walletCharged',operation_id IS NOT NULL,'chargedAmount',CASE WHEN operation_id IS NULL THEN 0 ELSE payable_minor END,'currency',currency,'version',version) FROM portal_import_bookings WHERE id=$1").bind(id).fetch_one(&mut **tx).await?;
     let document =
         receipt::document(tx, v["referenceNo"].as_str().ok_or_else(invalid)?, None).await?;
     let native = api::for_import(tx, id, document.clone()).await?;
@@ -348,7 +348,7 @@ async fn execute(
             json!({"ok":true,"walletMutation":false})
         }
         Command::History => {
-            let rows:Vec<Value>=sqlx::query_scalar("SELECT jsonb_build_object('id',b.id,'importedOn',b.created_at,'referenceNo',coalesce(b.booking_reference,b.public_ref),'supplierReference',b.display_supplier_reference,'provider',b.provider,'source',b.source,'status',b.status,'paxName',concat_ws(' ',b.data#>>'{passengers,travellers,0,firstName}',b.data#>>'{passengers,travellers,0,lastName}'),'assigned',concat_ws(' ',u.first_name,u.last_name),'supplierGross',b.gross_minor::numeric/100,'userPayable',b.payable_minor::numeric/100,'paymentState',CASE WHEN b.operation_id IS NULL THEN 'unpaid' ELSE 'captured' END,'currency',b.currency) FROM portal_import_bookings b JOIN portal_users u ON u.id=b.assigned_user_id ORDER BY b.created_at DESC,b.id DESC LIMIT 500").fetch_all(&mut *tx).await?;
+            let rows:Vec<Value>=sqlx::query_scalar("SELECT jsonb_build_object('id',b.id,'importedOn',b.created_at,'referenceNo',coalesce(b.booking_reference,b.public_ref),'supplierReference',b.display_supplier_reference,'provider',b.provider,'source',b.source,'status',b.status,'paxName',concat_ws(' ',b.data#>>'{passengers,travellers,0,firstName}',b.data#>>'{passengers,travellers,0,lastName}'),'assigned',concat_ws(' ',u.first_name,u.last_name),'supplierGross',b.gross_minor::numeric/100,'userPayable',b.payable_minor::numeric/100,'paymentState',CASE WHEN b.operation_id IS NULL THEN 'unpaid' ELSE (SELECT metadata->>'managementPaymentState' FROM ticket_management_receipts WHERE booking_id=b.id) END,'currency',b.currency) FROM portal_import_bookings b JOIN portal_users u ON u.id=b.assigned_user_id ORDER BY b.created_at DESC,b.id DESC LIMIT 500").fetch_all(&mut *tx).await?;
             json!({"history":rows})
         }
         Command::Read { reference } => sqlx::query_scalar(
