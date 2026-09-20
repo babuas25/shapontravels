@@ -82,7 +82,7 @@ See [Swagger walkthrough and API contract](docs/MARKUP_API.md). Create a draft, 
 
 ## Deployment
 
-[Ubuntu 24.04 server setup](docs/SERVER_SETUP.md) and [GitHub Actions CI/CD](docs/CI_CD.md). Pushes to main and pull requests run checks and a Linux release build. VPS deployment starts only after server prerequisites and the `VPS_DEPLOY_ENABLED` repository variable are configured.
+[Production server and branch routing](docs/PRODUCTION_SERVER.md): pushes to `main`, `development`, and `production`, plus pull requests, run checks and a Linux release build. Only the matching `development` or `production` branch deploys, after its separate enable switch and credentials are configured. [Original server setup](docs/SERVER_SETUP.md) and [CI/CD operations](docs/CI_CD.md) retain historical single-server instructions.
 
 
 ## Admin reconciliation screen
