@@ -41,6 +41,232 @@ async fn read(
     )
     .await
 }
+
+#[tokio::test]
+#[ignore = "requires NEW empty IDENTITY_PROFILE_FILL_ONCE_TEST_DATABASE_URL ending _identity_test"]
+async fn b2b_blank_fields_fill_once_with_admin_corrections() {
+    let url = std::env::var("IDENTITY_PROFILE_FILL_ONCE_TEST_DATABASE_URL").unwrap();
+    let parsed = url::Url::parse(&url).unwrap();
+    assert!(matches!(parsed.host_str(), Some("127.0.0.1" | "localhost")));
+    assert!(parsed.path().ends_with("_identity_test"));
+    let pool = PgPoolOptions::new()
+        .max_connections(8)
+        .connect(&url)
+        .await
+        .unwrap();
+    let existing: i64 = sqlx::query_scalar(
+        "SELECT count(*) FROM information_schema.tables WHERE table_schema='public'",
+    )
+    .fetch_one(&pool)
+    .await
+    .unwrap();
+    assert_eq!(
+        existing, 0,
+        "Use a new empty database; never reset retained data"
+    );
+    MIGRATOR.run(&pool).await.unwrap();
+    let app = app(pool.clone(), Arc::new(FakeProvider::default()), true);
+    assert_eq!(
+        request(&app, "bootstrap", Some(OPERATOR), subject("user_root"))
+            .await
+            .0,
+        200
+    );
+    seed(&pool, "user_admin", "admin").await;
+    let (owner, sub, _) = agency(&pool, "fill", "ST-B2B810010").await;
+    let (other, _, _) = agency(&pool, "other", "ST-B2B810011").await;
+
+    for (actor, id) in [("user_fill_owner", owner), ("user_fill_sub", sub)] {
+        let identity_version = version(&pool, id).await;
+        let first = edit_input(&pool, actor, id, Kind::Profile, 0,
+            json!({"agencyName":"  First Agency  ","agencyEmail":"office@example.invalid","bankName":"First bank"})).await;
+        let response = request(
+            &app,
+            "profiles/edit",
+            Some(BRIDGE),
+            serde_json::to_value(&first).unwrap(),
+        )
+        .await;
+        assert_eq!(response.0, 200, "{}", response.1);
+        assert_eq!(response.1["fields"]["agencyName"], "First Agency");
+        assert!(profiles::edit(&pool, first).await.unwrap().replayed);
+
+        for values in [
+            json!({"agencyName":"Replacement"}),
+            json!({"agencyEmail":""}),
+            json!({"bankName":null}),
+            json!({"agencyName":"  ","website":"https://new.example.invalid"}),
+        ] {
+            let input = edit_input(&pool, actor, id, Kind::Profile, 1, values).await;
+            let response = request(
+                &app,
+                "profiles/edit",
+                Some(BRIDGE),
+                serde_json::to_value(input).unwrap(),
+            )
+            .await;
+            assert_eq!(response.0, 403);
+            assert_eq!(response.1["error"], "IDENTITY_PROFILE_FIELD_LOCKED");
+        }
+        let current = read(&pool, actor, id, Kind::Profile).await.unwrap();
+        assert_eq!(current.version, 1, "Denied mixed patches are atomic");
+        assert!(!current.fields.contains_key(&Field::Website));
+
+        // An unchanged value can accompany a first save of another blank field.
+        let input = edit_input(
+            &pool,
+            actor,
+            id,
+            Kind::Profile,
+            1,
+            json!({"agencyName":"First Agency","agencyLicenseNo":"License 1"}),
+        )
+        .await;
+        profiles::edit(&pool, input).await.unwrap();
+        let a = edit_input(
+            &pool,
+            actor,
+            id,
+            Kind::Profile,
+            2,
+            json!({"website":"https://one.example.invalid"}),
+        )
+        .await;
+        let b = edit_input(
+            &pool,
+            actor,
+            id,
+            Kind::Profile,
+            2,
+            json!({"website":"https://two.example.invalid"}),
+        )
+        .await;
+        let (a, b) = tokio::join!(profiles::edit(&pool, a), profiles::edit(&pool, b));
+        assert_ne!(
+            a.is_ok(),
+            b.is_ok(),
+            "Only one concurrent first save can commit"
+        );
+        assert_eq!(a.err().or_else(|| b.err()).unwrap().0, StatusCode::CONFLICT);
+        let current = read(&pool, actor, id, Kind::Profile).await.unwrap();
+        assert_eq!(current.version, 3);
+        let edit = edit_input(
+            &pool,
+            actor,
+            id,
+            Kind::Profile,
+            3,
+            json!({"website":"https://replacement.example.invalid"}),
+        )
+        .await;
+        assert_eq!(
+            profiles::edit(&pool, edit).await.unwrap_err().1,
+            "IDENTITY_PROFILE_FIELD_LOCKED"
+        );
+
+        for (manager, revision) in [("user_admin", 4), ("user_root", 5)] {
+            let edit = edit_input(
+                &pool,
+                manager,
+                id,
+                Kind::Profile,
+                revision - 1,
+                json!({"agencyName":format!("Corrected {revision}"),"agencyMobile":""}),
+            )
+            .await;
+            assert_eq!(profiles::edit(&pool, edit).await.unwrap().version, revision);
+        }
+        let edit = edit_input(
+            &pool,
+            actor,
+            id,
+            Kind::Profile,
+            5,
+            json!({"agencyMobile":"0123456789","givenName":"First name"}),
+        )
+        .await;
+        let saved = profiles::edit(&pool, edit).await.unwrap();
+        assert_eq!(
+            saved.version, 6,
+            "Empty and missing fields are both fillable"
+        );
+        assert_eq!(saved.fields[&Field::AgencyName], "Corrected 5");
+        let edit = edit_input(
+            &pool,
+            actor,
+            id,
+            Kind::Profile,
+            6,
+            json!({"givenName":"Replacement"}),
+        )
+        .await;
+        assert_eq!(
+            profiles::edit(&pool, edit).await.unwrap_err().1,
+            "IDENTITY_PROFILE_FIELD_LOCKED"
+        );
+        assert_eq!(
+            version(&pool, id).await,
+            identity_version,
+            "Profile saves do not grant access"
+        );
+    }
+    for (actor, target) in [
+        ("user_fill_owner", sub),
+        ("user_fill_sub", owner),
+        ("user_fill_owner", other),
+    ] {
+        let edit = edit_input(
+            &pool,
+            actor,
+            target,
+            Kind::Profile,
+            0,
+            json!({"surname":"Forbidden"}),
+        )
+        .await;
+        assert_eq!(
+            profiles::edit(&pool, edit).await.unwrap_err().0,
+            StatusCode::FORBIDDEN
+        );
+    }
+    // Text-field permission must not grant unrestricted company document writes.
+    use shapontravels_api::identity::documents::{self, Prepare, Purpose, Slot};
+    let document = Prepare {
+        clerk_user_id: "user_fill_owner".into(),
+        operation_id: Uuid::new_v4(),
+        target_user_id: owner,
+        purpose: Purpose::Profile,
+        slot: Slot::TinCertificate,
+        expected_version: 0,
+        expected_identity_version: version(&pool, owner).await,
+        format: "pdf".into(),
+        byte_size: 32,
+        content_hash: "ab".repeat(32),
+    };
+    assert_eq!(
+        documents::prepare(&pool, document).await.unwrap_err().0,
+        StatusCode::FORBIDDEN
+    );
+    sqlx::query("UPDATE portal_users SET status='suspended' WHERE id=$1")
+        .bind(owner)
+        .execute(&pool)
+        .await
+        .unwrap();
+    let edit = edit_input(
+        &pool,
+        "user_fill_owner",
+        owner,
+        Kind::Profile,
+        6,
+        json!({"surname":"Blocked"}),
+    )
+    .await;
+    assert_eq!(
+        profiles::edit(&pool, edit).await.unwrap_err().0,
+        StatusCode::FORBIDDEN
+    );
+    pool.close().await;
+}
 #[tokio::test]
 #[ignore = "requires NEW empty IDENTITY_PROFILES_TEST_DATABASE_URL ending _identity_test"]
 async fn profile_staff_scope_versions_and_atomicity() {
@@ -135,7 +361,7 @@ async fn profile_staff_scope_versions_and_atomicity() {
             StatusCode::FORBIDDEN
         );
     }
-    // Administrative own-profile correction is allowed; company self-edits are not.
+    // Administrative own-profile correction remains allowed.
     profiles::edit(
         &pool,
         edit_input(
@@ -150,27 +376,6 @@ async fn profile_staff_scope_versions_and_atomicity() {
     )
     .await
     .unwrap();
-    for (actor, target) in [("user_one_owner", owner), ("user_one_sub", sub)] {
-        assert!(read(&pool, actor, target, Kind::Profile).await.is_ok());
-        assert_eq!(
-            profiles::edit(
-                &pool,
-                edit_input(
-                    &pool,
-                    actor,
-                    target,
-                    Kind::Profile,
-                    0,
-                    json!({"givenName":"Denied"})
-                )
-                .await
-            )
-            .await
-            .unwrap_err()
-            .0,
-            StatusCode::FORBIDDEN
-        );
-    }
     let cmd=edit_input(&pool,"user_customer",customer,Kind::Profile,0,json!({"givenName":"  Synthetic  ","passportNo":"PRIVATE_SYNTHETIC_PASSPORT","bankName":"Synthetic Bank"})).await;
     let saved = profiles::edit(&pool, cmd.clone()).await.unwrap();
     assert_eq!(saved.version, 1);
@@ -291,6 +496,23 @@ async fn profile_staff_scope_versions_and_atomicity() {
     )
     .await
     .unwrap();
+    // B2B users can only fill blanks: manager-filled fields remain locked.
+    for (actor, target) in [("user_one_owner", owner), ("user_one_sub", sub)] {
+        let current = read(&pool, actor, target, Kind::Profile).await.unwrap();
+        let edit = edit_input(
+            &pool,
+            actor,
+            target,
+            Kind::Profile,
+            current.version,
+            json!({"agencyName":"Denied replacement"}),
+        )
+        .await;
+        assert_eq!(
+            profiles::edit(&pool, edit).await.unwrap_err().1,
+            "IDENTITY_PROFILE_FIELD_LOCKED"
+        );
+    }
     let branding = profiles::branding(
         &pool,
         BrandingQuery {

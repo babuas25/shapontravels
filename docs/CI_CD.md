@@ -1,5 +1,6 @@
 # GitHub Actions CI/CD — Bengal Cloud VPS
 
+> Start with the [current deployment and maintenance runbook](DEPLOYMENT_RUNBOOK.md).
 > For the new `160.25.226.236` production server and separate `development` /
 > `production` branches, follow [PRODUCTION_SERVER.md](PRODUCTION_SERVER.md).
 > The `main` branch deployment and generic `VPS_*` settings below describe the

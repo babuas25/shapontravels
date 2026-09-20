@@ -1,6 +1,7 @@
 //! Server-attested private assets: authorize/reserve before upload; publish after revalidation.
 use super::{operations::User, phase5::*, *};
 use crate::auth::ApiError;
+use chrono::{DateTime, Datelike, FixedOffset, Months, TimeZone, Utc};
 use serde::{Deserialize, Serialize};
 use sqlx::{PgPool, Postgres, Transaction};
 use uuid::Uuid;
@@ -137,6 +138,137 @@ pub struct View {
     pub slot: Slot,
     pub asset: Option<Asset>,
 }
+
+#[derive(Debug, Serialize, Deserialize, utoipa::ToSchema)]
+#[serde(deny_unknown_fields)]
+#[schema(as=IdentityDocumentUpdatePolicy)]
+pub struct UpdatePolicy {
+    #[schema(value_type=String)]
+    pub target_user_id: Uuid,
+    pub slot: Slot,
+    pub can_upload: bool,
+    pub can_remove: bool,
+    pub cycle: String,
+    pub next_upload_at: Option<i64>,
+}
+
+// Trade years reset at Bangladesh midnight on July 1. CAAB renewals use
+// the last successful upload's two-year anniversary (Feb 29 clamps to Feb 28).
+fn next_license_update(slot: Slot, latest: DateTime<Utc>) -> Option<DateTime<Utc>> {
+    let zone = FixedOffset::east_opt(6 * 3600).expect("Bangladesh offset");
+    let latest = latest.with_timezone(&zone);
+    match slot {
+        Slot::TradeLicense => zone
+            .with_ymd_and_hms(
+                latest.year() + i32::from(latest.month() >= 7),
+                7,
+                1,
+                0,
+                0,
+                0,
+            )
+            .single()
+            .map(|v| v.with_timezone(&Utc)),
+        Slot::TravelAgencyLicense => latest
+            .checked_add_months(Months::new(24))
+            .map(|v| v.with_timezone(&Utc)),
+        _ => None,
+    }
+}
+
+async fn update_policy(
+    tx: &mut Transaction<'_, Postgres>,
+    actor: &User,
+    target: &User,
+    slot: Slot,
+) -> Result<UpdatePolicy, ApiError> {
+    let manager = actor.actor.role.manages_users();
+    let owner = actor.actor.role == Role::B2b && actor.actor.user_id == target.actor.user_id
+        && sqlx::query_scalar::<_, bool>("SELECT EXISTS(SELECT 1 FROM portal_agencies WHERE owner_user_id=$1 AND status='active')")
+            .bind(actor.actor.user_id).fetch_one(&mut **tx).await?;
+    let supported = matches!(
+        slot,
+        Slot::Logo | Slot::TradeLicense | Slot::TravelAgencyLicense
+    );
+    let mut result = UpdatePolicy {
+        target_user_id: target.actor.user_id,
+        slot,
+        can_upload: manager || (owner && supported),
+        can_remove: manager || (owner && slot == Slot::Logo),
+        cycle: if manager {
+            "anytime"
+        } else {
+            match slot {
+                Slot::Logo if owner => "anytime",
+                Slot::TradeLicense if owner => "july_year",
+                Slot::TravelAgencyLicense if owner => "two_years_from_upload",
+                _ => "admin_only",
+            }
+        }
+        .into(),
+        next_upload_at: None,
+    };
+    if !manager && owner && matches!(slot, Slot::TradeLicense | Slot::TravelAgencyLicense) {
+        // Retained successful assets, including admin replacements and removed
+        // slot contents, preserve the renewal limit even when the current slot is empty.
+        let (latest, now): (Option<DateTime<Utc>>, DateTime<Utc>) =
+            sqlx::query_as("SELECT max(completed_at),clock_timestamp() FROM portal_identity_assets WHERE user_id=$1 AND purpose='profile' AND slot=$2 AND state='ready'")
+                .bind(target.actor.user_id).bind(slot.name()).fetch_one(&mut **tx).await?;
+        if let Some(latest) = latest {
+            let next = next_license_update(slot, latest).ok_or_else(bad)?;
+            if now < next {
+                result.can_upload = false;
+                result.next_upload_at = Some(next.timestamp_millis());
+            }
+        }
+    }
+    Ok(result)
+}
+
+async fn require_upload_allowed(
+    tx: &mut Transaction<'_, Postgres>,
+    actor: &User,
+    target: &User,
+    purpose: Purpose,
+    slot: Slot,
+) -> Result<(), ApiError> {
+    if purpose == Purpose::Profile && !update_policy(tx, actor, target, slot).await?.can_upload {
+        return Err(ApiError(
+            axum::http::StatusCode::CONFLICT,
+            "IDENTITY_DOCUMENT_UPDATE_NOT_DUE",
+        ));
+    }
+    Ok(())
+}
+
+/// Separate endpoint keeps existing strict document-view consumers compatible.
+pub async fn policy(pool: &PgPool, input: Query) -> Result<UpdatePolicy, ApiError> {
+    if input.purpose != Purpose::Profile || input.asset_id.is_some() {
+        return Err(bad());
+    }
+    let mut tx = begin_mutation(pool).await?;
+    let (actor, target) = scope(
+        &mut tx,
+        &input.clerk_user_id,
+        input.target_user_id,
+        input.purpose,
+        input.slot,
+        false,
+    )
+    .await?;
+    let result = update_policy(&mut tx, &actor, &target, input.slot).await?;
+    profiles::limit(&mut tx, actor.actor.user_id, "document_policy", 80, 3600).await?;
+    log(
+        &mut tx,
+        Uuid::new_v4(),
+        &actor,
+        target.actor.user_id,
+        "document.policy_read",
+    )
+    .await?;
+    tx.commit().await?;
+    Ok(result)
+}
 async fn scope(
     tx: &mut Transaction<'_, Postgres>,
     subject: &str,
@@ -168,9 +300,23 @@ async fn scope(
         return Ok((actor, target));
     }
     let (actor, mut target) =
-        profiles::scope(tx, subject, id, profiles::Kind::Profile, write).await?;
+        profiles::scope(tx, subject, id, profiles::Kind::Profile, false).await?;
     if !target.actor.role.requires_agency() {
         return Err(denied());
+    }
+    if write && !actor.actor.role.manages_users() {
+        let owner: bool = sqlx::query_scalar("SELECT EXISTS(SELECT 1 FROM portal_agencies WHERE owner_user_id=$1 AND status='active')")
+            .bind(actor.actor.user_id).fetch_one(&mut **tx).await?;
+        if actor.actor.role != Role::B2b
+            || actor.actor.user_id != target.actor.user_id
+            || !owner
+            || !matches!(
+                slot,
+                Slot::Logo | Slot::TradeLicense | Slot::TravelAgencyLicense
+            )
+        {
+            return Err(denied());
+        }
     }
     if slot == Slot::Logo && target.actor.role == Role::B2bSub {
         let owner:Uuid=sqlx::query_scalar("SELECT a.owner_user_id FROM portal_agency_memberships m JOIN portal_agencies a ON a.id=m.agency_id WHERE m.user_id=$1 AND a.status<>'archived'").bind(id).fetch_optional(&mut **tx).await?.ok_or_else(denied)?;
@@ -341,6 +487,7 @@ pub async fn prepare(pool: &PgPool, input: Prepare) -> Result<Asset, ApiError> {
     {
         return Err(conflict());
     }
+    require_upload_allowed(&mut tx, &actor, &target, input.purpose, input.slot).await?;
     profiles::limit(&mut tx, actor.actor.user_id, "documents", 40, 3600).await?;
     sqlx::query("INSERT INTO portal_identity_assets(id,actor_id,user_id,purpose,slot,request_hash,expected_version,identity_version,public_id,format,byte_size,content_hash) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12)")
  .bind(input.operation_id).bind(actor.actor.user_id).bind(target.actor.user_id).bind(input.purpose.name()).bind(input.slot.name()).bind(fingerprint).bind(input.expected_version).bind(input.expected_identity_version).bind(format!("shapon/identity/{}",input.operation_id)).bind(input.format).bind(input.byte_size).bind(input.content_hash).execute(&mut *tx).await?;
@@ -386,6 +533,7 @@ pub async fn start(pool: &PgPool, input: AssetRequest) -> Result<Asset, ApiError
     {
         return Err(conflict());
     }
+    require_upload_allowed(&mut tx, &actor, &target, purpose, slot).await?;
     sqlx::query("UPDATE portal_identity_assets SET state='uploading' WHERE id=$1")
         .bind(a.id)
         .execute(&mut *tx)
@@ -430,6 +578,7 @@ pub async fn finish(pool: &PgPool, input: Finish) -> Result<Asset, ApiError> {
         {
             return Err(conflict());
         }
+        require_upload_allowed(&mut tx, &actor, &target, purpose, slot).await?;
     }
     sqlx::query("UPDATE portal_identity_assets SET state=$2,completed_at=CASE WHEN $2='ready' THEN clock_timestamp() ELSE NULL END WHERE id=$1").bind(a.id).bind(next).execute(&mut *tx).await?;
     if next == "ready" && a.purpose == "profile" {
@@ -455,6 +604,9 @@ pub async fn remove(pool: &PgPool, input: Remove) -> Result<View, ApiError> {
         true,
     )
     .await?;
+    if !actor.actor.role.manages_users() && input.slot != Slot::Logo {
+        return Err(denied());
+    }
     let old = replay(&mut tx, input.operation_id, &fingerprint).await?;
     let v = version(&mut tx, target.actor.user_id, Purpose::Profile, input.slot).await?;
     if old.is_none() {
@@ -550,4 +702,43 @@ pub async fn uploads(pool: &PgPool, input: UploadsQuery) -> Result<Uploads, ApiE
     .await?;
     tx.commit().await?;
     Ok(Uploads { items, next })
+}
+
+#[cfg(test)]
+mod renewal_tests {
+    use super::*;
+    fn instant(value: &str) -> DateTime<Utc> {
+        DateTime::parse_from_rfc3339(value)
+            .unwrap()
+            .with_timezone(&Utc)
+    }
+    #[test]
+    fn trade_year_changes_at_july_first_in_bangladesh() {
+        for (uploaded, next) in [
+            ("2026-06-30T17:59:59Z", "2026-06-30T18:00:00Z"),
+            ("2026-06-30T18:00:00Z", "2027-06-30T18:00:00Z"),
+            ("2026-12-31T22:00:00Z", "2027-06-30T18:00:00Z"),
+        ] {
+            assert_eq!(
+                next_license_update(Slot::TradeLicense, instant(uploaded)),
+                Some(instant(next))
+            );
+        }
+    }
+    #[test]
+    fn caab_waits_two_calendar_years_from_each_successful_upload() {
+        for (uploaded, next) in [
+            ("2025-09-21T10:15:00Z", "2027-09-21T10:15:00Z"),
+            ("2026-12-31T17:59:59Z", "2028-12-31T17:59:59Z"),
+            ("2024-02-29T08:00:00Z", "2026-02-28T08:00:00Z"),
+            // Local Feb 29 starts six hours before UTC Feb 29.
+            ("2024-02-28T20:00:00Z", "2026-02-27T20:00:00Z"),
+        ] {
+            assert_eq!(
+                next_license_update(Slot::TravelAgencyLicense, instant(uploaded)),
+                Some(instant(next))
+            );
+        }
+        assert!(next_license_update(Slot::Logo, instant("2026-01-01T00:00:00Z")).is_none());
+    }
 }

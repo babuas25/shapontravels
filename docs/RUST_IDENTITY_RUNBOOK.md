@@ -1,6 +1,6 @@
 # Rust identity — isolated setup, verification and activation gates
 
-Updated 2026-09-17. Phases 0–8 are implemented and verified. The user-authorized **localhost** target is now active in canonical mode; see [local cutover evidence](evidence/RUST_IDENTITY_LOCAL_CUTOVER_2026-09-17.md) and [restart instructions](LOCAL_PORTAL.md). Clerk owns login; Rust owns local application authority. Production activation and external mail/webhook delivery remain pending. The disposable fixture instructions below are separate from the retained local database, which must not be reset or used as an empty test fixture.
+Updated 2026-09-20. Clerk owns login; Rust owns application authority. Production canonical activation is complete (revision 5), and development is active separately (revision 3). Production Rust business email/SMS delivery is enabled. See the [current deployment record and operating procedure](DEPLOYMENT_RUNBOOK.md) and [notification policy](BUSINESS_NOTIFICATIONS.md). The earlier [localhost cutover evidence](evidence/RUST_IDENTITY_LOCAL_CUTOVER_2026-09-17.md) and [restart instructions](LOCAL_PORTAL.md) concern a separate local target. Disposable fixture instructions below must not be applied to retained local or server databases.
 
 ## Start a disposable local environment
 
@@ -74,7 +74,7 @@ Use lowercase target/database names. The recorded rehearsal preserved all 77 tab
 
 ### Read-only target review
 
-`POST /admin/portal-identity/preflight` requires the temporary **operator** capability (`stio_`), not the Next bridge. Its only input is the explicitly selected `clerk_user_id`. It checks current schema/bootstrap, the selected local Super Admin, 14 unresolved work queues and eight retained identity/business mapping issue categories. The mapping fingerprints cover 11 tables, limited to 100,000 rows each; larger reviews fail explicitly rather than silently truncate. The API does not call Clerk, resolve blocked work, import identities or mutate data. It does not prove that the selected Clerk login is currently usable.
+`POST /admin/portal-identity/preflight` requires the temporary **operator** capability (`stio_`), not the Next bridge. Its only input is the explicitly selected `clerk_user_id`. It checks current schema/bootstrap, the selected local Super Admin, 15 unresolved work queues (including business notification deliveries) and eight retained identity/business mapping issue categories. The mapping fingerprints cover 11 tables, limited to 100,000 rows each; larger reviews fail explicitly rather than silently truncate. The API does not call Clerk, resolve blocked work, import identities or mutate data. It does not prove that the selected Clerk login is currently usable.
 
 `readiness` and `preflight` use PostgreSQL repeatable read/read-only transactions and no boundary rate-limit/audit writes. A SELECT-only DB role is supported for these two inspection endpoints. Unresolved work is reported by queue; one logical operation may occur in several queues. Pending invitations/financial requests and blocked mail require review, even when no uncertain provider call is present. Inspection errors never produce a clear report.
 
@@ -93,7 +93,7 @@ Exit 0 means the selected local operator/mapping/backlog snapshot is clear, main
 
 ### Coordinated maintenance preparation
 
-The code now supports `SHAPON_IDENTITY_AUTHORITY=maintenance` in Next and `PORTAL_IDENTITY_MAINTENANCE=true` in Rust. Defaults remain legacy/false. Enable them only as part of the selected environment's deployment procedure; this work has not enabled them on an existing installation.
+The code now supports `SHAPON_IDENTITY_AUTHORITY=maintenance` in Next and `PORTAL_IDENTITY_MAINTENANCE=true` in Rust. Defaults remain legacy/false. Enable them only as part of the selected environment's coordinated deployment procedure. Both deployed targets were out of maintenance after their recorded 2026-09-20 rollouts.
 
 Restart/drain **every** serving replica, scheduler and external worker before relying on the freeze. Next rejects all matched application/API/Server Action requests with 503, no-store and Retry-After. Rust rejects all ordinary routes, including legacy admin and machine APIs; only `GET /health/live` and the authenticated `POST` readiness/preflight endpoints remain. Rust's identity worker does no work and its cleanup worker is not started. `/health/ready` intentionally returns 503, removing the frozen instance from business traffic.
 
@@ -111,10 +111,10 @@ The full synthetic marker/pause/resume/fencing matrix is `tests/identity_rollout
 
 The local retained-booking acknowledgment is deliberately narrow: `acknowledge_retained_bookings:true` permits initial activation only on loopback databases ending `_identity_test`, with zero mapping issues and no backlog other than bookings. Every retained booking must be an `outcome_unknown` older than five minutes; pending/recent bookings fail. Booking state/update time is included in the reviewed digest and checked under row locks. It never marks a booking resolved or bypasses account-deletion checks. The 2026-09-17 local activation records the user's explicit instruction to retain the unknown booking.
 
-### Production activation still outstanding
+### Future target activation and recovery
 
 Before actual activation, record the selected target/environment and Clerk operator, review immutable retained owner/client/booking mappings, take and restore a target backup, pause old account writers/workers, resolve uncertain operations, apply migrations and verify every authority consumer uses the same selected pin. Configure real provider/mail/storage secrets through the deployment secret mechanism, not chat. Then execute the approved non-destructive target smoke plan and record monitoring/rollback evidence.
 
-The canonical selector and durable marker are active for the separately reviewed localhost target. Do not bypass the pin or set development mode on a deployed application. Production activation, real account/data deletion and financial import were not performed. The local `.env.development.local` and private Rust runtime configuration were explicitly changed for the authorized local cutover; production configuration was unchanged.
+The 2026-09-17 localhost evidence predates the separately completed server rollouts. Production and development now each have their own canonical selector and durable marker; their current recorded state is in the deployment runbook. Do not reuse localhost configuration, bypass pins or set preview identity mode on a deployed application. Activation does not authorize real account/data deletion or financial import.
 
 After the first canonical authority write, switching back to stale Clerk metadata/Supabase permissions may restore revoked access. Pause mutations and recover forward; never drop identity tables or roll back only one side of a provider operation. Monitor readiness, unknown operations, event/mail backlog, current authorization denials and audit/store errors. Review unknowns explicitly instead of retrying external writes blindly.

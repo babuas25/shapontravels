@@ -419,7 +419,9 @@ pub async fn edit(pool: &PgPool, mut input: Edit) -> Result<View, ApiError> {
         &input.clerk_user_id,
         input.target_user_id,
         input.kind,
-        true,
+        // Text-profile self writes have a per-field rule below. Keep the shared
+        // write scope strict for document/logo writes and staff operations.
+        input.kind != Kind::Profile,
     )
     .await?;
     normalized(&mut input.change, input.kind, target.actor.role)?;
@@ -450,6 +452,28 @@ pub async fn edit(pool: &PgPool, mut input: Edit) -> Result<View, ApiError> {
     }
     if input.expected_identity_version != target.version || input.expected_version != view.version {
         return Err(conflict());
+    }
+    if input.kind == Kind::Profile
+        && actor.actor.role.requires_agency()
+        && actor.actor.user_id == target.actor.user_id
+    {
+        let Change::Patch { fields } = &input.change else {
+            return Err(invalid());
+        };
+        // Use current persisted values inside the same serialized transaction
+        // as the write. Imported/application/admin-filled values also lock.
+        // Replays were resolved above, so a lost response can be recovered.
+        for (field, requested) in fields {
+            if let Some(stored) = view.fields.get(field)
+                && !stored.trim().is_empty()
+                && requested.as_deref().unwrap_or("") != stored.trim()
+            {
+                return Err(ApiError(
+                    StatusCode::FORBIDDEN,
+                    "IDENTITY_PROFILE_FIELD_LOCKED",
+                ));
+            }
+        }
     }
     if actor.actor.role.manages_users() {
         limit(&mut tx, actor.actor.user_id, "edit", 40, 3600).await?;

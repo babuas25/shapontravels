@@ -259,7 +259,11 @@ async fn complete_phase5_application_document_name_matrix() {
     assert!(a::review(&pool, successful).await.unwrap().replayed);
     assert_eq!(count(&pool, "wallet_owners").await, 1);
     assert_eq!(count(&pool, "portal_agencies").await, 3);
-    assert_eq!(count(&pool, "portal_identity_mail").await, 2);
+    assert_eq!(
+        count(&pool, "portal_identity_mail").await,
+        1,
+        "Approval queues one recipient-only activation message"
+    );
     let v = read_app(&pool, "user_applicant", customer).await;
     assert_eq!(v.status.as_deref(), Some("accepted"));
     assert_eq!(v.version, 4);
@@ -323,12 +327,8 @@ async fn complete_phase5_application_document_name_matrix() {
         a::review(&pool, stale_review).await.unwrap_err().0,
         StatusCode::CONFLICT
     );
-    // Read-only company profiles, foreign agency and canonical owner logo.
-    for (actor, target) in [
-        ("user_one_owner", owner),
-        ("user_one_sub", sub),
-        ("user_two_owner", owner),
-    ] {
+    // Sub-user/foreign-agency writes stay blocked; owner logo writes are covered by renewal tests.
+    for (actor, target) in [("user_one_sub", sub), ("user_two_owner", owner)] {
         assert_eq!(
             d::prepare(
                 &pool,

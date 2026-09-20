@@ -1,5 +1,8 @@
 # Rust business notifications
 
+For environment selection, release order and post-deployment worker verification,
+see the [deployment and maintenance runbook](DEPLOYMENT_RUNBOOK.md).
+
 Business email and SMS are delivered by `shapontravels-api notifications-worker`.
 The API writes immutable recipient/event snapshots in the same PostgreSQL
 transaction as the business event. No provider request runs inside that transaction.
@@ -108,23 +111,42 @@ queues as a rollback: that can resend historical messages.
 
 ## Current rollout status (2026-09-20)
 
-The local implementation has not been deployed or activated. The SMTP 553
-sender/relay rejection was resolved by explicitly setting `EMAIL_FROM_ADDRESS`
-to the authenticated mailbox `no-reply-uat@shapontravels.com` in the backend
-`.env`. One Rust email smoke test using those backend credentials was accepted
-by Zoho. This proves SMTP acceptance, not inbox placement. Using the originally
+Production is deployed and active. Backend release `373e5f6ab4242bc1c860d66ecfd60627a0aa9657`
+passed GitHub Actions run `35518720667`; its verified Ubuntu artifact is installed
+on the production VPS. Migration 0062 is applied. The canonical rollout is active
+at revision 5, with maintenance disabled and the temporary operator capability
+removed. `shapontravels-notifications.service` is enabled, running without
+restarts, and dispatch ownership is `rust`.
+
+Frontend commit `b3c7eafeeb430187c0ece35d6b2863a6426fef0d` is pushed to the new
+private frontend repository. Vercel deployment `dpl_51FcVuBRXYDsNX3T5TfbuyJaPK9M`
+is READY and serves the production domain. Business sender modules and schedulers
+are removed; the project has no cron definitions. Account emails remain separate.
+The localhost:3001 production profile now uses revision 5; the signed-in
+Super Admin account list was verified in the browser.
+
+The existing frontend branded HTML header, footer and itinerary presentation
+are reused in Rust (`assets/email/business.html`, `src/notifications/html.rs`).
+Production uses `Shapon Travels <no-reply-uat@shapontravels.com>` with reply-to
+`support@shapontravels.com`. SMTP TLS and authentication were verified from the
+VPS without sending another message. The earlier Rust email smoke test was
+accepted by Zoho and the user confirmed inbox receipt. Using the originally
 requested `noreply@shapontravels.com` still requires authorization of that alias.
 The application loads `.env`; `.env.local` is not loaded automatically.
 
-One earlier explicit SMS smoke test was accepted by BulkSMSBD. No additional
-SMS was sent during this email fix. Live smoke tests are never part of CI.
-The current local backend `.env` has SMTP settings; the business worker also
-requires `APP_URL` and the BulkSMSBD configuration before activation. The email
-smoke supplied a portal URL and unused SMS placeholders only in its subprocess;
-it did not activate the worker or connect to a database.
+The pre-migration production backup was restored to a new disposable database;
+all 115 public tables/sequences matched and the source remained unchanged.
+Production health and canonical readiness pass. The business delivery and
+attempt queues are empty: no production booking/deposit was fabricated, and no
+historical notification was replayed. Actual business-event inbox/handset delivery
+will occur when eligible agent events are created; this deployment check did not
+create those events. One earlier explicit SMS smoke test was accepted by BulkSMSBD.
 
-The frontend production build and relevant account/notification checks pass.
+Private deployment evidence is retained in `.local/notification-rollout/`.
+Production GitHub auto-deploy has been restored to enabled.
+
 Two existing static frontend checks (`verify-booking-rollout-controls` and
 `verify-manual-booking-import`) also fail against the original Git HEAD: they
 expect legacy authorization in routes already delegated to the Rust import
-adapter. These are not successful validation gates for this change.
+adapter. The production build, relevant account/notification checks and Rust CI
+passed; these two pre-existing static failures were not represented as passing.

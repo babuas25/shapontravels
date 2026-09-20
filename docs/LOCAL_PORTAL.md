@@ -34,6 +34,30 @@ curl -i http://127.0.0.1:18081/health/ready
 
 Expect HTTP 200. Connection refused means Rust is stopped or listening on a different port. A readiness failure means PostgreSQL or migration checks are failing. Health does not test the supplier.
 
+### After updating backend code
+
+The retained local database is independent of both VPS databases. A successful
+development/production deployment does not migrate localhost. After pulling or
+building code with new migrations, verify local readiness before using the UI.
+The canonical launcher intentionally does not apply migrations automatically.
+If its log says `apply reviewed migrations before starting identity`, stop the
+identified local launcher(s), back up the database selected by private
+`.local/identity-local/config.json`, review the pending migrations, and run the
+current binary's `migrate` command with that selected local database configuration.
+Do not use the generic `.env` database or reset this retained database. Restart one
+portal launcher, then verify health, authenticated identity readiness, matching
+frontend/runtime/durable pins, and the signed-in browser dashboard.
+
+On 2026-09-20, localhost:3000 returned `IDENTITY_AUTHORITY_UNAVAILABLE` because a
+Rust restart required migration 0062 while the local database was still at 0060.
+After a private backup, migrations 0061–0062 were applied to the selected local
+database. User, booking, wallet-ledger and import row counts remained unchanged.
+One launcher was restarted; health and homepage returned 200, canonical readiness
+and all pins matched at local revision 15, and the existing signed-in Super Admin
+dashboard rendered. Recovery evidence is private under
+`.local/identity-local/recovery-2026-09-20T17-32-54.844Z/`.
+No VPS deployment or production migration was part of this localhost recovery.
+
 The canonical local launcher uses **configured supplier reads**: Search, FareRules and RePrice for FirstTrip, TakeOff and Triplover, plus each supplier's configured Hold and PNR support. Each supplier uses its own `*_BASE_URL`, `*_SEARCH_BASE_URL`, `*_EMAIL`, `*_PASSWORD` and `*_CURRENCY` from Rust `.env`. UAT and production endpoints are both supported; credentials and endpoints must belong to the same supplier environment/account. No endpoints or currencies are guessed. The old `LOCAL_API_UAT_HOLDS` flag no longer selects this launcher's supplier mode.
 
 At startup/reload this local launcher enables search for suppliers with credentials in `.env` and disables search for suppliers with both email and password absent. Incomplete credentials or URLs produce an actionable startup error. This replaces stale local UAT-only participation switches; dashboard search switches still apply until the next reload. Supplier authentication/transport errors are isolated per supplier, so successful suppliers can return partial results. Invalid credentials, denied access and unavailable inventory cannot be made into real flight results.
@@ -63,3 +87,16 @@ The actual signed-in frontend was then tested through its Search button with the
 ## Supplier Hold on the main server
 
 The main binary already reads each supplier's booking/ticketing flags and uses the same adapters as the local connections. Set the relevant booking flag to `true` in the main server environment and enable that supplier's `search_enabled` and `booking_enabled` in that server's database. Deploy the built release through the normal deployment workflow and restart the service after environment changes; the main server does not use the local `.env` watcher. Local database controls are not copied to the main server. Verify a fresh checkout reports `submissionEnabled=true` before submitting any booking. The shared ticketing restrictions described above apply to both servers.
+
+
+### Document permission endpoint restart — 2026-09-21
+
+The updated local frontend requested `documents/policy`, but the running
+`local_identity` process predated that endpoint and returned `404 NOT_FOUND`.
+Rebuilt `local_identity` and restarted only the verified local portal launcher.
+Both health endpoints and canonical readiness returned 200 at the unchanged
+local rollout revision 15. The affected B2B account's NID document query and
+permission query both returned 200; no saved NID is present and its upload policy
+is admin-only. No database migration, profile/document edit, pin change or remote
+deployment was performed. Refresh details in the existing browser to clear the
+previous response.

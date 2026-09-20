@@ -1189,6 +1189,19 @@ async fn documents_query(
         .map(Json)
         .map_err(identity_error)
 }
+#[utoipa::path(post,path="/admin/portal-identity/documents/policy",request_body=super::documents::Query,security(("identity_bridge"=[])),responses((status=200,body=super::documents::UpdatePolicy),(status=403,description="Current scope forbidden"),(status=409,description="Version, state or replay conflict"),(status=503,description="Provider/store unavailable")))]
+async fn documents_policy(
+    State(state): State<AppState>,
+    Extension(runtime): Extension<Runtime>,
+    input: Result<Json<super::documents::Query>, JsonRejection>,
+) -> Result<Json<super::documents::UpdatePolicy>, ApiError> {
+    let input = input.map_err(payload_error)?.0;
+    verified(&runtime, &input.clerk_user_id).await?;
+    super::documents::policy(&state.pool, input)
+        .await
+        .map(Json)
+        .map_err(identity_error)
+}
 #[utoipa::path(post,path="/admin/portal-identity/documents/prepare",request_body=super::documents::Prepare,security(("identity_bridge"=[])),responses((status=200,body=super::documents::Asset),(status=403,description="Current scope forbidden"),(status=409,description="Version, state or replay conflict"),(status=503,description="Provider/store unavailable")))]
 async fn documents_prepare(
     State(state): State<AppState>,
@@ -1361,6 +1374,10 @@ pub fn routes(state: AppState) -> Router<AppState> {
             post(documents_query),
         )
         .route(
+            "/admin/portal-identity/documents/policy",
+            post(documents_policy),
+        )
+        .route(
             "/admin/portal-identity/documents/prepare",
             post(documents_prepare),
         )
@@ -1488,6 +1505,7 @@ pub fn routes(state: AppState) -> Router<AppState> {
         applications_review,
         applications_queue,
         documents_query,
+        documents_policy,
         documents_prepare,
         documents_intent,
         documents_start,
@@ -1535,6 +1553,7 @@ pub fn routes(state: AppState) -> Router<AppState> {
         super::applications::Page,
         super::documents::Query,
         super::documents::View,
+        super::documents::UpdatePolicy,
         super::documents::Prepare,
         super::documents::Asset,
         super::documents::AssetRequest,

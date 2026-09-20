@@ -1,5 +1,7 @@
 # Production server and branch deployments
 
+Start with [the current deployment and maintenance runbook](DEPLOYMENT_RUNBOOK.md) for release order, environment verification and troubleshooting.
+
 Production target: `160.25.226.236`, `api.shapontravels.com`, Ubuntu 24.04 x86_64.
 Development target: the existing `160.25.226.72` server (`sendbox.shapontravels.com`).
 The operator requested a new empty database. Do not copy the development database,
@@ -44,11 +46,10 @@ Each environment is restricted to its matching branch. The old
 variables/secrets to the new production server. New routing uses only the prefixed
 settings above.
 
-Branch routing alone does not replace the development server's supplier accounts:
-the existing server reported `APP_ENV=production` during inspection. Configure
-reviewed UAT credentials and execution controls before testing supplier mutations
-there. Do not assume a `development` Git branch changes the application's runtime
-environment (supported values are `local`, `test`, `uat`, and `production`).
+As of 2026-09-20 development uses `APP_ENV=uat`, with supplier booking/ticketing
+and real notification delivery disabled. Review UAT credentials and execution
+controls before enabling supplier mutations. A Git branch alone does not change
+the runtime environment (supported values: `local`, `test`, `uat`, `production`).
 
 ## Server files
 
@@ -94,10 +95,22 @@ migrations; `build.rs` ensures new migration files rebuild the embedded migrator
 
 ## Application activation
 
+As verified on 2026-09-20, production canonical identity is active at revision 5
+and its Vercel production frontend is live. The separate `http://localhost:3001`
+profile also connects to production. Development canonical identity is active at
+revision 3 with its branch-specific Vercel Preview. Both targets run Rust release
+`373e5f6` through migration `0062`. Temporary operator capabilities were removed,
+maintenance is off and branch auto-deployment is enabled. Production Rust business
+notifications are active; development real delivery remains disabled. See
+[business notifications](BUSINESS_NOTIFICATIONS.md) for worker ownership and policy.
+The generic backend administrator and the portal Super Admin are separate;
+canonical mode fences legacy `/admin/login` and other generic admin routes.
+See the frontend's [local production connection guide](../../shopontravels/docs/PRODUCTION_API_LOCAL.md).
+
 A healthy empty installation is not a configured travel business. Bootstrap the
-real administrator, configure supplier accounts/IP allowlists and pricing, and
-complete production identity readiness separately. Keep supplier booking/ticketing
-and identity activation disabled until that setup is reviewed. Health checks only
+real administrator for a new installation, configure supplier accounts/IP allowlists
+and pricing, and complete the chosen identity rollout. Keep supplier booking/ticketing
+disabled until supplier setup is reviewed. Health checks only
 establish process and database/schema readiness.
 
 See [the original server guide](SERVER_SETUP.md) for service administration and
