@@ -82,6 +82,13 @@ pub async fn backlog(
             "'sending','unknown','failed'",
         ),
         (
+            "business_deliveries",
+            "business_notification_deliveries",
+            "state",
+            "'sent','suppressed'",
+            "'sending','unknown','failed'",
+        ),
+        (
             "wallet_requests",
             "wallet_requests",
             "status",

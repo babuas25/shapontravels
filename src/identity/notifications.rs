@@ -36,6 +36,7 @@ pub(crate) async fn worker(
     let mut tx = super::begin_mutation(&state.pool).await?;
     let result = match command {
         Command::Claim { channel } => {
+            let rust_owned = crate::notifications::rust_owned(&mut tx).await?;
             if !["email", "sms"].contains(&channel.as_str()) {
                 return Err(invalid());
             }
@@ -43,6 +44,10 @@ pub(crate) async fn worker(
             // Recheck recipient authority and contact immediately before claiming;
             // an old quote/event must never resurrect a suspended/deleted account.
             sqlx::query("UPDATE portal_notification_deliveries d SET state='suppressed',error_code='RECIPIENT_NO_LONGER_ELIGIBLE' WHERE d.state IN ('pending','failed') AND (NOT EXISTS(SELECT 1 FROM portal_users u WHERE u.id=d.user_id AND u.status='active' AND (d.channel<>'email' OR lower(btrim(u.email))=d.recipient) AND (d.channel<>'sms' OR portal_notification_phone(u.id)=d.recipient) AND (d.audience<>'internal' OR u.role IN ('staff_support','staff_account','admin','superadmin')) AND NOT EXISTS(SELECT 1 FROM portal_identity_provider_state s WHERE s.subject=u.clerk_user_id AND s.deleted)) OR (d.agency_id IS NOT NULL AND NOT EXISTS(SELECT 1 FROM portal_agencies a JOIN portal_users o ON o.id=a.owner_user_id JOIN portal_agency_memberships m ON m.agency_id=a.id AND m.user_id=d.user_id WHERE a.id=d.agency_id AND a.status='active' AND o.status='active')))").execute(&mut *tx).await?;
+            if rust_owned {
+                // Business sends have moved to Rust. Identity role mail stays here.
+                sqlx::query("UPDATE portal_notification_deliveries SET state='suppressed',error_code='BUSINESS_SENDER_MOVED_TO_RUST' WHERE kind IN ('booking','ticket_management') AND state IN ('pending','failed')").execute(&mut *tx).await?;
+            }
             let token = Uuid::new_v4();
             let row:Option<Value>=sqlx::query_scalar("UPDATE portal_notification_deliveries SET state='sending',claim_token=$1,claimed_at=clock_timestamp(),attempts=attempts+1 WHERE id=(SELECT id FROM portal_notification_deliveries WHERE channel=$2 AND (state='pending' OR (state='failed' AND attempts<3)) AND next_attempt_at<=clock_timestamp() ORDER BY created_at,id LIMIT 1 FOR UPDATE SKIP LOCKED) RETURNING jsonb_build_object('id',id,'claim_token',claim_token,'kind',kind,'channel',channel,'audience',audience,'recipient',recipient,'payload',payload)").bind(token).bind(channel).fetch_optional(&mut *tx).await?;
             if let Some(row) = row {

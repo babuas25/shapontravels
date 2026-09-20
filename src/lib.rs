@@ -12,6 +12,7 @@ pub mod fare_breakdown;
 mod http_errors;
 pub mod identity;
 pub mod markup;
+pub mod notifications;
 pub mod passengers;
 pub mod portal;
 pub mod portal_holds;

@@ -15,7 +15,7 @@ export function validateReport(v) {
       || !/^[a-f0-9]{64}$/.test(v.mapping_digest ?? '')
       || typeof v.observed_at !== 'string' || !Number.isFinite(Date.parse(v.observed_at))
       || Math.abs(Date.now() - Date.parse(v.observed_at)) > 300000) invalid();
-  const queues = ['creates', 'invitations', 'deletions', 'effects', 'events', 'mail', 'assets', 'wallet_notifications', 'wallet_deliveries', 'wallet_requests', 'wallet_reservations', 'bookings', 'ticket_issues', 'cancellations'];
+  const queues = ['creates', 'invitations', 'deletions', 'effects', 'events', 'mail', 'assets', 'wallet_notifications', 'wallet_deliveries', 'business_deliveries', 'wallet_requests', 'wallet_reservations', 'bookings', 'ticket_issues', 'cancellations'];
   if (!v.backlog || Object.keys(v.backlog).length !== queues.length || queues.some(k => !v.backlog[k] || !count(v.backlog[k].pending) || !count(v.backlog[k].uncertain) || v.backlog[k].uncertain > v.backlog[k].pending)) invalid();
   const mappings = ['agency_wallet_missing', 'unmapped_wallet_owners', 'unmapped_client_subjects', 'unmapped_staff_subjects', 'unmapped_draft_subjects', 'unmapped_booking_creators', 'agency_client_wallet_mismatch', 'active_agency_users_without_membership'];
   if (!v.mapping_issues || Object.keys(v.mapping_issues).length !== mappings.length || mappings.some(k => !count(v.mapping_issues[k]))) invalid();

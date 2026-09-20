@@ -24,11 +24,24 @@ async fn run() -> Result<(), String> {
     }
     let args: Vec<_> = std::env::args().skip(1).collect();
     if args.len() > 1
-        || args
-            .first()
-            .is_some_and(|v| !["serve", "migrate", "bootstrap-admin"].contains(&v.as_str()))
+        || args.first().is_some_and(|v| {
+            ![
+                "serve",
+                "migrate",
+                "bootstrap-admin",
+                "notifications-check",
+                "notifications-worker",
+                "notifications-activate",
+            ]
+            .contains(&v.as_str())
+        })
     {
-        return Err("usage: shapontravels-api [serve|migrate|bootstrap-admin]".into());
+        return Err("usage: shapontravels-api [serve|migrate|bootstrap-admin|notifications-check|notifications-worker|notifications-activate]".into());
+    }
+    if args.first().is_some_and(|v| v == "notifications-check") {
+        shapontravels_api::notifications::provider::Providers::from_env()?;
+        tracing::info!("Business notification provider configuration valid; no messages sent");
+        return Ok(());
     }
     let config = Config::from_env()?;
     let auth_proxy =
@@ -47,6 +60,37 @@ async fn run() -> Result<(), String> {
     }
     if !schema_ready(&pool).await {
         return Err("database schema is not current; run migrate".into());
+    }
+    if args
+        .first()
+        .is_some_and(|v| v.starts_with("notifications-"))
+    {
+        use shapontravels_api::{identity, notifications};
+        if identity::maintenance::Maintenance::from_env()?.0 {
+            return Err("identity maintenance is enabled".into());
+        }
+        let providers = notifications::provider::Providers::from_env()?;
+        if args[0] == "notifications-activate" {
+            let pin = identity::rollout::Pin::from_env()?;
+            identity::rollout::scoped(Some(pin), notifications::activate(&pool))
+                .await
+                .map_err(|e| e.1)?;
+            tracing::info!(
+                "Business notifications assigned to Rust; historical messages are not replayed"
+            );
+        } else {
+            let (stop, receiver) = tokio::sync::oneshot::channel();
+            let mut worker = tokio::spawn(notifications::run(pool.clone(), providers, receiver));
+            tokio::select! {
+                result=&mut worker => { result.map_err(|_| "notification worker failed")??; },
+                _=shutdown() => {
+                    let _=stop.send(());
+                    worker.await.map_err(|_| "notification worker failed")??;
+                }
+            }
+        }
+        pool.close().await;
+        return Ok(());
     }
     if args.first().is_some_and(|v| v == "bootstrap-admin") {
         use std::io::{self, Write};

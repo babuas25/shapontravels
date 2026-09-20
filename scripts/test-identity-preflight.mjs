@@ -11,7 +11,7 @@ import { validateReport } from './identity-preflight.mjs';
 
 const tmp = await mkdtemp(path.join(os.tmpdir(), 'identity-preflight-contract-'));
 const token = `stio_${'a'.repeat(43)}`;
-const queues = ['creates', 'invitations', 'deletions', 'effects', 'events', 'mail', 'assets', 'wallet_notifications', 'wallet_deliveries', 'wallet_requests', 'wallet_reservations', 'bookings', 'ticket_issues', 'cancellations'];
+const queues = ['creates', 'invitations', 'deletions', 'effects', 'events', 'mail', 'assets', 'wallet_notifications', 'wallet_deliveries', 'business_deliveries', 'wallet_requests', 'wallet_reservations', 'bookings', 'ticket_issues', 'cancellations'];
 const mappings = ['agency_wallet_missing', 'unmapped_wallet_owners', 'unmapped_client_subjects', 'unmapped_staff_subjects', 'unmapped_draft_subjects', 'unmapped_booking_creators', 'agency_client_wallet_mismatch', 'active_agency_users_without_membership'];
 const tables = ['portal_identity_control', 'portal_users', 'portal_agencies', 'portal_agency_memberships', 'portal_agency_wallets', 'wallet_owners', 'wallet_client_links', 'api_clients', 'portal_staff_clients', 'portal_hold_drafts', 'flight_bookings'];
 const fresh = () => ({ format_version: 1, mapping_digest: 'a'.repeat(64), observed_at: new Date().toISOString(), authority_mode: 'staged', schema_ready: true, bootstrap_ready: true,

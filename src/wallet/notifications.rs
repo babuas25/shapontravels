@@ -104,6 +104,11 @@ pub(crate) async fn run_worker(
 ) -> Result<Json<Value>> {
     rate_limit(&state.pool, &format!("wallet-worker:{actor}"), 300).await?;
     let mut tx = state.pool.begin().await?;
+    if !matches!(command, Command::Complete { .. })
+        && crate::notifications::rust_owned(&mut tx).await?
+    {
+        return Err(conflict("BUSINESS_SENDER_MOVED_TO_RUST"));
+    }
     recover(&mut tx).await?;
     let value = match command {
         Command::ClaimEvent { id } => {
@@ -300,6 +305,15 @@ pub(super) async fn status(pool: &PgPool, actor: &Actor, request_id: Uuid) -> Re
     }
     let events:Vec<Value>=sqlx::query_scalar("SELECT jsonb_build_object('id',id,'event',event,'channel',channel,'state',state,'errorCode',error_code,'attempts',attempts,'nextAttemptAt',next_attempt_at) FROM wallet_notifications WHERE request_id=$1 ORDER BY created_at,id").bind(request_id).fetch_all(pool).await?;
     let mut deliveries:Vec<Value>=sqlx::query_scalar("SELECT jsonb_build_object('id',d.id,'event',n.event,'channel',n.channel,'recipient',d.recipient,'audience',d.audience,'state',d.state,'generation',d.generation,'attempts',d.attempts,'errorCode',d.error_code,'nextAttemptAt',d.next_attempt_at,'automaticRetryAt',CASE WHEN d.state='failed' AND d.generation_attempts<3 THEN d.next_attempt_at ELSE NULL END,'completedAt',d.completed_at) FROM wallet_notification_deliveries d JOIN wallet_notifications n ON n.id=d.notification_id WHERE n.request_id=$1 ORDER BY d.created_at,d.id").bind(request_id).fetch_all(pool).await?;
+    let native: bool = sqlx::query_scalar(
+        "SELECT owner='rust' FROM business_notification_dispatch WHERE singleton",
+    )
+    .fetch_one(pool)
+    .await?;
+    if native {
+        deliveries=sqlx::query_scalar("SELECT jsonb_build_object('id',id,'event',payload->>'event','channel',channel,'recipient',recipient,'audience','partner','state',state,'generation',1,'attempts',attempts,'errorCode',error_code,'nextAttemptAt',next_attempt_at,'automaticRetryAt',CASE WHEN state='failed' AND attempts<3 THEN next_attempt_at ELSE NULL END,'completedAt',CASE WHEN state IN ('sent','failed','unknown','suppressed') THEN claimed_at ELSE NULL END) FROM business_notification_deliveries WHERE kind='deposit' AND payload->>'requestId'=$1 ORDER BY created_at,id").bind(request_id.to_string()).fetch_all(pool).await?;
+    }
+    let events = if native { Vec::new() } else { events };
     for d in &mut deliveries {
         if let Some(s) = d["recipient"].as_str() {
             d["recipient"] = json!(if let Some((_, domain)) = s.rsplit_once('@') {
@@ -359,6 +373,60 @@ pub(super) async fn retry(pool: &PgPool, actor: &Actor, input: Retry) -> Result<
     let request = workflows::request(&mut tx, input.request_id).await?;
     if request["kind"] != "deposit" {
         return Err(missing());
+    }
+    if crate::notifications::rust_owned(&mut tx).await? {
+        if input.event_id.is_some() {
+            return Err(conflict("NOTIFICATION_EXPANSION_RETIRED"));
+        }
+        let decision = format!("deposit_{}", request["status"].as_str().unwrap_or(""));
+        let row:Option<(Uuid,String,i32,Uuid,Uuid,Value,String)>=sqlx::query_as("SELECT id,state,attempts,user_id,agency_id,payload,channel FROM business_notification_deliveries WHERE kind='deposit' AND payload->>'requestId'=$1 AND (($2::uuid IS NOT NULL AND id=$2) OR ($2::uuid IS NULL AND channel='email' AND payload->>'event'=$3)) ORDER BY created_at DESC,id DESC LIMIT 1 FOR UPDATE").bind(input.request_id.to_string()).bind(input.delivery_id).bind(&decision).fetch_optional(&mut *tx).await?;
+        let (id, state, attempts, user, agency, payload, channel) = row.ok_or_else(missing)?;
+        if input.delivery_id.is_some()
+            && (input.expected_attempts != Some(attempts) || input.expected_generation != Some(1))
+        {
+            return Err(conflict("NOTIFICATION_STATUS_CHANGED"));
+        }
+        if state == "sending" {
+            return Err(conflict("NOTIFICATION_DELIVERY_IN_PROGRESS"));
+        }
+        if state == "unknown" && !input.acknowledge_unknown {
+            return Err(conflict("NOTIFICATION_UNKNOWN_REQUIRES_REVIEW"));
+        }
+        if state == "sent" && input.delivery_id.is_some() {
+            return Err(conflict("NOTIFICATION_ALREADY_SENT"));
+        }
+        let queued = state != "pending";
+        if queued {
+            if state == "failed" {
+                sqlx::query("UPDATE business_notification_deliveries SET state='suppressed',error_code='MANUAL_RETRY_SUPERSEDED' WHERE id=$1").bind(id).execute(&mut *tx).await?;
+            }
+            sqlx::query("SELECT enqueue_business_notification($1,'deposit',$2,$3,$4,$5)")
+                .bind(format!("deposit-retry:{}", input.operation_id))
+                .bind(channel)
+                .bind(user)
+                .bind(agency)
+                .bind(payload)
+                .execute(&mut *tx)
+                .await?;
+            let eligible: bool = sqlx::query_scalar("SELECT EXISTS(SELECT 1 FROM business_notification_deliveries WHERE source_key=$1 AND state='pending')")
+                .bind(format!("deposit-retry:{}", input.operation_id))
+                .fetch_one(&mut *tx).await?;
+            if !eligible {
+                return Err(conflict("NOTIFICATION_RECIPIENT_INELIGIBLE"));
+            }
+        }
+        let result = json!({"queued":true,"newAttempt":queued,"delivered":false});
+        sqlx::query("INSERT INTO wallet_notification_actions(id,actor_id,request_hash,result) VALUES($1,$2,$3,$4)").bind(input.operation_id).bind(&actor.external_user_id).bind(hash).bind(&result).execute(&mut *tx).await?;
+        super::portal::audit(
+            &mut tx,
+            actor,
+            "notification.rust_retry",
+            id,
+            json!({"reason":input.reason,"acknowledgeUnknown":input.acknowledge_unknown}),
+        )
+        .await?;
+        tx.commit().await?;
+        return Ok(result);
     }
     if input.event_id.is_some() && input.delivery_id.is_some() {
         return Err(invalid("INVALID_NOTIFICATION_RETRY"));

@@ -49,6 +49,16 @@ jobs:
           bash -n scripts/deploy/backup.sh
           python3 scripts/deploy/test_activate.py
           python3 scripts/deploy/test_send.py
+      - name: Native business notification integration
+        run: |
+          createdb business_notification_test
+          cargo test --locked --test business_notifications -- --ignored
+        env:
+          PGHOST: 127.0.0.1
+          PGPORT: '5432'
+          PGUSER: test
+          PGPASSWORD: test
+          BUSINESS_NOTIFICATION_TEST_DATABASE_URL: postgres://test:test@127.0.0.1:5432/business_notification_test
   build:
     name: Build Ubuntu 24.04 release
     needs: check

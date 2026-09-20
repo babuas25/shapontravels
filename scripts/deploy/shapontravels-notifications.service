@@ -1,0 +1,24 @@
+[Unit]
+Description=Shapon Travels business email and SMS worker
+Wants=network-online.target
+After=network-online.target postgresql.service shapontravels.service
+PartOf=shapontravels.service
+
+[Service]
+Type=simple
+User=shapontravels
+Group=shapontravels
+WorkingDirectory=/etc/shapontravels
+Environment=DB_MAX_CONNECTIONS=2
+ExecStart=/opt/shapontravels/shapontravels-api notifications-worker
+Restart=on-failure
+RestartSec=15
+TimeoutStopSec=90
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=true
+UMask=0077
+
+[Install]
+WantedBy=multi-user.target
