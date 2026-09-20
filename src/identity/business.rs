@@ -722,6 +722,11 @@ pub async fn directory(
         }
         _ => return Err(denied()),
     };
+    if input.kind == "assignees" {
+        // Canonical directory reads use a shared PostgreSQL quota, independent
+        // of booking submissions. Verify current identity/role before consuming it.
+        crate::auth::rate_limit(&mut *tx, &format!("identity:assignees:{}", actor.id), 60).await?;
+    }
     let mut rows:Vec<Principal>=sqlx::query_as("SELECT u.id,u.clerk_user_id subject,u.role,u.authorization_version,m.agency_id,a.agency_code,o.clerk_user_id owner_subject,coalesce(nullif(trim(concat_ws(' ',u.first_name,u.last_name)),''),u.clerk_user_id) name,coalesce(u.email,'') email,coalesce(p.fields->>'agencyName','') agency_name FROM portal_users u LEFT JOIN portal_agency_memberships m ON m.user_id=u.id LEFT JOIN portal_agencies a ON a.id=m.agency_id LEFT JOIN portal_users o ON o.id=a.owner_user_id LEFT JOIN portal_identity_profiles p ON p.user_id=o.id AND p.kind='profile' WHERE u.status='active' AND u.role=ANY($1) AND ($2::uuid IS NULL OR u.id>$2) AND ($3='' OR strpos(lower(concat_ws(' ',u.clerk_user_id,u.email,u.first_name,u.last_name,a.agency_code,p.fields->>'agencyName')),lower($3))>0) AND (u.role NOT IN ('b2b','b2b_sub') OR (a.status='active' AND o.status='active')) AND NOT EXISTS(SELECT 1 FROM portal_identity_provider_state s WHERE s.subject=u.clerk_user_id AND s.deleted) ORDER BY u.id LIMIT $4")
         .bind(roles).bind(input.after).bind(input.query.trim()).bind(input.limit+1).fetch_all(&mut *tx).await?;
     let more = rows.len() > input.limit as usize;

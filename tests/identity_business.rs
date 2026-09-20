@@ -259,6 +259,57 @@ async fn canonical_business_wallet_passenger_client_matrix() {
         2
     );
     let deposit = Uuid::new_v4();
+    // One successful assignee read above already consumed this actor's quota.
+    // Requests across router clones share PostgreSQL counters; concurrency must
+    // neither over-admit nor exhaust the pool while holding the identity lock.
+    for _ in 1..50 {
+        assert_eq!(directory(&app, "user_root", "assignees").await.0, 200);
+    }
+    let mut reads = tokio::task::JoinSet::new();
+    for _ in 0..20 {
+        let app = app.clone();
+        reads.spawn(async move { directory(&app, "user_root", "assignees").await });
+    }
+    let mut allowed = 0;
+    let mut limited = 0;
+    while let Some(result) = reads.join_next().await {
+        let (status, body) = result.unwrap();
+        match status {
+            200 => allowed += 1,
+            429 => {
+                assert_eq!(body["error"], "RATE_LIMITED");
+                limited += 1;
+            }
+            _ => panic!("unexpected directory result: {status} {body}"),
+        }
+    }
+    assert_eq!((allowed, limited), (10, 10));
+    assert_eq!(directory(&app, "user_root", "receivers").await.0, 200);
+    assert_eq!(directory(&app, "user_admin", "assignees").await.0, 200);
+    let root: Uuid =
+        sqlx::query_scalar("SELECT id FROM portal_users WHERE clerk_user_id='user_root'")
+            .fetch_one(&pool)
+            .await
+            .unwrap();
+    let bucket = shapontravels_api::auth::digest(&format!("identity:assignees:{root}"));
+    // A 30-second-old bucket remains capped; a full minute restores access.
+    sqlx::query(
+        "UPDATE rate_buckets SET window_start=now()-INTERVAL '30 seconds' WHERE bucket_key=$1",
+    )
+    .bind(&bucket)
+    .execute(&pool)
+    .await
+    .unwrap();
+    assert_eq!(directory(&app, "user_root", "assignees").await.0, 429);
+    sqlx::query(
+        "UPDATE rate_buckets SET window_start=now()-INTERVAL '61 seconds' WHERE bucket_key=$1",
+    )
+    .bind(&bucket)
+    .execute(&pool)
+    .await
+    .unwrap();
+    assert_eq!(directory(&app, "user_root", "assignees").await.0, 200);
+
     let body = json!({"action":"deposit","id":deposit,"data":{"currency":"BDT","amount":"125.50","remarks":"Synthetic cash","payment":{"method":"cash","branch_id":"00000000-0000-4000-8000-000000000001","receiver":{"id":"user_receiver","role":"superadmin","name":"FORGED"}}}});
     let (s, v) = wallet(&app, "user_sub", body.clone()).await;
     assert_eq!(s, 200, "{v}");

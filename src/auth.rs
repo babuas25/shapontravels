@@ -143,9 +143,13 @@ mod admission_tests {
     }
 }
 
-pub(crate) async fn rate_limit(pool: &PgPool, key: &str, limit: i32) -> Result<(), ApiError> {
+pub(crate) async fn rate_limit<'e>(
+    executor: impl sqlx::Executor<'e, Database = sqlx::Postgres>,
+    key: &str,
+    limit: i32,
+) -> Result<(), ApiError> {
     let (count,): (i32,) = sqlx::query_as("INSERT INTO rate_buckets(bucket_key) VALUES($1) ON CONFLICT(bucket_key) DO UPDATE SET requests = CASE WHEN rate_buckets.window_start <= now() - INTERVAL '60 seconds' THEN 1 ELSE rate_buckets.requests + 1 END, window_start = CASE WHEN rate_buckets.window_start <= now() - INTERVAL '60 seconds' THEN now() ELSE rate_buckets.window_start END RETURNING requests")
-        .bind(digest(key)).fetch_one(pool).await?;
+        .bind(digest(key)).fetch_one(executor).await?;
     if count > limit {
         return Err(ApiError(StatusCode::TOO_MANY_REQUESTS, "RATE_LIMITED"));
     }
