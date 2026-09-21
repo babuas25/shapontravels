@@ -928,3 +928,19 @@ the user's production release authorization under this runbook.
   account-linking decision are reviewed. The prior read-only comparison found
   zero subject-ID overlap between the selected live Clerk users and the four
   retained Rust identities; do not infer a mapping from email or alter roles.
+
+### Production identity-status wording correction — 2026-09-22 (Asia/Dhaka)
+
+- Replaced the incorrect `Test environment` label on the production account
+  status screen with `Account access`. The screen remains the explicit result
+  for a valid Clerk session that cannot yet be linked to the retained Rust
+  account service; this release does not alter that routing or perform a
+  provider/account migration.
+- Frontend `3351867863ea64e04782e4e65c5fe511a72ec16e` passed development
+  [Actions 35639647166](https://github.com/babuas25/shapontravels-frontend/actions/runs/35639647166)
+  and production
+  [Actions 35639650896](https://github.com/babuas25/shapontravels-frontend/actions/runs/35639650896).
+  Vercel Preview `dpl_5TmgZ3M9Dicbpw2UPiDvAmP1Uxja` and Production
+  `dpl_2EJgcom6KPRRyKMNXyKYrqRAuX5j` are READY. Local TypeScript and
+  login-resilience checks passed. No Rust service deployment, database,
+  identity-provider credential, role, account or rollout-pin change occurred.
