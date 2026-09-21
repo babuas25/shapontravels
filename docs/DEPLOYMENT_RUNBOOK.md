@@ -48,7 +48,10 @@ frontend remote is the new private repository above, never `babuas25/shopontrave
 5. Test the frontend changes, then push to its `development` branch when requested.
    Its Vercel variables must be scoped to Preview + Git branch `development`.
    Other Preview branches need their own reviewed configuration.
-6. Wait for the matching Vercel deployment to be READY. Verify the stable branch
+6. Require the matching frontend GitHub Actions quality and build jobs to pass;
+   the workflow runs on both development and main. Also wait for the matching
+   Vercel deployment to be READY. Vercel success does not establish Actions success.
+   Verify the stable branch
    homepage in the browser and the existing user's login, dashboard and role.
    Do not create real bookings, tickets, deposits or notification deliveries as
    an incidental deployment check.
@@ -668,3 +671,29 @@ request; no manual VPS deployment or production migration is authorized here.
   provider configuration passed its read-only check; the worker was restarted
   and confirmed active. No test booking, ticket or email was sent. Private
   environment, deployment and test evidence is under `.local/doc-role-release`.
+
+### Frontend Actions CI recovery — 2026-09-21
+
+- The preceding frontend Vercel deployments were READY, but their separate
+  GitHub Actions runs had failed. Run `35579354139` failed lint at the two
+  application-status anchors in `app/identity-phase5/workspace.tsx`; quality
+  stopped before TypeScript/API checks and the dependent build was skipped.
+  The earlier release verification missed this independent CI failure.
+- Frontend `f33bd0c55c6a843930ed695489ba33c7327d4d9a` uses Next Link with
+  prefetch disabled for those status links, excludes the existing generated
+  `.next-production-api` output from local lint, and runs CI on development
+  as well as main. No lint rules were disabled. The onboarding fixture now
+  recognizes the dedicated Super Admin overview and runs in CI too.
+- [Development CI 35580054573](https://github.com/babuas25/shapontravels-frontend/actions/runs/35580054573)
+  passed quality and build before promotion.
+  [Production CI 35580369822](https://github.com/babuas25/shapontravels-frontend/actions/runs/35580369822)
+  also passed both jobs. Local lint, TypeScript, API Management isolation and
+  B2B onboarding/role landing checks passed.
+- Matching Vercel Preview `dpl_GpbyCFsk8SVKee7v4Wkcnd8js8sU` and Production
+  `dpl_Cfz46r3mKD9xied6gwPAXVCtNEaz` are READY at the stable branch/production
+  aliases. Both stable homepages were checked in Chrome and correctly resolved
+  the existing Super Admin session, Summary and Recent Activity dashboard.
+- No backend runtime, database migration, environment variable or authority-pin
+  change. Both APIs retain `7a7bf986ec72d33e70196bd0f03e180f74948c1a` and schema
+  `0064`, with authenticated canonical readiness, matching pins, maintenance
+  off and public live/ready HTTP 200. No live business mutation was used for QA.
