@@ -169,10 +169,10 @@ Recheck before the next release:
 
 | Item | Development | Production |
 | --- | --- | --- |
-| Rust release | `33b8660` | `33b8660` |
-| Applied migration | `0062` | `0062` |
+| Rust release | `96295fe` | `96295fe` |
+| Applied migration | `0063` | `0063` |
 | Canonical rollout revision | `3` | `5` |
-| Frontend release | `0890fc9` | `0890fc9` |
+| Frontend release | `0c42355` | `0c42355` |
 | Real business notification worker | Disabled | Active |
 
 Temporary operator capabilities were removed and maintenance was off on both
@@ -432,3 +432,55 @@ request; no manual VPS deployment or production migration is authorized here.
   unrestricted. Production B2B mutation journeys were not repeated with real data.
 - Sanitized release evidence is retained privately at
   `.local/development-setup/b2b-production-release-20260921.json`.
+
+
+### Registration feedback release — 2026-09-21
+
+- User explicitly authorized development migration/push followed by production.
+  Backend `96295fedf919049872ab7615fdd5fbb07ad5439d` passed
+  [development Actions 35558568044](https://github.com/babuas25/shapontravels/actions/runs/35558568044)
+  and [production Actions 35559249078](https://github.com/babuas25/shapontravels/actions/runs/35559249078),
+  including checks, release build and the selected deployment job.
+- Both VPSs run that exact SHA and migration `0063`. Internal/public health and
+  authenticated canonical readiness passed; revisions remain 3/5, pins match,
+  maintenance is off, and Clerk account writers remain disabled. Production
+  backup: `/var/backups/shapontravels/db-20260921T040630Z.dump`. Migration preserves
+  existing mail evidence and does not enqueue receipts for historical submissions.
+- Frontend `0c42355354bfdfc561c754bba34e8133af4c8917` includes the submission success
+  dialog, branded submission/approval emails and protected SMTP diagnostics.
+  Development Preview `dpl_6dJioQPDiYVpiA4oufwRpTLzEKYd` is READY at
+  <https://shapontravels-frontend-5oe0cw2wt-shapontravels.vercel.app/>.
+  Both stable homepages resolved the existing Super Admin session correctly.
+  No real application, approval or document change was created as a smoke test.
+- Production-only Vercel SMTP settings and a dedicated identity mail credential
+  were installed; Preview delivery remains disabled. Runtime environment backups
+  are root-only under `/var/backups/shapontravels/env-before-registration-mail-*`.
+  Production business notification ownership remains Rust and its worker is active;
+  development real business delivery remains inactive.
+- Initial identity delivery attempted the existing pending welcome message. All
+  five attempts were definitely `not_sent`; the row is now `blocked` at its retry
+  limit. Immutable attempt history is retained. Do not reset the row or blindly
+  resend it. No submission/approval message was generated during verification.
+- SMTP authentication succeeded locally and through the deployed, token-protected
+  GET `/api/identity/mail` readiness endpoint. A stale-claim POST returned 409
+  before any SMTP send. The readiness endpoint only verifies TLS/authentication;
+  it does not prove provider acceptance of a complete message or inbox delivery.
+- Found a sender mismatch: production authenticated as `no-reply@shapontravels.com`
+  but the identity sender used `no-reply-uat@shapontravels.com`. Corrected the
+  Production Vercel identity sender to the authenticated mailbox. This is a
+  plausible cause of the initial rejection, not a confirmed provider diagnosis.
+  A user-selected test recipient was requested for final message acceptance
+  verification. Do not claim successful inbox delivery without that evidence.
+- Private release/configuration evidence: `.local/registration-release/`.
+
+- Final Production deployment `dpl_DTDg3UFSU5C7bkMzSG3Z2A8JarPs` is READY at
+  <https://shapontravels-frontend-ac4wxsihy-shapontravels.vercel.app/> with the
+  corrected identity sender. Stable production homepage/browser verification
+  passed again. The authenticated SMTP readiness endpoint returned 200/ready;
+  stale delivery claims still return 409 before sending.
+- Re-enabled production identity autodispatch after this configuration correction.
+  Authenticated readiness reports mail enabled, matching revision 5 and Clerk
+  writers still disabled. API and business notification services are active;
+  final public live/ready checks pass. The old welcome remains blocked and was
+  not replayed. Full SMTP message acceptance/inbox verification remains pending
+  the requested test recipient; future registration events use the corrected sender.
