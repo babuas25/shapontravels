@@ -189,10 +189,10 @@ Recheck before the next release:
 
 | Item | Development | Production |
 | --- | --- | --- |
-| Rust release | `7a7bf98` | `7a7bf98` |
+| Rust release | `06d71a0` | `06d71a0` |
 | Applied migration | `0064` | `0064` |
 | Canonical rollout revision | `3` | `5` |
-| Frontend release | `952e864` | `952e864` |
+| Frontend release | `8fd2fd5` | `8fd2fd5` |
 | Real business notification worker | Disabled | Active |
 
 Temporary operator capabilities were removed and maintenance was off on both
@@ -748,3 +748,46 @@ request; no manual VPS deployment or production migration is authorized here.
 - Frontend changes remain local pending a frontend push request. No supplier
   activation, remote runtime, identity pin or migration is changed by this push.
   The previously verified deployed release record above remains applicable.
+
+### Supplier Control and lowest-fare production release — 2026-09-21
+
+- User explicitly authorized completing all pending backend/frontend production
+  updates. The earlier source-only push restriction no longer blocks this release.
+  Rust `06d71a0a83daab1bf50620f2caf1163bda871e3c` is deployed on both servers.
+  [Development Actions 35584056492](https://github.com/babuas25/shapontravels/actions/runs/35584056492)
+  and [production Actions 35584182726](https://github.com/babuas25/shapontravels/actions/runs/35584182726)
+  passed Rust/PostgreSQL checks, release build and their respective deployment jobs.
+- Frontend `8fd2fd5bb64f9829cc2cbe360987c8b93944e2de` was pushed to development,
+  verified, then promoted to main in `babuas25/shapontravels-frontend`.
+  [Development CI 35584966934](https://github.com/babuas25/shapontravels-frontend/actions/runs/35584966934)
+  and [production CI 35585317044](https://github.com/babuas25/shapontravels-frontend/actions/runs/35585317044)
+  passed both quality and build jobs. Vercel Preview
+  `dpl_r2eGUcUP8J8weDjTQPbDPAR1yvvm` and Production
+  `dpl_8QTQrzPpe8QJDHTMaBDXs33TriXV` are READY with the correct stable aliases.
+- Super Admin Supplier Control now manages independent Search participation for
+  FirstTrip, TripLover and TakeOff using the canonical Rust API. Lowest supplier
+  fare wins; equal fares use FirstTrip → TripLover → TakeOff. Staff schedule
+  grouping compares exact supplier costs even when published gross fares match.
+- Both authenticated supplier-control APIs and dashboard summaries passed.
+  Browser verification of both stable homepages resolved the existing Super
+  Admin to its dashboard; both Supplier Control pages loaded successfully.
+  Development correctly shows FirstTrip/TakeOff as unconfigured. Production
+  final API and browser reads show all three configured and Search-enabled,
+  version 3, with 60-second deadlines. Connection switches were unchanged by
+  backend activation; subsequent reads observed FirstTrip/TakeOff enabled.
+  The release checks did not mutate live Search switches.
+- Deployed SHAs, internal/public health, canonical readiness and matching pins
+  passed. Schema remains 0064, revisions remain development 3 / production 5,
+  and maintenance is off. No new migration or Vercel environment change.
+  Production notification ownership/configuration was validated and its worker
+  restored and verified active after API activation. Development delivery stays off.
+- Deployment backups: development
+  `/var/backups/shapontravels/db-20260921T094414Z.dump`; production
+  `/var/backups/shapontravels/db-20260921T094613Z.dump`. Private release evidence:
+  `.local/supplier-release/`. No real booking, ticket, deposit or test notification
+  was created. Backend `main` remains historical; current releases use
+  `development` and `production`, while frontend production uses `main`.
+- Final live browser Search used the originally reported DAC–SIN route on
+  2026-09-29 for one adult. The results show BS-307, V, 22:30 via TakeOff at
+  supplier fare BDT 39,866.99, confirming the cheaper source now reaches the
+  displayed primary flight card. No Select/hold/booking/ticket action was taken.

@@ -1,6 +1,7 @@
 # Supplier Control
 
-Local implementation, not yet deployed. The canonical Super Admin sidebar links
+Released to development and production on 2026-09-21 with backend `06d71a0`
+and frontend `8fd2fd5`. The canonical Super Admin sidebar links
 `/dashboard/supplier-control`. FirstTrip, TripLover and TakeOff each have an
 independent Search switch; any subset can be active. All-off explicitly shows
 that new searches are unavailable. Equal-fare priority remains

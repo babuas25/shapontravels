@@ -184,4 +184,5 @@ The controlled VPS replay of the final policy returned four successes and eight 
 The canonical dashboard [Supplier Control](SUPPLIER_CONTROL.md) provides independent
 Search switches for FirstTrip, TripLover and TakeOff. Any subset may be enabled.
 Changes are version-checked and audited; turning a supplier off invalidates its
-prior unbooked offers. The feature is implemented locally and is not yet deployed.
+prior unbooked offers. Released to development and production on 2026-09-21;
+see the deployment runbook for the verified backend/frontend release pair.

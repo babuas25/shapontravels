@@ -69,8 +69,21 @@ The prior rows are backed up under
 Internal readiness before/after and public readiness passed; API and notification
 services remain active. No service restart, deployment or migration was needed.
 
-Production supplier activation and code release are pending explicit authorization. Before
-activation, verify the complete platform Search with all three inventories in
-the development environment, including existing pricing-coverage checks, and
-follow the deployment runbook. FirstTrip and TakeOff remain search-disabled.
-No booking, ticket or notification was sent by this work.
+The user subsequently authorized the complete production release. Backend
+`06d71a0` and frontend `8fd2fd5` are deployed in development and production;
+matching Actions checks/build/deploy jobs and both Vercel deployments passed.
+Authenticated canonical supplier-control reads and actual dashboard/Supplier
+Control browser checks passed. Production final reads show all three suppliers
+configured and Search-enabled at version 3 with 60-second deadlines. The release
+itself preserved connection switches; the subsequent enabled state was observed
+through the API and UI. No live switch mutation was performed as a smoke test.
+See the deployment runbook for release and verification details. No booking,
+ticket or notification was created as a test by this work.
+
+## Final production browser verification
+
+After release, a fresh one-adult DAC–SIN Search for 2026-09-29 displayed BS-307 V,
+22:30, **via TakeOff**, supplier fare **BDT 39,866.99**. The UI reported 151 total
+schedules and nine US-Bangla schedules. No booking/hold/selection was submitted.
+This verifies the originally reported cheaper supplier is now represented by the
+primary production flight card; the observed fare is not a locked quotation.
