@@ -39,6 +39,15 @@ pub(super) async fn enqueue(
     }
     Ok(())
 }
+pub(super) async fn enqueue_application_submission(
+    tx: &mut Transaction<'_, Postgres>,
+    user_id: Uuid,
+    version: i64,
+) -> Result<(), ApiError> {
+    sqlx::query("INSERT INTO portal_identity_mail(id,kind,audience,user_id,application_version) VALUES($1,'application_submitted','recipient',$2,$3) ON CONFLICT DO NOTHING")
+        .bind(Uuid::new_v4()).bind(user_id).bind(version).execute(&mut **tx).await?;
+    Ok(())
+}
 async fn record(
     tx: &mut Transaction<'_, Postgres>,
     id: Uuid,

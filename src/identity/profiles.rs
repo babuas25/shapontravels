@@ -215,7 +215,14 @@ pub(super) async fn scope(
 ) -> Result<(operations::User, operations::User), ApiError> {
     super::api::validate_subject(subject)?;
     super::api::require_bootstrap(tx).await?;
-    let actor = operations::actor(tx, subject).await?;
+    let actor = super::phase5::actor(tx, subject).await?;
+    // Applicants may complete only their own personal profile. Keep the active
+    // actor requirement for administration, staff records and business access.
+    if actor.actor.status == Status::Onboarding
+        && (actor.actor.user_id != target || kind != Kind::Profile)
+    {
+        return Err(denied());
+    }
     let target = operations::user(tx, target).await?;
     if matches!(target.actor.status, Status::Deleting | Status::Deleted) {
         return Err(denied());

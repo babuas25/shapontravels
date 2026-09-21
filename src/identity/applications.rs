@@ -241,6 +241,7 @@ pub async fn submit(pool: &PgPool, mut input: Submit) -> Result<View, ApiError> 
     )
     .await?;
     view = load(&mut tx, &actor).await?;
+    mail::enqueue_application_submission(&mut tx, actor.actor.user_id, view.version).await?;
     tx.commit().await?;
     Ok(view)
 }

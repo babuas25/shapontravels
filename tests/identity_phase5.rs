@@ -242,7 +242,11 @@ async fn complete_phase5_application_document_name_matrix() {
     assert_eq!(rejected.status.as_deref(), Some("rejected"));
     assert!(a::review(&pool, reject).await.unwrap().replayed);
     assert_eq!(count(&pool, "wallet_owners").await, 0);
-    assert_eq!(count(&pool, "portal_identity_mail").await, 0);
+    assert_eq!(
+        count(&pool, "portal_identity_mail").await,
+        1,
+        "Only the submission receipt is queued before approval"
+    );
     let mut resubmit = submit(&pool, "user_applicant", customer, 2).await;
     resubmit.documents = vec![asset.id];
     a::submit(&pool, resubmit).await.unwrap();
@@ -261,8 +265,8 @@ async fn complete_phase5_application_document_name_matrix() {
     assert_eq!(count(&pool, "portal_agencies").await, 3);
     assert_eq!(
         count(&pool, "portal_identity_mail").await,
-        1,
-        "Approval queues one recipient-only activation message"
+        3,
+        "Two submissions plus one recipient-only activation message; review replay adds none"
     );
     let v = read_app(&pool, "user_applicant", customer).await;
     assert_eq!(v.status.as_deref(), Some("accepted"));
@@ -604,7 +608,16 @@ async fn complete_phase5_application_document_name_matrix() {
         owner_uploads.items.is_empty(),
         "uploader intents are not a global private document listing"
     );
-    let claim = identity::mail::claim(&pool).await.unwrap().unwrap();
+    let mut claim = identity::mail::claim(&pool).await.unwrap().unwrap();
+    while claim.kind == "application_submitted" {
+        identity::mail::start(&pool, claim.id, claim.token, claim.fence)
+            .await
+            .unwrap();
+        identity::mail::finish(&pool, &claim, identity::mail::Outcome::Sent)
+            .await
+            .unwrap();
+        claim = identity::mail::claim(&pool).await.unwrap().unwrap();
+    }
     assert_eq!(claim.kind, "b2b_activated");
     identity::mail::start(&pool, claim.id, claim.token, claim.fence)
         .await

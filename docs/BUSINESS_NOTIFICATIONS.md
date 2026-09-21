@@ -42,6 +42,35 @@ role emails remain with Next.js/Clerk. Next.js business sender modules, business
 cron routes, and legacy arbitrary-recipient email/SMS sharing are removed.
 Clipboard and itinerary screenshot sharing remain available.
 
+### B2B registration messages
+
+Canonical application mail uses the separate Rust identity outbox and identity
+worker, with the authenticated Next.js SMTP receiver at `/api/identity/mail`.
+It does not use the business-notification worker or a browser-supplied recipient.
+Canonical email transport can be enabled independently of Clerk account writers;
+its dedicated token, HTTPS origin and matching rollout pin remain required.
+
+- A successful application submission atomically queues `application_submitted`
+  for the registered account email. Migration `0063` records the application
+  version and preserves the existing queue/history. Each corrected resubmission
+  receives a new acknowledgement; command retries do not create duplicates.
+- Admin approval atomically queues the existing `b2b_activated` event. Its
+  registration-success template tells the recipient to log out, log in again
+  using the same email, and continue to Flight Search.
+- The frontend shows a success dialog only after the submission commits. It
+  promises an email without claiming SMTP acceptance or inbox delivery early.
+  No receipt is enqueued for a rolled-back or invalid submission.
+- Single-use delivery claims, current account eligibility and unknown-outcome
+  handling remain enforced. Never resend an `unknown` SMTP outcome automatically.
+
+Release coordination: the SMTP receiver must support `application_submitted`
+before the new Rust worker dispatches it. Publish the backward-compatible mail
+receiver first against the current healthy backend, or pause identity mail
+dispatch during the coordinated rollout; do not let the old receiver consume new
+events (a rejected delivery becomes `unknown`). Apply `0063` through the reviewed
+backend deployment, then verify canonical readiness and the identity mail runtime
+configuration. Migration alone neither sends messages nor replays old submissions.
+
 ## Delivery semantics
 
 PostgreSQL deduplicates `(source_key, channel, recipient)`. Atomic claims use

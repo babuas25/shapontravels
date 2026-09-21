@@ -230,18 +230,9 @@ impl Runtime {
                     {
                         return Ok(Some(runtime));
                     }
-                    if runtime.creator.is_none() {
-                        return Err(
-                            "identity mail requires an explicit provider writer mode".into()
-                        );
-                    }
                     let origin = std::env::var("PORTAL_IDENTITY_MAIL_ORIGIN")
                         .map_err(|_| "identity mail origin missing")?;
-                    runtime.mailer = Some(Arc::new(if let Some(pin) = runtime.rollout_pin() {
-                        super::mail::HttpMail::canonical(&origin, token.clone(), pin.clone())?
-                    } else {
-                        super::mail::HttpMail::new(&origin, token.clone())?
-                    }));
+                    runtime.configure_mail(&origin, token)?;
                 }
                 Ok(Some(runtime))
             }
@@ -1603,3 +1594,75 @@ pub fn routes(state: AppState) -> Router<AppState> {
     ))
 )]
 pub struct IdentityDoc;
+
+impl Runtime {
+    fn configure_mail(&mut self, origin: &str, token: String) -> Result<(), String> {
+        // Canonical SMTP delivery is independently authorized by its rollout pin
+        // and dedicated transport token. It does not need Clerk account writers.
+        // Staged delivery retains its disposable provider-writer requirement.
+        let mailer = if let Some(pin) = self.rollout_pin() {
+            super::mail::HttpMail::canonical(origin, token, pin.clone())?
+        } else if self.creator.is_some() {
+            super::mail::HttpMail::new(origin, token)?
+        } else {
+            return Err("staged identity mail requires an explicit provider writer mode".into());
+        };
+        self.mailer = Some(Arc::new(mailer));
+        Ok(())
+    }
+}
+
+#[cfg(test)]
+mod mail_configuration_tests {
+    use super::*;
+    struct NoProviderCalls;
+    impl IdentityProvider for NoProviderCalls {
+        fn lookup<'a>(&'a self, _: &'a str) -> super::super::provider::Lookup<'a> {
+            Box::pin(async { panic!("Mail configuration must not contact Clerk") })
+        }
+    }
+    #[test]
+    fn pinned_mail_does_not_enable_clerk_writers() {
+        let token = format!("stim_{}", "m".repeat(43));
+        let mut runtime = Runtime::staged(
+            &format!("stib_{}", "b".repeat(43)),
+            None,
+            Arc::new(NoProviderCalls),
+        )
+        .unwrap();
+        assert!(
+            runtime
+                .configure_mail("http://127.0.0.1:3000", token.clone())
+                .is_err()
+        );
+        runtime = runtime
+            .with_rollout(super::super::rollout::Pin {
+                id: Uuid::new_v4(),
+                target_id: "production".into(),
+                revision: 1,
+                backend_release: "a".repeat(64),
+                frontend_release: "b".repeat(64),
+            })
+            .unwrap();
+        assert!(
+            runtime
+                .configure_mail("http://127.0.0.1:3000", token.clone())
+                .is_err()
+        );
+        assert!(
+            runtime
+                .configure_mail("https://portal.example.invalid", "invalid".into())
+                .is_err()
+        );
+        runtime
+            .configure_mail("https://portal.example.invalid", token)
+            .unwrap();
+        assert!(runtime.mailer.is_some());
+        assert!(
+            runtime.creator.is_none()
+                && runtime.inviter.is_none()
+                && runtime.deleter.is_none()
+                && runtime.effector.is_none()
+        );
+    }
+}
