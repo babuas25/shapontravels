@@ -186,10 +186,10 @@ Recheck before the next release:
 
 | Item | Development | Production |
 | --- | --- | --- |
-| Rust release | `6c4b227` | `6c4b227` |
-| Applied migration | `0063` | `0063` |
+| Rust release | `7a7bf98` | `7a7bf98` |
+| Applied migration | `0064` | `0064` |
 | Canonical rollout revision | `3` | `5` |
-| Frontend release | `ab6a3e5` | `ab6a3e5` |
+| Frontend release | `952e864` | `952e864` |
 | Real business notification worker | Disabled | Active |
 
 Temporary operator capabilities were removed and maintenance was off on both
@@ -624,3 +624,47 @@ request; no manual VPS deployment or production migration is authorized here.
   configuration was validated and its worker restarted and verified active;
   development real delivery remains disabled. Private evidence is under ignored
   `.local/fare-checkout-release`.
+
+
+### Document submission and retained agency roles — 2026-09-21
+
+- Rust `7a7bf986ec72d33e70196bd0f03e180f74948c1a` deployed successfully to
+  development and production. Actions `35577148708` and `35578134094` passed
+  Rust/PostgreSQL checks, release build and their respective deployment jobs.
+  Migration `0064` is applied on both databases. Canonical revisions remain 3
+  and 5, with matching pins, maintenance off and healthy internal/public APIs.
+- Frontend `952e864faef8dd690136ad2dc4132a491b350c12` was pushed to development
+  and promoted to main in the authorized frontend repository. Vercel Preview
+  `dpl_FvfHeb2ZkzhqQJLzKbfkZMSC87Nj` and Production
+  `dpl_89e6fT4JZPrEzquGhNRehkK5m4mN` are READY, with the correct stable aliases.
+- Missing Cloudinary credentials caused Production `IDENTITY_ASSET_UNAVAILABLE`.
+  The three server-only variables were added to Vercel Production and the
+  credential set passed a read-only Cloudinary ping. This frontend deployment
+  activates that configuration. Development assets remain disabled; production
+  storage credentials were not copied into Preview or the Rust VPS.
+- Application forms now upload a selected document and submit its verified ID
+  together. Preflight failures permit retry/removal without trapping the form;
+  unknown uploads still block resend and submission until recovery. Existing
+  application fields remain visible. Known upload states do not require a
+  Cloudinary provider read to recover.
+- The old owner/membership database restriction caused role changes to return
+  `IDENTITY_MEMBERSHIP_DEPENDENCY`. Role changes now retain agency/wallet identity,
+  pause an owner's agency while the owner has a non-B2B role, invalidate affected
+  client authority and restore the previous agency status on return to B2B.
+  Dormant membership does not become the new staff/admin session's agency scope.
+  Explicit suspension, archival, last-Super-Admin and cross-agency protections remain.
+- Validation: all-target Clippy, fresh operations/business/document/deletion DB
+  tests, frontend typecheck, upload adapter regressions, seven Preview readiness
+  checks and optional-image checks. Browser fixtures verified selected-file
+  submission, preflight retry/removal, uncertain-upload blocking and restoration
+  through `set_role` rather than provisioning a duplicate agency.
+- The stable development and production sites loaded the existing Super Admin
+  dashboard and Users & Roles lists successfully. Production Business documents
+  loaded without a storage/identity error. Real role changes or document/application
+  writes were not performed as live tests; those cases used disposable fixtures.
+- Deployment backups: development
+  `/var/backups/shapontravels/db-20260921T082823Z.dump`; production
+  `/var/backups/shapontravels/db-20260921T084223Z.dump`. Production notification
+  provider configuration passed its read-only check; the worker was restarted
+  and confirmed active. No test booking, ticket or email was sent. Private
+  environment, deployment and test evidence is under `.local/doc-role-release`.
