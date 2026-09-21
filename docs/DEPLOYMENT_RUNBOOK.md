@@ -1,6 +1,6 @@
 # Deployment and maintenance runbook
 
-Current operating instructions, updated 2026-09-20. Read this before deploying,
+Current operating instructions, updated 2026-09-21. Read this before deploying,
 changing Vercel environment variables or changing identity configuration. This
 supersedes the historical single-server `main` / `VPS_*` deployment instructions.
 Recorded revisions below are evidence of a completed release, not values to copy
@@ -169,10 +169,10 @@ Recheck before the next release:
 
 | Item | Development | Production |
 | --- | --- | --- |
-| Rust release | `00e26f9` | `373e5f6` |
+| Rust release | `33b8660` | `33b8660` |
 | Applied migration | `0062` | `0062` |
 | Canonical rollout revision | `3` | `5` |
-| Frontend release | `f3d64fe` | `f127621` |
+| Frontend release | `0890fc9` | `0890fc9` |
 | Real business notification worker | Disabled | Active |
 
 Temporary operator capabilities were removed and maintenance was off on both
@@ -386,3 +386,49 @@ only after the matching backend development pipeline and authenticated readiness
 pass. The paired frontend release entry records the backend run and publication
 verification. Existing production branches/configuration remain outside this
 request; no manual VPS deployment or production migration is authorized here.
+
+### B2B development release verified — 2026-09-21
+
+- Backend `33b86607fecfaab6fc54097184777a8f999bc7ef` passed
+  [Actions run 35536156525](https://github.com/babuas25/shapontravels/actions/runs/35536156525),
+  including Deploy development. Exact deployed SHA, public health and authenticated
+  canonical readiness were verified: migration `0062`, revision 3, matching pins.
+- Frontend `0890fc915968e9c6a9096e7dcb22bf690140b9d3` completed Vercel Preview
+  deployment `69xQsVXnZKuiFA3z7Z6w3nfnLzwd`. The stable development homepage
+  resolved the existing Super Admin session to its dashboard. Real business
+  notification delivery remains disabled. Private evidence:
+  `.local/development-setup/b2b-release-20260921.json`.
+
+### B2B production release verified — 2026-09-21 09:15 Asia/Dhaka
+
+- The user explicitly authorized production promotion. Fast-forwarded backend
+  `production` to `33b86607fecfaab6fc54097184777a8f999bc7ef`, then frontend `main`
+  to `0890fc915968e9c6a9096e7dcb22bf690140b9d3` after backend verification.
+  Both local working checkouts remain on `development`.
+- [Actions run 35556026599](https://github.com/babuas25/shapontravels/actions/runs/35556026599)
+  passed Rust/PostgreSQL checks, release build and Deploy production. Verified
+  the exact deployed backend SHA on `160.25.226.236`, active API and HTTP 200
+  from public live/ready endpoints. Authenticated canonical readiness is true,
+  revision 5, with matching runtime/durable pins and maintenance off.
+- No new migration, identity pin, environment or supplier configuration change.
+  Schema remains `0062`. Deployment backup
+  `/var/backups/shapontravels/db-20260921T031046Z.dump` exists; this release did
+  not perform a new restore drill.
+- API stop/start left the notification worker inactive because of its `PartOf`
+  relationship. Verified dispatch owner `rust` and valid notification configuration,
+  then resumed the previously active worker. Post-release checks confirmed it
+  active with zero restarts. No synthetic notification delivery was requested.
+- Vercel Production deployment `GgK6cG2j9cwHEBqG6ARV7bKZJPsg` succeeded for
+  frontend `0890fc9` (GitHub deployment `6560939599`) at
+  <https://shapontravels-frontend-by71n6rml-shapontravels.vercel.app/>.
+  The stable <https://shapontravels-frontend.vercel.app/> homepage was checked
+  in Chrome after deployment: the existing signed-in Super Admin reached the
+  dashboard with its correct role and navigation, without a setup/readiness error.
+  No new production account or B2B document upload was created for verification.
+- Includes the prior booking-assignee quota fix and the tested B2B onboarding,
+  Flight Search landing/sidebar, fill-once company information and document rules.
+  CAAB replacement is available two calendar years after the last successful
+  upload; trade-license renewal uses July–June and company logo changes remain
+  unrestricted. Production B2B mutation journeys were not repeated with real data.
+- Sanitized release evidence is retained privately at
+  `.local/development-setup/b2b-production-release-20260921.json`.
