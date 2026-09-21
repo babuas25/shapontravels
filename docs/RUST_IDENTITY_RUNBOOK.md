@@ -91,6 +91,28 @@ The script does not load `.env`. HTTPS is required except for loopback HTTP fixt
 
 Exit 0 means the selected local operator/mapping/backlog snapshot is clear, maintenance is enabled, and no compared mapping changed. Exit 2 preserves an actionable review with unresolved work, mapping drift or missing maintenance. Exit 1 means invalid configuration/response, failed request or output failure. **All outcomes retain `activation_ready:false` and `activation_performed:false`.** A clear database snapshot cannot prove backups, external writer shutdown, provider identity or target configuration.
 
+### Reviewed provider-subject remap
+
+Migration `0065_portal_identity_subject_remaps.sql` supports a one-time Clerk
+provider-subject change for an existing, retained portal account. It does not
+discover users or match by email, name, role metadata, browser session or an
+invitation. An operator must independently verify the exact old and new Clerk
+subjects belong to the same person, then record those explicit pairs in a
+private manifest. A subject with retained business references must never be
+onboarded as a fresh account instead.
+
+`node scripts/identity-subject-remap-plan.mjs --manifest /private/approved-mapping.json --output /private/remap.sql`
+only validates that explicit manifest and writes mode-0600 SQL; it loads no
+environment, contacts no provider, connects to no database and cannot apply a
+change. During the already-coordinated maintenance window, run the reviewed
+plan once against the selected target after the backup/restore evidence is
+fresh. Its transaction retains the portal user ID, roles, agencies, wallets,
+client links, holds and booking ownership while changing their live subject
+references together. It increments authorization state, records the immutable
+mapping and writes a hashed audit record. Historical audit/event rows continue
+to show their original subject. A duplicate, unexpected current subject, stale
+portal user ID, incomplete remap or direct identity-key update fails closed.
+
 ### Coordinated maintenance preparation
 
 The code now supports `SHAPON_IDENTITY_AUTHORITY=maintenance` in Next and `PORTAL_IDENTITY_MAINTENANCE=true` in Rust. Defaults remain legacy/false. Enable them only as part of the selected environment's coordinated deployment procedure. Both deployed targets were out of maintenance after their recorded 2026-09-20 rollouts.
