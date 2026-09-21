@@ -60,7 +60,7 @@ No VPS deployment or production migration was part of this localhost recovery.
 
 The canonical local launcher uses **configured supplier reads**: Search, FareRules and RePrice for FirstTrip, TakeOff and Triplover, plus each supplier's configured Hold and PNR support. Each supplier uses its own `*_BASE_URL`, `*_SEARCH_BASE_URL`, `*_EMAIL`, `*_PASSWORD` and `*_CURRENCY` from Rust `.env`. UAT and production endpoints are both supported; credentials and endpoints must belong to the same supplier environment/account. No endpoints or currencies are guessed. The old `LOCAL_API_UAT_HOLDS` flag no longer selects this launcher's supplier mode.
 
-At startup/reload this local launcher enables search for suppliers with credentials in `.env` and disables search for suppliers with both email and password absent. Incomplete credentials or URLs produce an actionable startup error. This replaces stale local UAT-only participation switches; dashboard search switches still apply until the next reload. Supplier authentication/transport errors are isolated per supplier, so successful suppliers can return partial results. Invalid credentials, denied access and unavailable inventory cannot be made into real flight results.
+At startup/reload the local launcher preserves the saved Supplier Control Search switches. Restarting does not re-enable a supplier switched off by a Super Admin. New or newly configured suppliers are enabled explicitly through Supplier Control. Incomplete credentials or URLs produce an actionable startup error. Supplier authentication/transport errors are isolated per supplier, so successful suppliers can return partial results. Invalid credentials, denied access and unavailable inventory cannot be made into real flight results.
 
 Each supplier uses the same `SupplierAdapter` and capability flags as the main server:
 
@@ -100,3 +100,23 @@ permission query both returned 200; no saved NID is present and its upload polic
 is admin-only. No database migration, profile/document edit, pin change or remote
 deployment was performed. Refresh details in the existing browser to clear the
 previous response.
+
+### Dashboard and Supplier Control recovery — 2026-09-21
+
+The frontend requested `include_summary: true`, but the local Rust process
+started before the dashboard summary update. The same authenticated dashboard
+request returned 422 `INVALID_REQUEST` with that field and 200 without it.
+The retained local database was also still at migration 0062.
+
+Stopped the verified old portal launcher, saved and checked a private database
+backup, applied reviewed migrations 0063–0064, and rebuilt/restarted the current
+local backend. User, booking, wallet-ledger and import counts stayed unchanged.
+Search, servicing, booking, ticketing and timeout settings were verified preserved;
+restart now invalidates old offers without resetting Supplier Control switches.
+
+Internal health and authenticated canonical readiness passed at unchanged local
+revision 15. The summary request returned 200 with all five summary fields and
+seven booking records. Reloading the existing signed-in localhost browser showed
+Summary cards and Recent Activity instead of the unavailable banner.
+Private backup and recovery evidence: `.local/identity-local/dashboard-recovery-2026-09-21T09-25-55.329Z/`.
+No VPS or frontend production deployment was performed.

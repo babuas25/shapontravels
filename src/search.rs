@@ -529,7 +529,14 @@ async fn search_tracked(
     tracing::debug!(target: "search_memory", phase = "suppliers_parsed");
     let supplier_ms = started.elapsed().as_millis() as u64;
     let processing_started = std::time::Instant::now();
-    batches.sort_by(|a, b| a.0.id.cmp(&b.0.id));
+    // Preserve tie priority for retained fare variants, including clients that
+    // do not receive supplier names and keep response order for equal prices.
+    batches.sort_by_key(|batch| {
+        crate::selection::SUPPLIER_PRIORITY
+            .iter()
+            .position(|id| *id == batch.0.id)
+            .unwrap_or(usize::MAX)
+    });
     let search_id = Uuid::new_v4();
     let mut returned = Vec::new();
     let mut retained_suppliers = std::collections::BTreeSet::new();
@@ -596,8 +603,7 @@ async fn search_tracked(
         .iter()
         .map(|(c, o)| (c.id.as_str(), *o))
         .collect();
-    let selected =
-        crate::selection::winners(&source_offers, &["takeoff", "firsttrip", "triplover"]);
+    let selected = crate::selection::winners(&source_offers, crate::selection::SUPPLIER_PRIORITY);
     tracing::debug!(target: "search_memory", phase = "selection_complete");
     let source_count = candidates.len();
     drop(source_offers);

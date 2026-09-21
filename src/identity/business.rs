@@ -205,6 +205,19 @@ pub async fn execute(
         crate::auth::rate_limit(&state.pool, &format!("markup:{}", c.actor.id), 60).await?;
     }
     match (path, input.method.as_str()) {
+        ("/admin/supplier-search-control", "POST") => {
+            if c.actor.role != "superadmin" {
+                return Err(denied());
+            }
+            if input.body["action"] != "list" {
+                crate::auth::rate_limit(
+                    &state.pool,
+                    &format!("supplier-control:{}", c.actor.id),
+                    60,
+                )
+                .await?;
+            }
+        }
         ("/admin/portal-imports/receipt", "POST") => {
             if !["superadmin", "b2b", "b2b_sub"].contains(&c.actor.role.as_str()) {
                 return Err(denied());
@@ -655,6 +668,7 @@ pub async fn execute(
         .merge(crate::tier::routes())
         .merge(crate::markup::routes())
         .merge(crate::search_controls::routes())
+        .merge(crate::connections::routes())
         .merge(crate::site_content::routes())
         .merge(crate::sales_reports::routes())
         .merge(crate::portal_imports::routes())

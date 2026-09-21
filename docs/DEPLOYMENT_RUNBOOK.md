@@ -697,3 +697,54 @@ request; no manual VPS deployment or production migration is authorized here.
   change. Both APIs retain `7a7bf986ec72d33e70196bd0f03e180f74948c1a` and schema
   `0064`, with authenticated canonical readiness, matching pins, maintenance
   off and public live/ready HTTP 200. No live business mutation was used for QA.
+
+### Supplier Search timeout maintenance — 2026-09-21 15:00 Asia/Dhaka
+
+- User explicitly requested 60-second supplier Search deadlines. On production
+  `160.25.226.236`, changed only FirstTrip and TakeOff `timeout_seconds` from 20
+  to 60 using version guards and append-only `supplier.configuration` audit
+  events. Both versions advanced 1 → 2. TripLover remains 60 seconds, version 3.
+- Prior connection rows are retained in the root-only backup directory
+  `/root/shapontravels-config-backups/supplier-timeout-20260921T090013Z`.
+  Search/servicing/booking/ticketing controls and availability epochs were checked
+  unchanged. FirstTrip and TakeOff remain search-disabled; activation is pending.
+- Internal readiness passed before and after; public production readiness passed.
+  API and notification services remain active. Backend remains
+  `7a7bf986ec72d33e70196bd0f03e180f74948c1a`. No service restart, deployment,
+  frontend publication, migration or identity-pin change was needed.
+- Read-only live diagnosis confirmed TakeOff BS-307 V on DAC–SIN, 2026-09-29,
+  one adult, supplier fare BDT 39,866.99 versus FirstTrip/TripLover BDT 41,069.80.
+  All three published gross fares were BDT 44,170.00. FirstTrip Login + Search
+  took 21.4 seconds, exceeding its old deadline. No booking or ticket was created.
+- Local backend/frontend corrections for lowest-fare selection and equal-fare
+  FirstTrip → TripLover → TakeOff priority are tested but not deployed. See
+  [diagnosis and validation](evidence/SUPPLIER_PRIORITY_2026-09-21.md).
+
+### Localhost dashboard recovery — 2026-09-21
+
+- Localhost:3000 had new dashboard code, while the running Rust process rejected
+  `include_summary` with HTTP 422. The retained local database was at 0062.
+- Backed up the selected local canonical database, applied reviewed 0063–0064
+  migrations and restarted the rebuilt local portal launcher. Retained user,
+  booking, wallet-ledger and import counts were unchanged. Supplier controls and
+  timeouts were preserved; local restarts no longer reset Search switches.
+- Health and authenticated canonical readiness passed at local revision 15. The
+  actual signed-in browser rendered Summary and Recent Activity after reload.
+- Private evidence: `.local/identity-local/dashboard-recovery-2026-09-21T09-25-55.329Z/`.
+  This was local maintenance only; VPS releases and production controls did not change.
+
+### Supplier Control source promotion — 2026-09-21
+
+- User requested backend commits and pushes to `development` and `production`.
+  This source promotion includes canonical Super Admin supplier Search controls,
+  lowest-fare tie priority FirstTrip → TripLover → TakeOff, regression coverage,
+  and preservation of local Search switches across launcher restarts.
+- The commit uses `[skip ci]` because this request does not authorize service
+  deployment or database migrations. The push-triggered deployment workflow is
+  intentionally skipped; a branch SHA is not evidence of a deployed release.
+- Local validation passed: 107 Rust library tests (2 opt-in tests ignored),
+  formatting, all-target Clippy and diff checks. Disposable PostgreSQL supplier
+  controls and search integration checks passed during implementation.
+- Frontend changes remain local pending a frontend push request. No supplier
+  activation, remote runtime, identity pin or migration is changed by this push.
+  The previously verified deployed release record above remains applicable.

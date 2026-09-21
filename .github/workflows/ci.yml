@@ -49,6 +49,16 @@ jobs:
           bash -n scripts/deploy/backup.sh
           python3 scripts/deploy/test_activate.py
           python3 scripts/deploy/test_send.py
+      - name: Canonical supplier search controls
+        run: |
+          createdb -T template0 -E UTF8 supplier_control_identity_test
+          cargo test --locked --test supplier_controls -- --ignored
+        env:
+          PGHOST: 127.0.0.1
+          PGPORT: '5432'
+          PGUSER: test
+          PGPASSWORD: test
+          SUPPLIER_CONTROL_TEST_DATABASE_URL: postgres://test:test@127.0.0.1:5432/supplier_control_identity_test
       - name: B2B onboarding and registration mail integration
         run: |
           createdb -T template0 -E UTF8 onboarding_identity_test

@@ -51,7 +51,7 @@ Headers:
 
 Only returned offers with matching passenger counts, reconciled single-component pricing and no unverified ancillary/service charge are projected. Nonempty branded-fare mapping is deferred. Missing markup configuration fails with `PRICING_CONFIGURATION_ERROR`; unsupported mapping/coverage fails rather than exposing a partially marked-up offer.
 
-**Supplier selection precedes markup.** For conservatively equivalent offers, Search chooses the lowest original supplier `totalPrice` across the active connections, using exact decimal comparison. This is the total for all passengers, excluding platform markup. Equal supplier totals prefer **Takeoff → Firsttrip → Triplover**, as approved on 2026-09-09. Each retained class/fare option receives its applicable markup in its pricing snapshot; public B2B `totalPrice` remains published base+tax gross. Even if passenger rounding makes the chosen selling total higher, supplier-total ranking is preserved.
+**Supplier selection precedes markup.** For conservatively equivalent offers, Search chooses the lowest original supplier `totalPrice` across the active connections, using exact decimal comparison. This is the total for all passengers, excluding platform markup. Equal supplier totals prefer **Firsttrip → Triplover → Takeoff**, as requested on 2026-09-21. Each retained class/fare option receives its applicable markup in its pricing snapshot; public B2B `totalPrice` remains published base+tax gross. Even if passenger rounding makes the chosen selling total higher, supplier-total ranking is preserved.
 
 Equivalence is deliberately strict: reported `bookingClass`/RBD (for example Q or V), `serviceClass`, fare basis, carriers, ordered routes/segments, dates/times, baggage and refundability must match. `cabinClass` is optional and is excluded from the main key: null/missing/empty labels can match a known label when all required attributes agree. Explicitly conflicting nonempty cabin labels on any corresponding segment keep the entire otherwise-matching group separate, so an unknown label cannot bridge Economy and Business. Unknown fields, base/tax/AIT breakdown, fee metadata and other non-reference attributes remain in the comparison. Only the evidenced source/transaction/item/segment/component references and quoted total/discount fields are removed from the private key; original and returned offer shapes are preserved. Different display metadata, baggage representations or base/tax breakdowns may therefore keep otherwise similar offers separate pending verified normalization. Identical offers from the same supplier tied at its lowest price retain their original order.
 
@@ -178,3 +178,10 @@ Final two-second local burst replay returned eight successes and four SEARCH_BUS
 
 
 The controlled VPS replay of the final policy returned four successes and eight SEARCH_BUSY responses per twelve-arrival wave in all three runs. Median busy full-body latency was 3.099 seconds, so the two-second admission timer must not be presented as a two-second end-to-end response guarantee. See [VPS burst evidence](evidence/SEARCH_VPS_BURST_2026-09-10.md) for CPU/RAM caps, timing limits and complete outcomes. Production has not been updated.
+
+## Super Admin supplier controls
+
+The canonical dashboard [Supplier Control](SUPPLIER_CONTROL.md) provides independent
+Search switches for FirstTrip, TripLover and TakeOff. Any subset may be enabled.
+Changes are version-checked and audited; turning a supplier off invalidates its
+prior unbooked offers. The feature is implemented locally and is not yet deployed.

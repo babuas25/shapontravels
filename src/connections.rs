@@ -6,11 +6,75 @@ use axum::{
     Json, Router,
     extract::{Path, State},
     http::StatusCode,
-    routing::{get, put},
+    routing::{get, post, put},
 };
 use serde::{Deserialize, Serialize};
 use sqlx::{FromRow, PgPool};
 use utoipa::{OpenApi, ToSchema};
+
+#[derive(Deserialize, ToSchema)]
+#[serde(tag = "action", rename_all = "snake_case", deny_unknown_fields)]
+enum SearchControlCommand {
+    List,
+    Set {
+        supplier: String,
+        search_enabled: bool,
+        expected_version: i64,
+    },
+}
+
+#[utoipa::path(post, path="/admin/supplier-search-control", operation_id="supplierSearchControl", tag="Suppliers", security(("admin_session"=[])), request_body=SearchControlCommand,
+    responses((status=200,body=Object),(status=403,description="Super Admin required"),(status=409,description="Configuration changed"),(status=422,description="Supplier is not configured")))]
+async fn search_control(
+    admin: Admin,
+    State(state): State<AppState>,
+    Json(command): Json<SearchControlCommand>,
+) -> Result<Json<serde_json::Value>, ApiError> {
+    admin.super_admin()?;
+    let configured = |id: &str| {
+        state
+            .suppliers
+            .get(id)
+            .is_some_and(|s| s.currency.is_some())
+    };
+    let mut tx = crate::identity::business::begin(&state.pool).await?;
+    if let SearchControlCommand::Set {
+        supplier,
+        search_enabled,
+        expected_version,
+    } = command
+    {
+        if !["firsttrip", "triplover", "takeoff"].contains(&supplier.as_str())
+            || expected_version < 1
+        {
+            return Err(ApiError(StatusCode::BAD_REQUEST, "INVALID_REQUEST"));
+        }
+        if search_enabled && !configured(&supplier) {
+            return Err(ApiError(
+                StatusCode::UNPROCESSABLE_ENTITY,
+                "SUPPLIER_NOT_CONFIGURED",
+            ));
+        }
+        let row: Option<Connection> = sqlx::query_as("UPDATE supplier_connections SET search_enabled=$2,version=version+1,availability_epoch=availability_epoch+CASE WHEN search_enabled AND NOT $2 THEN 1 ELSE 0 END,updated_at=now() WHERE id=$1 AND version=$3 RETURNING id,search_enabled,servicing_enabled,booking_enabled,ticketing_enabled,timeout_seconds,version,availability_epoch")
+            .bind(&supplier).bind(search_enabled).bind(expected_version).fetch_optional(&mut *tx).await?;
+        let row = row.ok_or(ApiError(StatusCode::CONFLICT, "CONFIGURATION_CHANGED"))?;
+        sqlx::query("INSERT INTO audit_events(actor_kind,actor_id,action,resource_kind,resource_id,metadata) VALUES('admin',$1,'supplier.configuration','supplier',$2,$3)")
+            .bind(admin.id.to_string()).bind(&supplier).bind(serde_json::json!({"search_enabled":row.search_enabled,"version":row.version,"availability_epoch":row.availability_epoch})).execute(&mut *tx).await?;
+    }
+    let rows: Vec<Connection> = sqlx::query_as("SELECT id,search_enabled,servicing_enabled,booking_enabled,ticketing_enabled,timeout_seconds,version,availability_epoch FROM supplier_connections ORDER BY CASE id WHEN 'firsttrip' THEN 0 WHEN 'triplover' THEN 1 ELSE 2 END")
+        .fetch_all(&mut *tx).await?;
+    let suppliers: Vec<_> = rows
+        .iter()
+        .map(|row| {
+            serde_json::json!({
+                "id":row.id,"search_enabled":row.search_enabled,"configured":configured(&row.id),
+                "timeout_seconds":row.timeout_seconds,"version":row.version
+            })
+        })
+        .collect();
+    tx.commit().await?;
+    Ok(Json(serde_json::json!({"suppliers":suppliers})))
+}
 
 #[derive(Serialize, FromRow, ToSchema)]
 pub struct Connection {
@@ -82,10 +146,14 @@ pub async fn validate_unbooked(pool: &PgPool, id: &str, epoch: i64) -> Result<()
     }
 }
 #[derive(OpenApi)]
-#[openapi(paths(list, update), components(schemas(Connection, ConnectionUpdate)))]
+#[openapi(
+    paths(list, update, search_control),
+    components(schemas(Connection, ConnectionUpdate, SearchControlCommand))
+)]
 pub struct ConnectionDoc;
 pub fn routes() -> Router<AppState> {
     Router::new()
         .route("/admin/suppliers", get(list))
         .route("/admin/suppliers/{id}", put(update))
+        .route("/admin/supplier-search-control", post(search_control))
 }

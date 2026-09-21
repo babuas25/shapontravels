@@ -37,11 +37,10 @@ async fn main() {
     // Restarting discards supplier sessions. Old offers must not cross an
     // account/environment switch, even when the supplier ID is unchanged.
     let mut tx = pool.begin().await.expect("supplier restart transaction");
-    let configured_ids: Vec<_> = suppliers.keys().cloned().collect();
-    // This local launcher follows .env membership on each reload;
-    // old UAT-only database switches must not hide configured live suppliers.
-    sqlx::query("UPDATE supplier_connections SET search_enabled=(id=ANY($1)),availability_epoch=availability_epoch+1,version=version+1,updated_at=now()")
-        .bind(&configured_ids).execute(&mut *tx).await.expect("activate configured supplier reads and invalidate prior offers");
+    // Search participation is managed by Supplier Control. A restart must not
+    // silently re-enable a supplier that a Super Admin has switched off.
+    sqlx::query("UPDATE supplier_connections SET availability_epoch=availability_epoch+1,version=version+1,updated_at=now()")
+        .execute(&mut *tx).await.expect("invalidate prior offers while preserving supplier controls");
     sqlx::query("INSERT INTO audit_events(actor_kind,action,resource_kind,metadata) VALUES('system','supplier.local_read_restart','supplier','{\"reason\":\"reload configured supplier reads\"}')")
         .execute(&mut *tx).await.expect("audit supplier restart");
     tx.commit().await.expect("commit supplier restart");

@@ -8,6 +8,9 @@ use serde::{
 use serde_json::Value;
 use std::collections::{HashMap, HashSet};
 
+/// Used only when original supplier totals are exactly equal.
+pub(crate) const SUPPLIER_PRIORITY: &[&str] = &["firsttrip", "triplover", "takeoff"];
+
 fn text(value: &Value, field: &str) -> Option<()> {
     value
         .get(field)?
@@ -277,7 +280,7 @@ mod tests {
 
     include!("selection_legacy_test.rs");
 
-    const PRIORITY: &[&str] = &["takeoff", "firsttrip", "triplover"];
+    const PRIORITY: &[&str] = SUPPLIER_PRIORITY;
     fn fixture() -> Value {
         serde_json::from_str::<Value>(include_str!(
             "../tests/fixtures/production/triplover-search.json"
@@ -385,7 +388,7 @@ mod tests {
             .remove("cabinClass");
         assert_eq!(
             winners(&[("firsttrip", &original), ("takeoff", &missing)], PRIORITY),
-            vec![1]
+            vec![0]
         );
         assert!(
             missing["directions"][0][0]["segments"][0]
@@ -448,10 +451,18 @@ mod tests {
             let offers: Vec<_> = names.iter().map(|n| (*n, &low)).collect();
             let chosen = winners(&offers, PRIORITY);
             assert_eq!(chosen.len(), 1);
-            assert_eq!(offers[chosen[0]].0, "takeoff");
+            assert_eq!(offers[chosen[0]].0, "firsttrip");
         }
         assert_eq!(
             winners(&[("triplover", &low), ("firsttrip", &low)], PRIORITY),
+            vec![1]
+        );
+        assert_eq!(
+            winners(&[("triplover", &low), ("takeoff", &low)], PRIORITY),
+            vec![0]
+        );
+        assert_eq!(
+            winners(&[("firsttrip", &high), ("takeoff", &low)], PRIORITY),
             vec![1]
         );
     }
@@ -588,7 +599,7 @@ mod tests {
         let before = other.clone();
         assert_eq!(
             winners(&[("firsttrip", &original), ("takeoff", &other)], PRIORITY),
-            vec![1]
+            vec![0]
         );
         assert_eq!(other, before);
         other["directions"].as_array_mut().unwrap().reverse();
