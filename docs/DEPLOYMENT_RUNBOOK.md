@@ -884,10 +884,13 @@ the user's production release authorization under this runbook.
 - The Vercel-generated `*.vercel.app` hostname cannot complete a live Clerk
   production handshake. The project has no access to the existing
   `shapontravels.com` Vercel assignment, so `preview.shapontravels.com` was
-  added to the current project instead. Its DNS ownership record is pending:
-  TXT `_vercel.shapontravels.com` =
-  `vc-domain-verify=preview.shapontravels.com,d32d6ccb2a0ae95f9cba`.
-  Once verified, use that custom domain for live Clerk authentication.
+  added to the current project instead. On 2026-09-22 its DNS ownership was
+  verified and the Vercel-specific CNAME
+  `preview` -> `a6e83ebb52bcbb2b.vercel-dns-017.com` was configured. Vercel
+  reports `misconfigured=false`; an SNI check against its assigned addresses
+  returns HTTP 200 for `/sign-in`, and Clerk accepts the subdomain's handshake
+  redirect. Recursive DNS caches may need time to refresh before all clients
+  resolve the new hostname.
 - An interim alias-to-root redirect was reverted because the root domain routes
   to a different Vercel project. Frontend `a7e4627acfdbac81a99a9815f0d2aa4aa3a9184b`
   passed development Actions `35634473221` and production Actions `35634831031`;
