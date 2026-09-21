@@ -184,15 +184,15 @@ an explicit agency reassignment workflow and is rejected here.
 
 ## Last verified release and maintenance record
 
-Development updated 2026-09-21; production last released 2026-09-21.
+Development updated 2026-09-22; production last released 2026-09-22.
 Recheck before the next release:
 
 | Item | Development | Production |
 | --- | --- | --- |
-| Rust release | `bf47f17` | `bf47f17` |
-| Applied migration | `0064` | `0064` |
+| Rust release | `44c80a1` | `44c80a1` |
+| Applied migration | `0066` | `0066` |
 | Canonical rollout revision | `3` | `5` |
-| Frontend release | `ec9a7d9` | `ec9a7d9` (Clerk recovery pending) |
+| Frontend release | `94c20cd` | `94c20cd` |
 | Real business notification worker | Disabled | Active |
 
 Temporary operator capabilities were removed and maintenance was off on both
@@ -944,3 +944,43 @@ the user's production release authorization under this runbook.
   `dpl_2EJgcom6KPRRyKMNXyKYrqRAuX5j` are READY. Local TypeScript and
   login-resilience checks passed. No Rust service deployment, database,
   identity-provider credential, role, account or rollout-pin change occurred.
+
+
+### Reviewed Clerk identity cutover — 2026-09-22 (Asia/Dhaka)
+
+- Backend `44c80a1bd3ead64bcfd1713b360351c72dac9409` adds migrations `0065`
+  and `0066`: an audited, exact-subject remap procedure and restricted execution
+  permissions. The procedure moves one separately reviewed retained account and
+  all of its required retained references atomically; it rejects collisions and
+  does not infer identities from email or Clerk metadata.
+- The user-provided Super Admin account was independently preflighted against
+  the selected live Clerk instance, then remapped once during a production
+  maintenance window. Post-cutover checks confirm its portal user and retained
+  staff reference moved, its prior subject no longer grants access, and audit
+  evidence was recorded. No other retained account was remapped.
+- A root-only production backup
+  `/var/backups/shapontravels/db-20260921T200527Z.dump` was restored into a
+  disposable database and reached migration `0066` before the production change.
+  The production Rust runtime now uses the selected live Clerk credential without
+  recording its value. Maintenance is off; the application and notification
+  services are active; public live and ready health endpoints return HTTP 200.
+- Backend development [Actions 35644391149](https://github.com/babuas25/shapontravels/actions/runs/35644391149)
+  and production [Actions 35646136900](https://github.com/babuas25/shapontravels/actions/runs/35646136900)
+  passed build, checks, migration and deployment. Both environments report the
+  deployed backend SHA and schema `0066`.
+- Frontend `94c20cd32bab9e365d2b739b653d6d259ecdd629` changes dashboard and
+  affected route segments to request-time rendering so Vercel can build a
+  maintenance response without running identity authority during static
+  generation. It passed typecheck and a maintenance-mode Next build, then
+  development [Actions 35648244302](https://github.com/babuas25/shapontravels-frontend/actions/runs/35648244302)
+  and production [Actions 35648702289](https://github.com/babuas25/shapontravels-frontend/actions/runs/35648702289).
+  Vercel Preview `dpl_9k6Hq9LVcRcMt6pGrFrC1AnXgN56` and production
+  `dpl_5Jh3Ke7w3RNZkEV1P2avj2FUHqbx` are READY.
+- After the canonical production frontend deployment, the existing signed-in
+  Super Admin browser session loaded `/dashboard` and displayed its dashboard,
+  Super Admin navigation and retained booking summary. The former Account needs
+  linking status is absent.
+- The remaining retained accounts require the same separate exact-subject review
+  before a remap. Newly created Clerk accounts must use onboarding and receive no
+  retained portal role automatically. Private backup, preflight and remap artifacts
+  remain under restricted ignored `.local/identity-cutover-20260922/` storage.
