@@ -280,9 +280,16 @@ pub async fn review(pool: &PgPool, mut input: Review) -> Result<View, ApiError> 
         tx.commit().await?;
         return Ok(view);
     }
-    if target.actor.role != Role::Customer
-        || !matches!(target.actor.status, Status::Onboarding | Status::Active)
-        || view.status.as_deref() != Some("pending")
+    let accepted = matches!(input.decision, Decision::Accept);
+    let applicant = target.actor.role == Role::Customer
+        && matches!(target.actor.status, Status::Onboarding | Status::Active);
+    let existing_partner = target.actor.role == Role::B2b && target.actor.status == Status::Active;
+    if !(applicant || (existing_partner && accepted)) {
+        return Err(operations::conflict(
+            "IDENTITY_APPLICATION_REVIEW_INELIGIBLE",
+        ));
+    }
+    if view.status.as_deref() != Some("pending")
         || view.version != input.expected_version
         || target.version != input.expected_identity_version
         || view.profile_version != input.expected_profile_version
@@ -290,9 +297,8 @@ pub async fn review(pool: &PgPool, mut input: Review) -> Result<View, ApiError> 
         return Err(conflict());
     }
     profiles::limit(&mut tx, actor.actor.user_id, "application_review", 60, 3600).await?;
-    let accepted = matches!(input.decision, Decision::Accept);
     if accepted {
-        let agency = agencies::provision(&mut tx, &target).await?;
+        let agency = agencies::for_application_approval(&mut tx, &target).await?;
         // Presence, including explicit empty strings, wins over application transfer.
         let f = view.fields.as_ref().ok_or_else(conflict)?;
         let current: serde_json::Value = sqlx::query_scalar(
@@ -397,7 +403,7 @@ pub async fn queue(pool: &PgPool, input: Queue) -> Result<Page, ApiError> {
         return Err(denied());
     }
     profiles::limit(&mut tx, actor.actor.user_id, "application_review", 60, 3600).await?;
-    let mut items:Vec<Pending>=sqlx::query_as("SELECT a.user_id,a.version,(extract(epoch from a.updated_at)*1000)::bigint AS submitted_at FROM portal_identity_applications a JOIN portal_users u ON u.id=a.user_id WHERE a.status='pending' AND u.role='customer' AND u.status IN ('active','onboarding') AND ($1::uuid IS NULL OR a.user_id>$1) ORDER BY a.user_id LIMIT $2").bind(input.after).bind(input.limit+1).fetch_all(&mut *tx).await?;
+    let mut items:Vec<Pending>=sqlx::query_as("SELECT a.user_id,a.version,(extract(epoch from a.updated_at)*1000)::bigint AS submitted_at FROM portal_identity_applications a JOIN portal_users u ON u.id=a.user_id WHERE a.status='pending' AND ((u.role='customer' AND u.status IN ('active','onboarding')) OR (u.role='b2b' AND u.status='active' AND EXISTS(SELECT 1 FROM portal_agencies ag JOIN portal_agency_memberships m ON m.agency_id=ag.id AND m.user_id=ag.owner_user_id AND m.kind='owner' WHERE ag.owner_user_id=u.id AND ag.status='active'))) AND ($1::uuid IS NULL OR a.user_id>$1) ORDER BY a.user_id LIMIT $2").bind(input.after).bind(input.limit+1).fetch_all(&mut *tx).await?;
     let next = if items.len() > input.limit as usize {
         items.pop();
         items.last().map(|i| i.user_id)

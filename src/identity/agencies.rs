@@ -78,6 +78,25 @@ pub(super) async fn provision(
     Ok(agency)
 }
 
+/// An administrator may have provisioned a partner before reviewing its
+/// application. Complete that review against the same agency and wallet.
+pub(super) async fn for_application_approval(
+    tx: &mut Transaction<'_, Postgres>,
+    target: &User,
+) -> Result<Uuid, ApiError> {
+    if target.actor.role == Role::Customer {
+        return provision(tx, target).await;
+    }
+    if target.actor.role != Role::B2b || target.actor.status != Status::Active {
+        return Err(conflict("IDENTITY_APPLICATION_REVIEW_INELIGIBLE"));
+    }
+    sqlx::query_scalar("SELECT a.id FROM portal_agencies a JOIN portal_agency_memberships m ON m.agency_id=a.id AND m.user_id=a.owner_user_id AND m.kind='owner' AND m.user_role='b2b' JOIN portal_agency_wallets aw ON aw.agency_id=a.id JOIN wallet_owners w ON w.id=aw.wallet_owner_id AND w.owner_type='agency' AND w.owner_key=a.agency_code WHERE a.owner_user_id=$1 AND a.status='active' FOR UPDATE OF a")
+        .bind(target.actor.user_id)
+        .fetch_optional(&mut **tx)
+        .await?
+        .ok_or(conflict("IDENTITY_MEMBERSHIP_DEPENDENCY"))
+}
+
 pub(super) async fn reactivate(
     tx: &mut Transaction<'_, Postgres>,
     target: &User,

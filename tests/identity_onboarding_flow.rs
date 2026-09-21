@@ -211,6 +211,18 @@ async fn first_login_application_review_and_agency_access() {
         2,
         "A corrected resubmission receives its own acknowledgement"
     );
+    let applicant_id = Uuid::parse_str(resubmitted["target_user_id"].as_str().unwrap()).unwrap();
+    let direct = command(&pool, "user_root", applicant_id, Change::ProvisionAgency {}).await;
+    let blocked = request(
+        &app,
+        "operations",
+        Some(BRIDGE),
+        serde_json::to_value(direct).unwrap(),
+    )
+    .await;
+    assert_eq!(blocked.0, 409);
+    assert_eq!(blocked.1["error"], "IDENTITY_APPLICATION_REVIEW_REQUIRED");
+    assert_eq!(count(&pool, "portal_agencies").await, 0);
     let acceptance = review(&resubmitted, "accept");
     let approved = post(&app, "applications/review", acceptance.clone()).await;
     assert_eq!(approved["status"], "accepted");
@@ -320,6 +332,100 @@ async fn first_login_application_review_and_agency_access() {
             .0,
         403,
         "Suspension still denies self-profile access"
+    );
+    // Reproduce the retained state from the old separate role-grant flow:
+    // an active, provisioned owner with an application still awaiting review.
+    let existing = seed(&pool, "user_existing_partner", "customer").await;
+    let provision = command(&pool, "user_root", existing, Change::ProvisionAgency {}).await;
+    post(&app, "operations", serde_json::to_value(provision).unwrap()).await;
+    sqlx::query(
+        "INSERT INTO portal_identity_applications(user_id,status,fields) VALUES($1,'pending',$2)",
+    )
+    .bind(existing)
+    .bind(submission(&resubmitted)["fields"].clone())
+    .execute(&pool)
+    .await
+    .unwrap();
+    let existing_query = json!({"clerk_user_id":"user_root","target_user_id":existing});
+    let existing_view = post(&app, "applications/query", existing_query.clone()).await;
+    let queue = post(
+        &app,
+        "applications/queue",
+        json!({"clerk_user_id":"user_root","after":null,"limit":50}),
+    )
+    .await;
+    assert!(
+        queue["items"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|v| v["user_id"] == json!(existing))
+    );
+    let snapshot_sql = "SELECT jsonb_build_object('agency',a.id,'code',a.agency_code,'agency_version',a.version,'wallet',w.wallet_owner_id,'account',c.id,'balance',c.available_balance,'held',c.hold_balance,'account_version',c.version) FROM portal_agencies a JOIN portal_agency_wallets w ON w.agency_id=a.id JOIN wallet_accounts c ON c.owner_id=w.wallet_owner_id WHERE a.owner_user_id=$1";
+    let before: Value = sqlx::query_scalar(snapshot_sql)
+        .bind(existing)
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+    let existing_identity_version = version(&pool, existing).await;
+    let rejected = request(
+        &app,
+        "applications/review",
+        Some(BRIDGE),
+        review(&existing_view, "reject"),
+    )
+    .await;
+    assert_eq!(
+        rejected.1["error"],
+        "IDENTITY_APPLICATION_REVIEW_INELIGIBLE"
+    );
+    let mut stale = review(&existing_view, "accept");
+    stale["expected_identity_version"] = json!(existing_identity_version - 1);
+    assert_eq!(
+        request(&app, "applications/review", Some(BRIDGE), stale)
+            .await
+            .1["error"],
+        "IDENTITY_VERSION_CONFLICT"
+    );
+    let approve_existing = review(&existing_view, "accept");
+    assert_eq!(
+        post(&app, "applications/review", approve_existing.clone()).await["status"],
+        "accepted"
+    );
+    assert_eq!(
+        post(&app, "applications/review", approve_existing).await["replayed"],
+        true
+    );
+    assert_eq!(
+        request(
+            &app,
+            "applications/review",
+            Some(BRIDGE),
+            review(&existing_view, "accept")
+        )
+        .await
+        .1["error"],
+        "IDENTITY_VERSION_CONFLICT"
+    );
+    let after: Value = sqlx::query_scalar(snapshot_sql)
+        .bind(existing)
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+    assert_eq!(
+        before, after,
+        "Approval must retain agency code, wallet, balance and versions"
+    );
+    assert_eq!(version(&pool, existing).await, existing_identity_version);
+    assert_eq!(count(&pool, "portal_agencies").await, 2);
+    assert_eq!(
+        mail_count(&pool, "b2b_activated").await,
+        2,
+        "One confirmation per approved owner"
+    );
+    assert_eq!(
+        post(&app, "applications/query", existing_query).await["status"],
+        "accepted"
     );
     pool.close().await;
 }

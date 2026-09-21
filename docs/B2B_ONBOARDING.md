@@ -133,3 +133,21 @@ Chrome company-profile journeys, Phase 5 adapter checks and TypeScript.
 The full matrix used a fresh UTF-8 database for Bangla-field coverage and the
 current recipient-only activation-mail expectation. All uploads/providers were
 synthetic. No live database change, push or deployment was performed.
+
+
+## Pending application after a separate agency activation
+
+An older account-management flow allowed an administrator to provision the agency
+while its application remained pending. Such an active B2B owner can now have its
+application approved using its existing active agency and linked wallet. Approval
+still checks the application, identity and profile versions and administrator
+scope, transfers only missing profile fields, retains review history and queues
+one registration confirmation. It does not create a second agency or wallet.
+Rejecting an already active partner through application review is disallowed;
+access suspension is a separate account-management decision.
+
+New manual agency provisioning rejects a pending application with
+`IDENTITY_APPLICATION_REVIEW_REQUIRED`; the administrator must review it first.
+The pending queue includes retained active owners awaiting application approval.
+Real optimistic version conflicts refresh the frontend's application snapshot
+without automatically repeating the administrator's decision.

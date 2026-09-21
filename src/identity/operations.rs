@@ -321,6 +321,11 @@ pub async fn change(pool: &PgPool, input: ChangeRequest) -> Result<OperationView
     let mut affected = vec![input.target_user_id];
     match input.change {
         Change::ProvisionAgency {} => {
+            let pending: bool = sqlx::query_scalar("SELECT EXISTS(SELECT 1 FROM portal_identity_applications WHERE user_id=$1 AND status='pending')")
+                .bind(input.target_user_id).fetch_one(&mut *tx).await?;
+            if pending {
+                return Err(conflict("IDENTITY_APPLICATION_REVIEW_REQUIRED"));
+            }
             agency_id = Some(super::agencies::provision(&mut tx, &target).await?);
         }
         Change::ReactivateAgency {
