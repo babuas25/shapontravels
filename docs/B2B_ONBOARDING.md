@@ -151,3 +151,18 @@ New manual agency provisioning rejects a pending application with
 The pending queue includes retained active owners awaiting application approval.
 Real optimistic version conflicts refresh the frontend's application snapshot
 without automatically repeating the administrator's decision.
+
+## Portal flight-search connection
+
+An active canonical agency owner or sub user can start portal flight search
+without separate external API setup. On first search, Rust creates a missing
+owner-linked Basic client with only `search:read` and links it to the agency's
+existing BDT wallet in the same transaction. Concurrent first searches reuse
+one client. No credentials, machine tokens, external API management access,
+agency or wallet are created by this recovery.
+
+Existing clients are preserved, including explicit suspension or removed search
+permission. Customer, suspended and foreign-agency authority remains blocked.
+The canonical business integration matrix covers initial connection, concurrency,
+wallet identity, restricted clients and credential isolation. No migration or
+frontend change is required.

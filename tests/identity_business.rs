@@ -556,6 +556,59 @@ async fn canonical_business_wallet_passenger_client_matrix() {
     assert_eq!(s, 201, "{c}");
     assert_eq!(c["api_management_enabled"], false);
     assert_eq!(c["permissions"], json!(["search:read"]));
+    // Approved agencies with no manually configured API client can search.
+    // Concurrent first use creates one portal-only client and reuses its wallet.
+    let session = || {
+        call(
+            &app,
+            "user_other",
+            "/admin/portal-prebooking-sessions",
+            "POST",
+            json!({}),
+        )
+    };
+    let ((s, fresh), (other_status, again)) = tokio::join!(session(), session());
+    assert_eq!(s, 200, "{fresh}");
+    assert_eq!(other_status, 200, "{again}");
+    assert_eq!(fresh["client_id"], again["client_id"]);
+    let fresh_id = Uuid::parse_str(fresh["client_id"].as_str().unwrap()).unwrap();
+    let state: (bool, String, Vec<String>, bool, bool, i64, i64) = sqlx::query_as("SELECT c.active,c.tier,c.permissions,c.api_management_enabled,l.owner_id=aw.wallet_owner_id,(SELECT count(*) FROM client_credentials k WHERE k.client_id=c.id),(SELECT count(*) FROM machine_tokens t WHERE t.client_id=c.id) FROM api_clients c JOIN wallet_client_links l ON l.client_id=c.id JOIN portal_agencies a ON a.owner_user_id=$2 JOIN portal_agency_wallets aw ON aw.agency_id=a.id WHERE c.id=$1")
+        .bind(fresh_id).bind(second).fetch_one(&pool).await.unwrap();
+    assert_eq!(
+        state,
+        (
+            true,
+            "basic".into(),
+            vec!["search:read".into()],
+            false,
+            true,
+            0,
+            0
+        )
+    );
+    assert_eq!(
+        call(
+            &app,
+            "user_customer",
+            "/admin/portal-prebooking-sessions",
+            "POST",
+            json!({})
+        )
+        .await
+        .0,
+        403
+    );
+    // Existing explicit denials must survive first-use recovery.
+    for update in ["active=false", "active=true,permissions=ARRAY[]::text[]"] {
+        sqlx::query(&format!("UPDATE api_clients SET {update} WHERE id=$1"))
+            .bind(fresh_id)
+            .execute(&pool)
+            .await
+            .unwrap();
+        let (status, denied) = session().await;
+        assert_eq!(status, 404, "{denied}");
+        assert_eq!(denied["error"], "PORTAL_CLIENT_UNAVAILABLE");
+    }
     assert_eq!(
         call(
             &app,

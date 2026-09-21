@@ -794,6 +794,34 @@ pub(crate) async fn issue_search(
             id
         }
     } else {
+        // Agency approval grants portal use, independently of external API
+        // management. Older approvals may have no pricing/search client yet.
+        // Only fill that missing link; never reactivate or expand an existing
+        // client's permissions after an administrator restricted it.
+        let subject = c.actor.owner_subject.as_deref().ok_or_else(denied)?;
+        let owner = principal(&mut tx, subject).await?;
+        if owner.role != "b2b" || owner.agency_id != c.actor.agency_id {
+            return Err(denied());
+        }
+        let created: Option<Uuid> = sqlx::query_scalar("INSERT INTO api_clients(id,name,audience,external_user_id,permissions) VALUES($1,'Portal agency flight search','b2b',$2,ARRAY['search:read']) ON CONFLICT(external_user_id) DO NOTHING RETURNING id")
+            .bind(Uuid::new_v4()).bind(subject).fetch_optional(&mut *tx).await?;
+        if let Some(id) = created {
+            link_new_client(&mut tx, subject, id).await?;
+            super::audit(
+                &mut tx,
+                super::AuditEntry {
+                    operation_id: Uuid::new_v4(),
+                    actor_kind: super::AuditActorKind::User,
+                    actor_id: &c.actor.subject,
+                    action: "business.portal_search_client.create",
+                    target_user_id: Some(owner.id),
+                    target_agency_id: owner.agency_id,
+                    outcome: super::AuditOutcome::Succeeded,
+                    details: super::AuditDetails::default(),
+                },
+            )
+            .await?;
+        }
         sqlx::query_scalar("SELECT id FROM api_clients WHERE external_user_id=$1 AND active AND audience='b2b' AND 'search:read'=ANY(permissions) AND id NOT IN (SELECT client_id FROM portal_staff_clients)").bind(&c.actor.owner_subject).fetch_optional(&mut *tx).await?.ok_or(ApiError(StatusCode::NOT_FOUND,"PORTAL_CLIENT_UNAVAILABLE"))?
     };
     let active:bool=sqlx::query_scalar("SELECT EXISTS(SELECT 1 FROM api_clients WHERE id=$1 AND active AND 'search:read'=ANY(permissions))").bind(client).fetch_one(&mut *tx).await?;
