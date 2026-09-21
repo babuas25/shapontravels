@@ -346,6 +346,7 @@ async fn first_login_application_review_and_agency_access() {
     .execute(&pool)
     .await
     .unwrap();
+    let existing_client = client(&pool, "user_existing_partner", false).await;
     let existing_query = json!({"clerk_user_id":"user_root","target_user_id":existing});
     let existing_view = post(&app, "applications/query", existing_query.clone()).await;
     let queue = post(
@@ -417,6 +418,11 @@ async fn first_login_application_review_and_agency_access() {
         "Approval must retain agency code, wallet, balance and versions"
     );
     assert_eq!(version(&pool, existing).await, existing_identity_version);
+    let usable: bool = sqlx::query_scalar("SELECT active AND api_management_enabled AND EXISTS(SELECT 1 FROM client_credentials WHERE client_id=$1 AND active) AND EXISTS(SELECT 1 FROM machine_tokens WHERE client_id=$1) FROM api_clients WHERE id=$1").bind(existing_client).fetch_one(&pool).await.unwrap();
+    assert!(
+        usable,
+        "Completing an existing partner review must not revoke its API access"
+    );
     assert_eq!(count(&pool, "portal_agencies").await, 2);
     assert_eq!(
         mail_count(&pool, "b2b_activated").await,

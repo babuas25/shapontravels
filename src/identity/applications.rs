@@ -335,7 +335,9 @@ pub async fn review(pool: &PgPool, mut input: Review) -> Result<View, ApiError> 
             }
         }
         sqlx::query("INSERT INTO portal_identity_profiles(user_id,kind,fields) VALUES($1,'profile',$2) ON CONFLICT(user_id,kind) DO UPDATE SET fields=portal_identity_profiles.fields || EXCLUDED.fields").bind(input.target_user_id).bind(serde_json::Value::Object(patch)).execute(&mut *tx).await?;
-        operations::revoke_clients(&mut tx, std::slice::from_ref(&target.subject)).await?;
+        if !existing_partner {
+            operations::revoke_clients(&mut tx, std::slice::from_ref(&target.subject)).await?;
+        }
         effects(
             &mut tx,
             input.operation_id,
