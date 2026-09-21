@@ -860,3 +860,36 @@ the user's production release authorization under this runbook.
   key installation/provider cutover is pending the reviewed retained-account
   mapping. Frontend production Actions `35609576733` passed both quality and build.
   Private evidence: `.local/airport-release/`.
+
+### Production Clerk frontend recovery — 2026-09-21
+
+- The user installed the selected live Clerk key pair in Vercel Production.
+  The production homepage now returns HTTP 200; the prior missing-publishable-
+  key HTTP 500 no longer occurs.
+- Clerk's automatic Vercel proxy mode generated `/__clerk` requests on the
+  `shapontravels-frontend.vercel.app` hostname. Clerk rejected that hostname
+  because the production instance is configured for `shapontravels.com`.
+  Production now sets `CLERK_DISABLE_AUTO_PROXY=true`, so the browser loads the
+  already-configured `clerk.shapontravels.com` Frontend API directly. No secret
+  values were written to this record.
+- Frontend `5f44a53465f245d32b45bb7280825426c4cafc9c` passed development Actions
+  `35632275798` and production Actions `35632640246`. Vercel Preview
+  `dpl_ES1re2ojQ3YJzzQBQRTJY8LN5N2K` and Production
+  `dpl_C8yPTmq2te9LfMZ8paEEScLUUsFD` are READY. A fresh production browser check
+  shows the Clerk email field and Continue button at `/sign-in`.
+- No account credentials, provider accounts, roles or retained Rust mappings
+  were changed. The new live Clerk instance's subjects still do not overlap the
+  retained Rust users, so post-login access for existing accounts needs the
+  separately reviewed account-linking decision.
+- The Vercel-generated `*.vercel.app` hostname cannot complete a live Clerk
+  production handshake. The project has no access to the existing
+  `shapontravels.com` Vercel assignment, so `preview.shapontravels.com` was
+  added to the current project instead. Its DNS ownership record is pending:
+  TXT `_vercel.shapontravels.com` =
+  `vc-domain-verify=preview.shapontravels.com,d32d6ccb2a0ae95f9cba`.
+  Once verified, use that custom domain for live Clerk authentication.
+- An interim alias-to-root redirect was reverted because the root domain routes
+  to a different Vercel project. Frontend `a7e4627acfdbac81a99a9815f0d2aa4aa3a9184b`
+  passed development Actions `35634473221` and production Actions `35634831031`;
+  the matching Vercel deployments are READY. No production Clerk credentials
+  or account data were entered during browser checks.
