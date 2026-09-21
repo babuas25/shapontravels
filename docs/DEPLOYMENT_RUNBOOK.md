@@ -896,3 +896,35 @@ the user's production release authorization under this runbook.
   passed development Actions `35634473221` and production Actions `35634831031`;
   the matching Vercel deployments are READY. No production Clerk credentials
   or account data were entered during browser checks.
+
+### Clerk provider-mismatch login-loop stabilization — 2026-09-22 (Asia/Dhaka)
+
+- Vercel runtime logs showed a client-side loop between `/sign-in` and
+  `/dashboard`, both HTTP 200, with no Vercel runtime error. The production
+  frontend was using the selected live Clerk instance while the production Rust
+  runtime still had a different `PORTAL_IDENTITY_CLERK_SECRET_KEY` (the
+  compared SHA-256 values differ; no credential value is recorded here). Rust
+  therefore returned `IDENTITY_PROVIDER_NOT_FOUND` after the browser completed
+  sign-in, and Clerk immediately sent the still-signed-in browser back to the
+  dashboard.
+- Frontend `345555583f8d166149949ee7081a12e586299874` preserves that verified
+  provider-mismatch state as `unrecognized` and renders an Account needs
+  linking status page. It no longer redirects the active Clerk session back to
+  `/sign-in`; the same-origin identity session API returns 403 for this state.
+  This is a UX and routing correction only: it does not change a Clerk account,
+  role, retained subject mapping, Rust runtime credential, database, rollout
+  pin or supplier setting.
+- Local checks passed: `npm run verify:identity-login-resilience`,
+  `npm run verify:rust-identity-authority`, `npm run typecheck`, and diff
+  whitespace validation. Frontend development
+  [Actions 35638480567](https://github.com/babuas25/shapontravels-frontend/actions/runs/35638480567)
+  and production
+  [Actions 35638883974](https://github.com/babuas25/shapontravels-frontend/actions/runs/35638883974)
+  passed. Vercel Preview `dpl_CWBJtnWYJ7JmJBM44ZAGLqTVbe3D` and Production
+  `dpl_996d3Q48U1HevM6LccacpjGLq7xc` are READY on the same SHA.
+- An SNI check of `preview.shapontravels.com/sign-in` returned HTTP 200 with
+  Clerk signed-out middleware state. Authenticated dashboard validation is
+  limited to the new status behavior until the provider cutover and retained
+  account-linking decision are reviewed. The prior read-only comparison found
+  zero subject-ID overlap between the selected live Clerk users and the four
+  retained Rust identities; do not infer a mapping from email or alter roles.
