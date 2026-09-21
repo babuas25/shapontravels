@@ -676,7 +676,7 @@ pub async fn finalize(pool: &PgPool, subject: &str, id: Uuid) -> Result<Deletion
     .await?;
     if let Some(agency) = r.agency_id {
         sqlx::query(
-            "UPDATE portal_agencies SET status='archived' WHERE id=$1 AND status<>'archived'",
+            "UPDATE portal_agencies SET status='archived',role_resume_status=NULL WHERE id=$1 AND status<>'archived'",
         )
         .bind(agency)
         .execute(&mut *tx)

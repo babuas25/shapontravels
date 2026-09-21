@@ -138,3 +138,63 @@ pub(super) async fn invalidate_members(
     Ok(sqlx::query_scalar("UPDATE portal_users SET authorization_version=authorization_version+1 WHERE id IN (SELECT user_id FROM portal_agency_memberships WHERE agency_id=$1 AND kind='sub') RETURNING id")
         .bind(agency).fetch_all(&mut **tx).await?)
 }
+
+/// Role changes retain the original agency, member identity and wallet links.
+pub(super) async fn validate_role_change(
+    tx: &mut Transaction<'_, Postgres>,
+    target: &User,
+    role: Role,
+) -> Result<(), ApiError> {
+    let membership: Option<(String, String, String)> = sqlx::query_as("SELECT m.kind,a.status,o.status FROM portal_agency_memberships m JOIN portal_agencies a ON a.id=m.agency_id JOIN portal_users o ON o.id=a.owner_user_id WHERE m.user_id=$1")
+        .bind(target.actor.user_id).fetch_optional(&mut **tx).await?;
+    if role.requires_agency() {
+        let Some((kind, status, owner_status)) = membership else {
+            return Err(conflict("IDENTITY_AGENCY_PROVISIONING_REQUIRED"));
+        };
+        if (role == Role::B2b && kind != "owner") || (role == Role::B2bSub && kind != "sub") {
+            return Err(conflict("IDENTITY_AGENCY_ROLE_MISMATCH"));
+        }
+        if status == "archived"
+            || (role == Role::B2bSub && (status != "active" || owner_status != "active"))
+        {
+            return Err(conflict("IDENTITY_AGENCY_REACTIVATION_REQUIRED"));
+        }
+    }
+    Ok(())
+}
+
+pub(super) async fn change_member_role(
+    tx: &mut Transaction<'_, Postgres>,
+    target: &User,
+    role: Role,
+) -> Result<Option<Uuid>, ApiError> {
+    let membership: Option<(Uuid, String)> = sqlx::query_as(
+        "SELECT agency_id,kind FROM portal_agency_memberships WHERE user_id=$1 FOR UPDATE",
+    )
+    .bind(target.actor.user_id)
+    .fetch_optional(&mut **tx)
+    .await?;
+    let Some((agency, kind)) = membership else {
+        return Ok(None);
+    };
+    let role_name = serde_json::to_value(role)
+        .unwrap()
+        .as_str()
+        .unwrap()
+        .to_owned();
+    if kind == "owner" {
+        if role == Role::B2b {
+            sqlx::query("UPDATE portal_agencies SET owner_role='b2b',status=CASE WHEN $2 THEN 'suspended' ELSE coalesce(role_resume_status,status) END,role_resume_status=NULL WHERE id=$1")
+                .bind(agency).bind(target.actor.status == Status::Suspended).execute(&mut **tx).await?;
+        } else {
+            sqlx::query("UPDATE portal_agencies SET owner_role=$2,role_resume_status=CASE WHEN status='archived' THEN NULL ELSE coalesce(role_resume_status,status) END,status=CASE WHEN status='archived' THEN status ELSE 'suspended' END WHERE id=$1")
+                .bind(agency).bind(&role_name).execute(&mut **tx).await?;
+        }
+    }
+    sqlx::query("UPDATE portal_agency_memberships SET user_role=$2 WHERE user_id=$1")
+        .bind(target.actor.user_id)
+        .bind(role_name)
+        .execute(&mut **tx)
+        .await?;
+    Ok((kind == "owner").then_some(agency))
+}

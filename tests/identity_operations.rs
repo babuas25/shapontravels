@@ -523,10 +523,114 @@ async fn local_operations_and_fenced_provider_recovery() {
         },
     )
     .await;
+    let retained_client = client(&pool, "user_a_sub", true).await;
+    let before_sub = version(&pool, sub).await;
+    let paused = operations::change(&pool, demote.clone()).await.unwrap();
+    assert_eq!(paused.effect_count, 3);
     assert_eq!(
-        operations::change(&pool, demote).await.err().unwrap().1,
-        "IDENTITY_MEMBERSHIP_DEPENDENCY"
+        operations::change(&pool, demote).await.unwrap().id,
+        paused.id
     );
+    assert_eq!(version(&pool, sub).await, before_sub + 1);
+    assert!(
+        !sqlx::query_scalar::<_, bool>("SELECT active FROM api_clients WHERE id=$1")
+            .bind(retained_client)
+            .fetch_one(&pool)
+            .await
+            .unwrap()
+    );
+    let retained: (Uuid, String, String) = sqlx::query_as(
+        "SELECT a.id,a.status,a.role_resume_status FROM portal_agencies a WHERE a.owner_user_id=$1",
+    )
+    .bind(owner)
+    .fetch_one(&pool)
+    .await
+    .unwrap();
+    assert_eq!(retained, (agency_id, "suspended".into(), "active".into()));
+    assert_eq!(
+        request(&app, "session", Some(BRIDGE), subject("user_a_sub"))
+            .await
+            .1["state"],
+        "suspended"
+    );
+    // A promoted owner has their new canonical access without inheriting an agency scope.
+    for role in [Role::Admin, Role::Superadmin] {
+        let promote = command(&pool, "user_root", owner, Change::SetRole { role }).await;
+        operations::change(&pool, promote).await.unwrap();
+        let session = request(&app, "session", Some(BRIDGE), subject("user_a_owner"))
+            .await
+            .1;
+        assert_eq!(session["user"]["role"], serde_json::to_value(role).unwrap());
+        assert!(session["agency_id"].is_null());
+        assert_eq!(session["state"], "authenticated");
+    }
+    let wrong_kind = command(
+        &pool,
+        "user_root",
+        owner,
+        Change::SetRole { role: Role::B2bSub },
+    )
+    .await;
+    assert_eq!(
+        operations::change(&pool, wrong_kind).await.err().unwrap().1,
+        "IDENTITY_AGENCY_ROLE_MISMATCH"
+    );
+    let restore = command(
+        &pool,
+        "user_root",
+        owner,
+        Change::SetRole { role: Role::B2b },
+    )
+    .await;
+    operations::change(&pool, restore).await.unwrap();
+    let retained: (Uuid, String, Option<String>) = sqlx::query_as(
+        "SELECT a.id,a.status,a.role_resume_status FROM portal_agencies a WHERE a.owner_user_id=$1",
+    )
+    .bind(owner)
+    .fetch_one(&pool)
+    .await
+    .unwrap();
+    assert_eq!(retained, (agency_id, "active".into(), None));
+    assert_eq!(
+        request(&app, "session", Some(BRIDGE), subject("user_a_sub"))
+            .await
+            .1["state"],
+        "authenticated"
+    );
+    // Sub-user promotion keeps its membership for a later explicit restoration.
+    let promote = command(
+        &pool,
+        "user_root",
+        sub,
+        Change::SetRole {
+            role: Role::StaffSupport,
+        },
+    )
+    .await;
+    operations::change(&pool, promote).await.unwrap();
+    let owner_manage_staff = command(
+        &pool,
+        "user_a_owner",
+        sub,
+        Change::SetAccess { active: false },
+    )
+    .await;
+    assert_eq!(
+        operations::change(&pool, owner_manage_staff)
+            .await
+            .err()
+            .unwrap()
+            .0,
+        StatusCode::FORBIDDEN
+    );
+    let restore = command(
+        &pool,
+        "user_root",
+        sub,
+        Change::SetRole { role: Role::B2bSub },
+    )
+    .await;
+    operations::change(&pool, restore).await.unwrap();
     let provision = command(
         &pool,
         "user_root",
@@ -555,7 +659,12 @@ async fn local_operations_and_fenced_provider_recovery() {
     )
     .await;
     operations::change(&pool, scoped).await.unwrap();
-    let sub_client = client(&pool, "user_a_sub", true).await;
+    let sub_client = retained_client;
+    sqlx::query("UPDATE api_clients SET active=true WHERE id=$1")
+        .bind(sub_client)
+        .execute(&pool)
+        .await
+        .unwrap();
     let previous = version(&pool, sub).await;
     let suspend = command(
         &pool,
@@ -652,6 +761,108 @@ async fn local_operations_and_fenced_provider_recovery() {
     assert_eq!(
         operations::change(&pool, limited).await.err().unwrap().1,
         "IDENTITY_RATE_LIMITED"
+    );
+    // Financial identity survives role changes; a suspended agency never resumes implicitly.
+    let financial_owner = seed(&pool, "user_financial_owner", "customer").await;
+    let provision = command(
+        &pool,
+        "user_root",
+        financial_owner,
+        Change::ProvisionAgency {},
+    )
+    .await;
+    operations::change(&pool, provision).await.unwrap();
+    let financial_snapshot = "SELECT jsonb_build_object('agency',a.id,'code',a.agency_code,'wallet',aw.wallet_owner_id,'account',wa.id,'balance',wa.available_balance,'reserved',wa.hold_balance) FROM portal_agencies a JOIN portal_agency_wallets aw ON aw.agency_id=a.id JOIN wallet_accounts wa ON wa.owner_id=aw.wallet_owner_id WHERE a.owner_user_id=$1";
+    let before: Value = sqlx::query_scalar(financial_snapshot)
+        .bind(financial_owner)
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+    let suspend = command(
+        &pool,
+        "user_root",
+        financial_owner,
+        Change::SetAccess { active: false },
+    )
+    .await;
+    operations::change(&pool, suspend).await.unwrap();
+    for role in [Role::Admin, Role::B2b] {
+        let change = command(
+            &pool,
+            "user_root",
+            financial_owner,
+            Change::SetRole { role },
+        )
+        .await;
+        operations::change(&pool, change).await.unwrap();
+    }
+    let after: Value = sqlx::query_scalar(financial_snapshot)
+        .bind(financial_owner)
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+    assert_eq!(before, after);
+    assert_eq!(
+        request(
+            &app,
+            "session",
+            Some(BRIDGE),
+            subject("user_financial_owner")
+        )
+        .await
+        .1["state"],
+        "suspended"
+    );
+    let status: String =
+        sqlx::query_scalar("SELECT status FROM portal_agencies WHERE owner_user_id=$1")
+            .bind(financial_owner)
+            .fetch_one(&pool)
+            .await
+            .unwrap();
+    assert_eq!(status, "suspended");
+    let version: i64 =
+        sqlx::query_scalar("SELECT version FROM portal_agencies WHERE owner_user_id=$1")
+            .bind(financial_owner)
+            .fetch_one(&pool)
+            .await
+            .unwrap();
+    let reactivate = command(
+        &pool,
+        "user_root",
+        financial_owner,
+        Change::ReactivateAgency {
+            expected_agency_version: version,
+        },
+    )
+    .await;
+    operations::change(&pool, reactivate).await.unwrap();
+    let promote = command(
+        &pool,
+        "user_root",
+        financial_owner,
+        Change::SetRole { role: Role::Admin },
+    )
+    .await;
+    operations::change(&pool, promote).await.unwrap();
+    assert!(
+        sqlx::query("UPDATE portal_agencies SET status='active' WHERE owner_user_id=$1")
+            .bind(financial_owner)
+            .execute(&pool)
+            .await
+            .is_err()
+    );
+    // The terminal archive update must clear the remembered role pause as deletion does.
+    sqlx::query("UPDATE portal_agencies SET status='archived',role_resume_status=NULL WHERE owner_user_id=$1").bind(financial_owner).execute(&pool).await.unwrap();
+    let restore = command(
+        &pool,
+        "user_root",
+        financial_owner,
+        Change::SetRole { role: Role::B2b },
+    )
+    .await;
+    assert_eq!(
+        operations::change(&pool, restore).await.err().unwrap().1,
+        "IDENTITY_AGENCY_REACTIVATION_REQUIRED"
     );
     // Large agency operations have bounded response detail, with explicit totals/truncation.
     let (large_owner, _, large_agency) = agency(&pool, "large", "ST-B2B333333").await;

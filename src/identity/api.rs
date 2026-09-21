@@ -489,7 +489,7 @@ async fn read_session(
     tx: &mut Transaction<'_, Postgres>,
     subject: &str,
 ) -> Result<IdentitySession, ApiError> {
-    let row: Option<SessionRow> = sqlx::query_as("SELECT u.id,u.clerk_user_id,u.role,u.status,u.version,u.authorization_version,a.id,a.agency_code,m.kind,a.status,o.status,u.email,u.first_name,u.last_name FROM portal_users u LEFT JOIN portal_agency_memberships m ON m.user_id=u.id LEFT JOIN portal_agencies a ON a.id=m.agency_id LEFT JOIN portal_users o ON o.id=a.owner_user_id WHERE u.clerk_user_id=$1")
+    let row: Option<SessionRow> = sqlx::query_as("SELECT u.id,u.clerk_user_id,u.role,u.status,u.version,u.authorization_version,a.id,a.agency_code,m.kind,a.status,o.status,u.email,u.first_name,u.last_name FROM portal_users u LEFT JOIN portal_agency_memberships m ON m.user_id=u.id AND u.role IN ('b2b','b2b_sub') LEFT JOIN portal_agencies a ON a.id=m.agency_id LEFT JOIN portal_users o ON o.id=a.owner_user_id WHERE u.clerk_user_id=$1")
         .bind(subject).fetch_optional(&mut **tx).await?;
     let mut result = IdentitySession {
         authority_mode: if super::rollout::canonical_context() {

@@ -260,18 +260,7 @@ pub async fn change(pool: &PgPool, input: ChangeRequest) -> Result<OperationView
                 return Err(denied());
             }
             if role != target.actor.role {
-                let member: bool = sqlx::query_scalar(
-                    "SELECT EXISTS(SELECT 1 FROM portal_agency_memberships WHERE user_id=$1)",
-                )
-                .bind(input.target_user_id)
-                .fetch_one(&mut *tx)
-                .await?;
-                if member {
-                    return Err(conflict("IDENTITY_MEMBERSHIP_DEPENDENCY"));
-                }
-                if role.requires_agency() {
-                    return Err(conflict("IDENTITY_AGENCY_PROVISIONING_REQUIRED"));
-                }
+                super::agencies::validate_role_change(&mut tx, &target, role).await?;
             }
             (role, target.actor.status)
         }
@@ -303,7 +292,7 @@ pub async fn change(pool: &PgPool, input: ChangeRequest) -> Result<OperationView
         && role.requires_agency()
         && !matches!(
             input.change,
-            Change::ProvisionAgency {} | Change::ReactivateAgency { .. }
+            Change::ProvisionAgency {} | Change::ReactivateAgency { .. } | Change::SetRole { .. }
         )
     {
         let usable:bool=sqlx::query_scalar("SELECT EXISTS(SELECT 1 FROM portal_agency_memberships m JOIN portal_agencies a ON a.id=m.agency_id JOIN portal_users o ON o.id=a.owner_user_id WHERE m.user_id=$1 AND a.status='active' AND (o.id=$1 OR o.status='active'))")
@@ -336,13 +325,19 @@ pub async fn change(pool: &PgPool, input: ChangeRequest) -> Result<OperationView
             affected.extend(super::agencies::invalidate_members(&mut tx, id).await?);
         }
         _ => {
+            if role != target.actor.role {
+                agency_id = super::agencies::change_member_role(&mut tx, &target, role).await?;
+                if let Some(id) = agency_id {
+                    affected.extend(super::agencies::invalidate_members(&mut tx, id).await?);
+                }
+            }
             sqlx::query("UPDATE portal_users SET role=$2,status=$3 WHERE id=$1")
                 .bind(input.target_user_id)
                 .bind(value(role))
                 .bind(value(status))
                 .execute(&mut *tx)
                 .await?;
-            if target.actor.role == Role::B2b && status == Status::Suspended {
+            if role == target.actor.role && role == Role::B2b && status == Status::Suspended {
                 let agency:Option<Uuid>=sqlx::query_scalar("UPDATE portal_agencies SET status='suspended' WHERE owner_user_id=$1 AND status<>'archived' RETURNING id")
                     .bind(input.target_user_id).fetch_optional(&mut *tx).await?;
                 if let Some(id) = agency {

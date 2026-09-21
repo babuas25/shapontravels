@@ -162,6 +162,23 @@ stores, drop identity tables, restore an old DB over financial/provider writes o
 retry unknown delivery/provider outcomes blindly. An older frontend must still
 match the active authority pin; reverting its commit alone may not restore service.
 
+## Document storage and retained agency roles
+
+Private identity documents are uploaded by Next server routes. Production needs
+`CLOUDINARY_CLOUD_NAME`, `CLOUDINARY_API_KEY`, and `CLOUDINARY_API_SECRET` in the
+Vercel Production environment together with the reviewed live asset mode. Never
+use `NEXT_PUBLIC_` for these values. Setting them on the Rust VPS does not configure
+Next uploads. Publish a new deployment after changing Vercel variables. Preview
+remains independently configured; do not copy production storage credentials.
+
+Migration 0064 retains agency membership and wallet links when an administrator
+assigns a non-B2B role. An owner’s agency pauses while the owner uses that role.
+Returning to B2B restores the agency’s previous status, but does not unsuspend an
+account or revive an archived agency. Existing sub-users lose effective agency
+access during the pause. Changed users and affected agency members have their
+cached client authority revoked. Owner/sub-user role interchange still requires
+an explicit agency reassignment workflow and is rejected here.
+
 ## Last verified release and maintenance record
 
 Development updated 2026-09-21; production last released 2026-09-21.
