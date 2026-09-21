@@ -189,10 +189,10 @@ Recheck before the next release:
 
 | Item | Development | Production |
 | --- | --- | --- |
-| Rust release | `06d71a0` | `06d71a0` |
+| Rust release | `bf47f17` | `bf47f17` |
 | Applied migration | `0064` | `0064` |
 | Canonical rollout revision | `3` | `5` |
-| Frontend release | `8fd2fd5` | `8fd2fd5` |
+| Frontend release | `ec9a7d9` | `ec9a7d9` (Clerk recovery pending) |
 | Real business notification worker | Disabled | Active |
 
 Temporary operator capabilities were removed and maintenance was off on both
@@ -808,3 +808,55 @@ no frontend checkout. No migration, environment change or live supplier activati
 is required. This entry records local preparation only; the verified deployed release above is
 unchanged. Production promotion/deployment and fresh search verification require
 the user's production release authorization under this runbook.
+
+
+### City-group Search release and Clerk configuration review — 2026-09-21
+
+- Rust `bf47f17b6ab5e0c603b02e2479e1df6ab8d75533` passed development Actions
+  `35606066326` and deployed to the development VPS. All 133 backend-owned
+  city/metro groups are compiled into Search/RePrice matching. Airport inputs
+  no longer depend on the frontend checkout. No migration or identity-pin change.
+- Development internal/public live and ready checks passed, canonical revision
+  remains 3 and schema remains 0064. Supplier switches and runtime/durable pins
+  were unchanged; real notification delivery remains inactive.
+- A live DAC–SIN search for 2026-09-28 returned 33 offers, including two airport
+  transfer options, with partial=false. A direct itinerary repriced successfully
+  in BDT with no fare change. One SHA→PVG transfer itinerary returned
+  `SUPPLIER_REPRICE_FAILED` (502); live transfer RePrice is not established by
+  the successful synthetic tests. No acceptance, hold, booking or ticket was made.
+- Frontend `ec9a7d9cc547a56e3aca2cb205bd2cb447ff3a08` passed both quality and
+  build in development Actions `35607606935`. The first Preview deployment
+  contained live Clerk keys accidentally scoped to Preview/development. The
+  prior test key pair was restored only to that scope after verifying the secret
+  matches the development Rust provider configuration. Recovery deployment
+  `dpl_84Qtkm7pZJv9cRkv5PyR41AsoawD` is READY at the stable development alias.
+  Browser navigation resolved the existing Super Admin to its dashboard again.
+  A fresh browser DAC–SIN search displayed 95 flight options, including SHA→PVG
+  notices on collapsed cards and transfer-arrangement guidance in Itinerary.
+  Production live keys were not copied into development.
+- The production homepage separately returned HTTP 500 with missing Clerk
+  publishable-key middleware diagnostics. The user selected a different live
+  Clerk instance. Read-only review found no subject-ID overlap between its 57
+  provider users and the four retained Rust users, including the Super Admin.
+  Account mapping and the selected new operator require explicit review before
+  completing the provider cutover. No roles, retained mappings or provider
+  accounts were changed. At the user’s repeated explicit request, compatible
+  frontend code was promoted to main; this does not resolve the Clerk outage.
+- Production backend Actions `35608046578` passed checks, release build and
+  deployment. The VPS reports `bf47f17`, schema 0064, canonical revision 5,
+  matching pins and maintenance off. Internal/public health passed and all three
+  supplier Search settings remain enabled and unchanged. Notification owner
+  and configuration were verified before restoring its worker, now active.
+- Production live DAC–SIN Search returned 593 offers in 8.69 seconds,
+  partial=false, including eight transfer and six alternate endpoint options.
+  DAC–KUL / SZB–XSP repriced successfully in BDT without changing the fare or
+  exact selected airports; a direct DAC–SIN offer also repriced successfully.
+  No acceptance, hold, booking, ticket, deposit or test message was created.
+- Production release backup:
+  `/var/backups/shapontravels/db-20260921T140215Z.dump`.
+  Frontend Production Vercel `dpl_6FcecXQ7XkT8ATgZ8GgHhKDLsxmu` is READY
+  on `ec9a7d9`; the stable homepage still returns the pre-existing HTTP 500.
+  Clerk keys are verified in the local frontend `.env.local`, but Production
+  key installation/provider cutover is pending the reviewed retained-account
+  mapping. Frontend production Actions `35609576733` passed both quality and build.
+  Private evidence: `.local/airport-release/`.
