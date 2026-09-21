@@ -244,25 +244,7 @@ fn journey_context(
             return None;
         }
         for option in options {
-            let segments = option["segments"].as_array()?;
-            if option["from"].as_str()? != route.origin
-                || option["to"].as_str()? != route.destination
-                || segments.first()?["from"].as_str()? != route.origin
-                || segments.last()?["to"].as_str()? != route.destination
-            {
-                return None;
-            }
-            for segment in segments {
-                if segment["from"].as_str().is_none_or(str::is_empty)
-                    || segment["to"].as_str().is_none_or(str::is_empty)
-                {
-                    return None;
-                }
-            }
-            if !segments
-                .windows(2)
-                .all(|pair| pair[0]["to"] == pair[1]["from"])
-            {
+            if !crate::locations::direction_matches(option, &route.origin, &route.destination) {
                 return None;
             }
         }
@@ -332,7 +314,7 @@ pub(crate) fn bind_references(value: &mut Value, map: &mut serde_json::Map<Strin
     }
 }
 
-#[utoipa::path(post,path="/api/Search",tag="Flights",security(("machine_token"=[])),request_body(content=SearchRequest,example=json!({"routes":[{"origin":"DAC","destination":"CXB","departureDate":"2026-09-29"}],"adults":1,"childs":0,"infants":0,"cabinClass":1,"preferredCarriers":[],"prohibitedCarriers":[],"childrenAges":[]})),responses((status=200,body=Object,description="Supplier-compatible item1/item2 envelope. Equivalent evidenced offers select the lowest original supplier total before markup; ties prefer Takeoff, Firsttrip, Triplover. bookingClass/RBD matching permits missing cabinClass; explicit cabin conflicts stay separate. Unknown fare equivalence stays separate. X-Search-Partial reports failed active connections. X-Search-Summary-Scope: retained-selling-offers; prices and counts summarize returned offers; B2B legacy totals are published base+tax gross, while fareBreakdown/pricing payable is the final charge."),(status=422,description="Pricing, currency or scope configuration incomplete; SUPPLIER_SUMMARY_UNSUPPORTED for unsupported summary metadata"),(status=503,description="SEARCH_BUSY with Retry-After: 1 when Search capacity/queue wait is exhausted; otherwise no active suppliers or all active connections failed")))]
+#[utoipa::path(post,path="/api/Search",tag="Flights",security(("machine_token"=[])),request_body(content=SearchRequest,example=json!({"routes":[{"origin":"DAC","destination":"CXB","departureDate":"2026-09-29"}],"adults":1,"childs":0,"infants":0,"cabinClass":1,"preferredCarriers":[],"prohibitedCarriers":[],"childrenAges":[]})),responses((status=200,body=Object,description="Supplier-compatible item1/item2 envelope. Equivalent evidenced offers select the lowest original supplier total before markup; ties prefer Takeoff, Firsttrip, Triplover. bookingClass/RBD matching permits missing cabinClass; explicit cabin conflicts stay separate. Unknown fare equivalence stays separate. X-Search-Partial reports failed/blocked active connections or offers excluded for unverified markup scope. X-Search-Summary-Scope: retained-selling-offers; prices and counts summarize returned offers; B2B legacy totals are published base+tax gross, while fareBreakdown/pricing payable is the final charge."),(status=422,description="Pricing, currency or scope configuration incomplete; SUPPLIER_SUMMARY_UNSUPPORTED for unsupported summary metadata"),(status=503,description="SEARCH_BUSY with Retry-After: 1 when Search capacity/queue wait is exhausted; otherwise no active suppliers or all active connections failed")))]
 async fn search(
     machine: Machine,
     authority: Option<Extension<crate::identity::business::SearchAuthority>>,
@@ -543,6 +525,9 @@ async fn search_tracked(
     let mut envelope = batches[0].2.clone();
     let mut statuses = Vec::new();
     let mut candidates = Vec::new();
+    let mut candidate_indices = Vec::new();
+    let mut source_count = 0;
+    let mut excluded_scope_offers = 0;
     for (connection, offers, source_body) in &batches {
         let entries = match source_body.get("item2") {
             Some(Value::Array(items)) => items.clone(),
@@ -567,7 +552,10 @@ async fn search_tracked(
             }
             statuses.push(entry);
         }
+        let mut excluded = 0;
         for original in offers {
+            let source_index = source_count;
+            source_count += 1;
             if original["brandedFares"]
                 .as_array()
                 .is_some_and(|items| !items.is_empty())
@@ -596,16 +584,42 @@ async fn search_tracked(
             {
                 return Err(error("SUPPLIER_REFERENCE_MISSING"));
             }
+            // A supplier can include alternate airports, airport transfers or
+            // ambiguous airlines whose markup scope cannot be established.
+            // Exclude only these offers before selection; never guess a rule or
+            // let one unsupported journey discard other verified inventory.
+            // Monetary, passenger and reference validation above still applies
+            // to every source offer, including an excluded one.
+            if let Err(e) = matching_context(original, &request, &rules) {
+                if e.1 != "COMPLEX_SCOPE_MATCHING_UNRESOLVED" {
+                    return Err(e);
+                }
+                excluded += 1;
+                continue;
+            }
             candidates.push((connection, original));
+            candidate_indices.push(source_index);
         }
+        if excluded > 0 {
+            tracing::warn!(supplier = %connection.id, excluded_offers = excluded,
+                "search offers excluded: markup scope could not be verified");
+            excluded_scope_offers += excluded;
+        }
+    }
+    if candidates.is_empty() && excluded_scope_offers > 0 {
+        // Distinguish unsupported inventory from a genuinely empty search.
+        return Err(error("COMPLEX_SCOPE_MATCHING_UNRESOLVED"));
     }
     let source_offers: Vec<_> = candidates
         .iter()
         .map(|(c, o)| (c.id.as_str(), *o))
         .collect();
-    let selected = crate::selection::winners(&source_offers, crate::selection::SUPPLIER_PRIORITY);
+    let selected: Vec<_> =
+        crate::selection::winners(&source_offers, crate::selection::SUPPLIER_PRIORITY)
+            .into_iter()
+            .map(|index| candidate_indices[index])
+            .collect();
     tracing::debug!(target: "search_memory", phase = "selection_complete");
-    let source_count = candidates.len();
     drop(source_offers);
     drop(candidates);
     // Transfer selected originals out of supplier envelopes without copying them.
@@ -760,12 +774,16 @@ async fn search_tracked(
         sql_batches,
         persistence_ms = persistence_started.elapsed().as_millis() as u64,
         total_ms = started.elapsed().as_millis() as u64,
-        source_offers = source_count, returned_offers = returned.len(),
+        source_offers = source_count, excluded_scope_offers, returned_offers = returned.len(),
         "Search processing completed");
     let mut headers = HeaderMap::new();
     headers.insert(
         "x-search-partial",
-        HeaderValue::from_static(if failures > 0 { "true" } else { "false" }),
+        HeaderValue::from_static(if failures > 0 || excluded_scope_offers > 0 {
+            "true"
+        } else {
+            "false"
+        }),
     );
     headers.insert(
         "x-search-currency",

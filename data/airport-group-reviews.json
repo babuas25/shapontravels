@@ -1,0 +1,20 @@
+{
+  "SIN_CITY": {
+    "countryCode": "SG",
+    "airports": ["SIN", "XSP"],
+    "reviewedOn": "2026-09-21",
+    "sources": ["https://www.caas.gov.sg/industry/aircraft-operators/foreign-air-operator/", "https://www.seletarairport.com/contact-us.html"]
+  },
+  "SHA": {
+    "countryCode": "CN",
+    "airports": ["PVG", "SHA"],
+    "reviewedOn": "2026-09-21",
+    "sources": ["https://english.shanghai.gov.cn/en-Transportation/20241231/f66f14bbd4b549ab88e6f3aec375790c.html"]
+  },
+  "KUL_CITY": {
+    "countryCode": "MY",
+    "airports": ["KUL", "SZB"],
+    "reviewedOn": "2026-09-21",
+    "sources": ["https://m.fireflyz.com.my/", "https://www.malaysiaaviationgroup.com.my/en/MAG-media-centre/news-releases/2025/firefly-jet-operations.html"]
+  }
+}

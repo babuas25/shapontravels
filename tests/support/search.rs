@@ -38,6 +38,20 @@ impl ReadSupplier for Mock {
             }
             match operation {
                 ReadOperation::Search => Ok(self.response.lock().unwrap().clone()),
+                ReadOperation::Reprice => {
+                    let response = self.response.lock().unwrap();
+                    let mut fare = response["item1"]["airSearchResponses"]
+                        .as_array()
+                        .unwrap()
+                        .iter()
+                        .find(|offer| offer["itemCodeRef"] == payload["itemCodeRef"])
+                        .unwrap()
+                        .clone();
+                    fare["currency"] = json!("BDT");
+                    fare["isPriceChanged"] = json!(false);
+                    fare["priceCodeRef"] = json!("synthetic-price");
+                    Ok(json!({"item1":fare,"item2":{"isSuccess":true}}))
+                }
                 ReadOperation::FareRules => Ok(
                     json!({"item1":{"uniqueTransID":"supplier-refreshed","itemCodeRef":payload["itemCodeRef"],"fareRuleDetails":[]},"item2":{"isSuccess":true}}),
                 ),
@@ -538,6 +552,7 @@ pub async fn verify(original_app: &Router, admin: &str, machine: &str, pool: &Pg
     for mock in &mocks {
         *mock.response.lock().unwrap() = complete.clone();
     }
+    verify_scope_isolation(&app, admin, &request, &mocks, pool, &complete).await;
     mocks[0].fail.store(true, Ordering::SeqCst);
     let (status, partial) = call(&app, "POST", "/api/Search", Some(machine), request.clone()).await;
     assert_eq!(status, 200);
@@ -563,6 +578,369 @@ pub async fn verify(original_app: &Router, admin: &str, machine: &str, pool: &Pg
             .1["error"],
         "ALL_SUPPLIERS_FAILED"
     );
+}
+
+async fn verify_scope_isolation(
+    app: &Router,
+    admin: &str,
+    request: &Value,
+    mocks: &[Arc<Mock>],
+    pool: &PgPool,
+    complete: &Value,
+) {
+    use axum::{body::Body, http::Request};
+    use http_body_util::BodyExt;
+    use tower::ServiceExt;
+
+    let original_complete = complete;
+    let mut complete = complete.clone();
+    let mut request = request.clone();
+    request["routes"][0]["destination"] = json!("SIN");
+    for (index, offer) in complete["item1"]["airSearchResponses"]
+        .as_array_mut()
+        .unwrap()
+        .iter_mut()
+        .enumerate()
+    {
+        let direction = &mut offer["directions"][0][0];
+        direction["to"] = json!("SIN");
+        direction["segments"][0]["to"] = json!("SIN");
+        if index > 0 {
+            let mut connection = direction["segments"][0].clone();
+            let (arrival, departure, destination) = if index == 1 {
+                ("KUL", "SZB", "XSP")
+            } else {
+                ("SHA", "PVG", "SIN")
+            };
+            direction["segments"][0]["to"] = json!(arrival);
+            connection["from"] = json!(departure);
+            connection["to"] = json!(destination);
+            connection["segmentCodeRef"] = json!(format!("configured-connection-{index}"));
+            direction["segments"]
+                .as_array_mut()
+                .unwrap()
+                .push(connection);
+            direction["stops"] = json!(1);
+        } else {
+            direction.as_object_mut().unwrap().remove("to");
+        }
+    }
+    // Groups outside the initial three, plus both direct memberships of TTN,
+    // must work through Search, scoped markup, FareRules and exact RePrice.
+    for (arrival, departure) in [
+        ("BKK", "DMK"),
+        ("IST", "SAW"),
+        ("LHR", "LGW"),
+        ("JFK", "TTN"),
+        ("TTN", "PHL"),
+    ] {
+        let mut extra = complete["item1"]["airSearchResponses"][0].clone();
+        extra["itemCodeRef"] = json!(format!("configured-{arrival}-{departure}"));
+        let direction = &mut extra["directions"][0][0];
+        let mut connection = direction["segments"][0].clone();
+        direction["segments"][0]["to"] = json!(arrival);
+        connection["from"] = json!(departure);
+        connection["segmentCodeRef"] = json!(format!("connection-{departure}"));
+        direction["segments"]
+            .as_array_mut()
+            .unwrap()
+            .push(connection);
+        direction["stops"] = json!(1);
+        complete["item1"]["airSearchResponses"]
+            .as_array_mut()
+            .unwrap()
+            .push(extra);
+    }
+    // A separate client keeps this matrix independent of the main suite's budget.
+    let (status, client) = call(
+        app,
+        "POST",
+        "/admin/clients",
+        Some(admin),
+        json!({
+            "name":"Scope isolation", "audience":"b2b", "agent_id":null,
+            "permissions":["search:read"], "active":true, "rate_limit_per_minute":1000
+        }),
+    )
+    .await;
+    assert_eq!(status, 201, "{client}");
+    let (_, session) = call(
+        app,
+        "POST",
+        "/auth/token",
+        None,
+        json!({
+            "client_id":client["client_id"], "client_secret":client["client_secret"]
+        }),
+    )
+    .await;
+    let token = session["access_token"].as_str().unwrap();
+    sqlx::query("UPDATE b2b_tier_policy SET basic=60")
+        .execute(pool)
+        .await
+        .unwrap();
+    let (status, rule) = call(app, "POST", "/admin/markup-rules", Some(admin), json!({
+        "name":"Scope regression", "audience":"b2b", "agent_id":null,
+        "airline":"BS", "origin":"DAC", "destination":"SIN", "kind":"fixed", "amount":"201", "currency":"BDT"
+    })).await;
+    assert_eq!(status, 201, "{rule}");
+    let rule_id = Uuid::parse_str(rule["id"].as_str().unwrap()).unwrap();
+    let (status, result) = call(
+        app,
+        "PUT",
+        &format!("/admin/markup-rules/{rule_id}/status"),
+        Some(admin),
+        json!({"expected_version":1,"active":true}),
+    )
+    .await;
+    assert_eq!(status, 200, "{result}");
+
+    let base = &complete["item1"]["airSearchResponses"][0];
+    let mut invalid = Vec::new();
+    // Different cities and ambiguous first carriers remain unresolved. Reviewed
+    // transfers SHA/PVG and KUL/SZB, and SIN/XSP endpoints are valid above.
+    let mut alternate = base.clone();
+    alternate["directions"][0][0]["to"] = json!("BKK");
+    alternate["directions"][0][0]["segments"][0]["to"] = json!("BKK");
+    invalid.push(alternate);
+    let mut transfer = base.clone();
+    let mut connection = transfer["directions"][0][0]["segments"][0].clone();
+    transfer["directions"][0][0]["segments"][0]["to"] = json!("SHA");
+    connection["from"] = json!("PEK");
+    connection["segmentCodeRef"] = json!("synthetic-connection");
+    transfer["directions"][0][0]["segments"]
+        .as_array_mut()
+        .unwrap()
+        .push(connection);
+    invalid.push(transfer);
+    let mut ambiguous = base.clone();
+    let mut alternative = ambiguous["directions"][0][0].clone();
+    alternative["segments"][0]["airlineCode"] = json!("SQ");
+    ambiguous["directions"][0]
+        .as_array_mut()
+        .unwrap()
+        .push(alternative);
+    invalid.push(ambiguous);
+    for (index, offer) in invalid.iter_mut().enumerate() {
+        offer["itemCodeRef"] = json!(format!("unverified-{index}"));
+    }
+    let search = || async {
+        let response = app
+            .clone()
+            .oneshot(
+                Request::builder()
+                    .method("POST")
+                    .uri("/api/Search")
+                    .header("authorization", format!("Bearer {token}"))
+                    .header("content-type", "application/json")
+                    .body(Body::from(request.to_string()))
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        let status = response.status().as_u16();
+        let partial = response
+            .headers()
+            .get("x-search-partial")
+            .map(|v| v.to_str().unwrap().to_string());
+        let body: Value =
+            serde_json::from_slice(&response.into_body().collect().await.unwrap().to_bytes())
+                .unwrap();
+        (status, partial, body)
+    };
+    for mask in 1..8 {
+        for (index, name) in ["firsttrip", "takeoff", "triplover"].iter().enumerate() {
+            sqlx::query("UPDATE supplier_connections SET search_enabled=$2 WHERE id=$1")
+                .bind(name)
+                .bind(mask & (1 << index) != 0)
+                .execute(pool)
+                .await
+                .unwrap();
+            let mut body = complete.clone();
+            // Invalid entries precede valid ones: selection must retain original
+            // flattened indices when persisting the winning supplier references.
+            let mut offers = invalid.clone();
+            offers.extend(
+                body["item1"]["airSearchResponses"]
+                    .as_array()
+                    .unwrap()
+                    .iter()
+                    .cloned(),
+            );
+            body["item1"]["airSearchResponses"] = json!(offers);
+            *mocks[index].response.lock().unwrap() = body;
+        }
+        let (status, partial, result) = search().await;
+        assert_eq!(status, 200, "supplier mask {mask}: {result}");
+        assert_eq!(partial.as_deref(), Some("true"));
+        let offers = result["item1"]["airSearchResponses"].as_array().unwrap();
+        assert_eq!(offers.len(), 8);
+        assert_eq!(result["item1"]["totalFlights"], 8);
+        assert_eq!(result["item1"]["supplierCount"], 1);
+        assert_eq!(result["item1"]["stops"], json!([0, 1]));
+        let expected = if mask & 1 != 0 {
+            "firsttrip"
+        } else if mask & 4 != 0 {
+            "triplover"
+        } else {
+            "takeoff"
+        };
+        for offer in offers {
+            let row: (String, Value, Uuid, Value) = sqlx::query_as(
+                "SELECT supplier_id,original,rule_id,tier_pricing FROM flight_offers WHERE id=$1",
+            )
+            .bind(Uuid::parse_str(offer["itemCodeRef"].as_str().unwrap()).unwrap())
+            .fetch_one(pool)
+            .await
+            .unwrap();
+            assert_eq!(row.0, expected);
+            assert!(
+                !row.1["itemCodeRef"]
+                    .as_str()
+                    .unwrap()
+                    .starts_with("unverified-")
+            );
+            assert_eq!(row.2, rule_id, "verified offer must keep its scoped markup");
+            assert_eq!(row.3["gross"], "4349.00");
+            assert_eq!(row.3["commission"], "68.97");
+            assert_eq!(row.3["payable"], "4280.03");
+            let (status, rules) = call(
+                app,
+                "POST",
+                "/api/FareRules",
+                Some(token),
+                json!({
+                    "uniqueTransID":offer["uniqueTransID"], "itemCodeRef":offer["itemCodeRef"],
+                    "segmentCodeRefs":refs(offer), "brandedFareRefs":""
+                }),
+            )
+            .await;
+            assert_eq!(status, 200, "{rules}");
+            let reprice_request = json!({"uniqueTransID":offer["uniqueTransID"],"itemCodeRef":offer["itemCodeRef"],
+                "segmentCodeRefs":refs(offer),"brandedFareRefs":"","taxRedemptions":[],"commissionOnTaxes":[]});
+            let (status, repriced) = call(
+                app,
+                "POST",
+                "/api/Reprice",
+                Some(token),
+                reprice_request.clone(),
+            )
+            .await;
+            assert_eq!(status, 200, "mask {mask}: {repriced}");
+            assert_eq!(repriced["item1"]["totalPrice"], offer["totalPrice"]);
+            assert_eq!(repriced["item1"]["isPriceChanged"], false);
+            // RePrice must never silently substitute a different airport even in
+            // the same configured group. Keep exact selected flight validation.
+            if row.1["directions"][0][0]["segments"]
+                .as_array()
+                .unwrap()
+                .last()
+                .unwrap()["to"]
+                == "XSP"
+            {
+                let mock_index = ["firsttrip", "takeoff", "triplover"]
+                    .iter()
+                    .position(|name| *name == expected)
+                    .unwrap();
+                let saved = mocks[mock_index].response.lock().unwrap().clone();
+                {
+                    let mut body = mocks[mock_index].response.lock().unwrap();
+                    let upstream = body["item1"]["airSearchResponses"]
+                        .as_array_mut()
+                        .unwrap()
+                        .iter_mut()
+                        .find(|candidate| candidate["itemCodeRef"] == row.1["itemCodeRef"])
+                        .unwrap();
+                    upstream["directions"][0][0]["segments"]
+                        .as_array_mut()
+                        .unwrap()
+                        .last_mut()
+                        .unwrap()["to"] = json!("SIN");
+                }
+                let (_, rejected) =
+                    call(app, "POST", "/api/Reprice", Some(token), reprice_request).await;
+                assert_eq!(rejected["error"], "SUPPLIER_ITINERARY_MISMATCH");
+                *mocks[mock_index].response.lock().unwrap() = saved;
+            }
+        }
+    }
+    // A whole supplier's unverified inventory must not suppress other sources.
+    mocks[0].response.lock().unwrap()["item1"]["airSearchResponses"] = json!(invalid);
+    let (status, partial, result) = search().await;
+    assert_eq!(status, 200, "{result}");
+    assert_eq!(partial.as_deref(), Some("true"));
+    let source: String = sqlx::query_scalar("SELECT supplier_id FROM flight_offers WHERE id=$1")
+        .bind(
+            Uuid::parse_str(
+                result["item1"]["airSearchResponses"][0]["itemCodeRef"]
+                    .as_str()
+                    .unwrap(),
+            )
+            .unwrap(),
+        )
+        .fetch_one(pool)
+        .await
+        .unwrap();
+    assert_eq!(source, "triplover");
+    // Scope exclusion must never bypass existing money/reference guards.
+    for (field, expected) in [
+        ("taxes", "SUPPLIER_PRICING_COVERAGE_UNSUPPORTED"),
+        ("reference", "SUPPLIER_REFERENCE_MISSING"),
+    ] {
+        let mut unsupported = invalid.clone();
+        if field == "taxes" {
+            unsupported[0]["bookingComponents"][0]["taxes"] = json!(0);
+        } else {
+            unsupported[0]["itemCodeRef"] = json!("");
+        }
+        mocks[0].response.lock().unwrap()["item1"]["airSearchResponses"] = json!(unsupported);
+        let (status, _, result) = search().await;
+        assert_eq!(status, 422);
+        assert_eq!(result["error"], expected);
+    }
+    let before: (i64, i64) = sqlx::query_as(
+        "SELECT (SELECT count(*) FROM flight_searches),(SELECT count(*) FROM flight_offers)",
+    )
+    .fetch_one(pool)
+    .await
+    .unwrap();
+    for mock in mocks {
+        mock.response.lock().unwrap()["item1"]["airSearchResponses"] = json!(invalid);
+    }
+    let (status, _, result) = search().await;
+    assert_eq!(status, 422);
+    assert_eq!(result["error"], "COMPLEX_SCOPE_MATCHING_UNRESOLVED");
+    let after: (i64, i64) = sqlx::query_as(
+        "SELECT (SELECT count(*) FROM flight_searches),(SELECT count(*) FROM flight_offers)",
+    )
+    .fetch_one(pool)
+    .await
+    .unwrap();
+    assert_eq!(
+        before, after,
+        "all-unverified Search must persist no offers"
+    );
+    for mock in mocks {
+        mock.response.lock().unwrap()["item1"]["airSearchResponses"] = json!([]);
+    }
+    let (status, partial, result) = search().await;
+    assert_eq!(status, 200, "{result}");
+    assert_eq!(partial.as_deref(), Some("false"));
+    assert_eq!(result["item1"]["totalFlights"], 0);
+    for mock in mocks {
+        *mock.response.lock().unwrap() = complete.clone();
+    }
+    let (status, partial, result) = search().await;
+    assert_eq!(status, 200, "{result}");
+    assert_eq!(partial.as_deref(), Some("false"));
+    for mock in mocks {
+        *mock.response.lock().unwrap() = original_complete.clone();
+    }
+    sqlx::query("UPDATE markup_rules SET active=false WHERE id=$1")
+        .bind(rule_id)
+        .execute(pool)
+        .await
+        .unwrap();
 }
 
 async fn verify_admission(

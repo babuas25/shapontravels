@@ -11,6 +11,7 @@ pub mod connections;
 pub mod fare_breakdown;
 mod http_errors;
 pub mod identity;
+mod locations;
 pub mod markup;
 pub mod notifications;
 pub mod passengers;

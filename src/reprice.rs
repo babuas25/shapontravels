@@ -379,15 +379,11 @@ fn valid_routes(fare: &Value, request: &SearchRequest) -> bool {
             group.as_array().is_some_and(|options| {
                 !options.is_empty()
                     && options.iter().all(|option| {
-                        option["segments"].as_array().is_some_and(|segments| {
-                            !segments.is_empty()
-                                && segments[0]["from"].as_str() == Some(route.origin.as_str())
-                                && segments.last().unwrap()["to"].as_str()
-                                    == Some(route.destination.as_str())
-                                && segments
-                                    .windows(2)
-                                    .all(|pair| pair[0]["to"] == pair[1]["from"])
-                        })
+                        crate::locations::direction_matches(
+                            option,
+                            &route.origin,
+                            &route.destination,
+                        )
                     })
             })
         })

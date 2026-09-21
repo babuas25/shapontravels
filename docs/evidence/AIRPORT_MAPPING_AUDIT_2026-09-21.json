@@ -1,0 +1,1069 @@
+{
+  "rows": 6725,
+  "activeRows": 6655,
+  "distinctActiveCodes": 6572,
+  "duplicateCodes": {
+    "AMC": 2,
+    "APS": 2,
+    "APY": 2,
+    "ARS": 2,
+    "BJW": 2,
+    "CCX": 2,
+    "CEO": 2,
+    "CHM": 2,
+    "CSZ": 2,
+    "CTF": 2,
+    "DAT": 2,
+    "DDU": 2,
+    "DZN": 2,
+    "ELR": 2,
+    "ENK": 2,
+    "FRK": 2,
+    "GJA": 2,
+    "GUI": 2,
+    "HYD": 2,
+    "INN": 2,
+    "IOR": 2,
+    "ISG": 2,
+    "ISK": 2,
+    "ITB": 2,
+    "JDO": 2,
+    "JFR": 2,
+    "KFE": 2,
+    "KID": 2,
+    "KKM": 2,
+    "KLQ": 2,
+    "KMM": 2,
+    "KYF": 2,
+    "LIM": 2,
+    "LLG": 2,
+    "MCJ": 2,
+    "MCU": 2,
+    "MJG": 2,
+    "MPD": 2,
+    "MPT": 2,
+    "MQZ": 2,
+    "MRE": 2,
+    "NIA": 2,
+    "NRT": 2,
+    "NST": 2,
+    "NUS": 2,
+    "OBI": 2,
+    "ODL": 2,
+    "OHE": 3,
+    "OSO": 2,
+    "PBB": 2,
+    "PCA": 2,
+    "PDG": 2,
+    "PIV": 2,
+    "PMW": 2,
+    "PPJ": 2,
+    "PRI": 3,
+    "PRM": 2,
+    "PSV": 2,
+    "PTG": 2,
+    "RCH": 2,
+    "REQ": 2,
+    "RZS": 2,
+    "SAV": 2,
+    "SFK": 2,
+    "SIO": 2,
+    "SMG": 2,
+    "STI": 2,
+    "SYC": 2,
+    "TBU": 2,
+    "TCG": 2,
+    "TGM": 2,
+    "TNO": 2,
+    "UCN": 2,
+    "UKK": 2,
+    "ULG": 2,
+    "VDP": 2,
+    "VME": 2,
+    "WRW": 2,
+    "YAX": 2,
+    "YZY": 2,
+    "ZBF": 2
+  },
+  "conflictingLocations": {
+    "AMC": [
+      [
+        "Am Timan",
+        "TD"
+      ],
+      [
+        "Campeche",
+        "MX"
+      ]
+    ],
+    "APS": [
+      [
+        "Anápolis",
+        "BR"
+      ],
+      [
+        "Araraquara",
+        "BR"
+      ]
+    ],
+    "APY": [
+      [
+        "Alto Parnaíba",
+        "BR"
+      ],
+      [
+        "Gomez Nino Apiay",
+        "CO"
+      ]
+    ],
+    "ARS": [
+      [
+        "Aragarças",
+        "BR"
+      ],
+      [
+        "Usina Santa Cruz",
+        "BR"
+      ]
+    ],
+    "BJW": [
+      [
+        "Bajawa Padhameleda",
+        "ID"
+      ],
+      [
+        "Padhameleda",
+        "ID"
+      ]
+    ],
+    "CCX": [
+      [
+        "Cáceres",
+        "BR"
+      ],
+      [
+        "Guadalupe",
+        "ES"
+      ]
+    ],
+    "CEO": [
+      [
+        "El Crucero",
+        "MX"
+      ],
+      [
+        "Waco Kungo",
+        "AO"
+      ]
+    ],
+    "CHM": [
+      [
+        "Manuel Prado Ugarteche",
+        "PE"
+      ],
+      [
+        "Teniente FAP Jaime A De Montreuil Morales",
+        "PE"
+      ]
+    ],
+    "CSZ": [
+      [
+        "Brigadier Hector Ruiz",
+        "AR"
+      ],
+      [
+        "Comodoro Rivadavia",
+        "AR"
+      ]
+    ],
+    "CTF": [
+      [
+        "Coatepeque",
+        "GT"
+      ],
+      [
+        "Contamana",
+        "PE"
+      ]
+    ],
+    "DAT": [
+      [
+        "Datong",
+        "CN"
+      ],
+      [
+        "Desierto de Atacama",
+        "CL"
+      ]
+    ],
+    "DZN": [
+      [
+        "Dzhezkazgan",
+        "KZ"
+      ],
+      [
+        "Zhezkazgan",
+        "KZ"
+      ]
+    ],
+    "ELR": [
+      [
+        "El Libertador Airbase",
+        "VE"
+      ],
+      [
+        "Elelim",
+        "ID"
+      ]
+    ],
+    "ENK": [
+      [
+        "St Angelo",
+        "GB"
+      ],
+      [
+        "Zyryanka",
+        "RU"
+      ]
+    ],
+    "FRK": [
+      [
+        "Fairoaks",
+        "GB"
+      ],
+      [
+        "Frégate Island",
+        "SC"
+      ]
+    ],
+    "GJA": [
+      [
+        "?akovica",
+        "KS"
+      ],
+      [
+        "La Laguna",
+        "HN"
+      ]
+    ],
+    "GUI": [
+      [
+        "Guiria",
+        "VE"
+      ],
+      [
+        "Guiuan",
+        "PH"
+      ]
+    ],
+    "INN": [
+      [
+        "Innarsuit",
+        "GL"
+      ],
+      [
+        "Innsbruck",
+        "AT"
+      ]
+    ],
+    "IOR": [
+      [
+        "Inishmore",
+        "IE"
+      ],
+      [
+        "Kilronan",
+        "IE"
+      ]
+    ],
+    "ISG": [
+      [
+        "Isa Giron",
+        "CO"
+      ],
+      [
+        "Ishigaki",
+        "JP"
+      ]
+    ],
+    "ISK": [
+      [
+        "?skenderun",
+        "TR"
+      ],
+      [
+        "Gandhinagar",
+        "IN"
+      ]
+    ],
+    "ITB": [
+      [
+        "Cachimbo",
+        "BR"
+      ],
+      [
+        "Itaituba",
+        "BR"
+      ]
+    ],
+    "JDO": [
+      [
+        "Colina Verde",
+        "BR"
+      ],
+      [
+        "Orlando Bezerra de Menezes",
+        "BR"
+      ]
+    ],
+    "KID": [
+      [
+        "Airport Drakslerov salas Kikinda",
+        "RS"
+      ],
+      [
+        "Kristianstad",
+        "SE"
+      ]
+    ],
+    "KKM": [
+      [
+        "Khok Kathiam",
+        "TH"
+      ],
+      [
+        "Sa Pran Nak",
+        "TH"
+      ]
+    ],
+    "KLQ": [
+      [
+        "Keluang",
+        "ID"
+      ],
+      [
+        "Kullorsuaq",
+        "GL"
+      ]
+    ],
+    "KMM": [
+      [
+        "Kimaam",
+        "ID"
+      ],
+      [
+        "Kiman",
+        "ID"
+      ]
+    ],
+    "LLG": [
+      [
+        "Chillagoe",
+        "AU"
+      ],
+      [
+        "Silampari",
+        "ID"
+      ]
+    ],
+    "MCJ": [
+      [
+        "Jorge Isaac",
+        "CO"
+      ],
+      [
+        "Maicao",
+        "CO"
+      ]
+    ],
+    "MJG": [
+      [
+        "Areopuerto Internacional Michael Gonzalez",
+        "PR"
+      ],
+      [
+        "Mayajigua",
+        "CU"
+      ]
+    ],
+    "MPD": [
+      [
+        "Mirpur Khas",
+        "PK"
+      ],
+      [
+        "Sindhri Tharparkar",
+        "PK"
+      ]
+    ],
+    "MPT": [
+      [
+        "Maliana",
+        "TL"
+      ],
+      [
+        "Maliana airport",
+        "ID"
+      ]
+    ],
+    "MQZ": [
+      [
+        "Margaret River",
+        "AU"
+      ],
+      [
+        "Margaret River",
+        "CO"
+      ]
+    ],
+    "MRE": [
+      [
+        "Mara Lodges",
+        "KE"
+      ],
+      [
+        "Mara Serena Lodge Airstrip",
+        "KE"
+      ]
+    ],
+    "NIA": [
+      [
+        "Niaqornat",
+        "GL"
+      ],
+      [
+        "Nimba",
+        "LR"
+      ]
+    ],
+    "NRT": [
+      [
+        "Narita",
+        "JP"
+      ],
+      [
+        "Tokyo",
+        "JP"
+      ]
+    ],
+    "NST": [
+      [
+        "Cha Ian",
+        "TH"
+      ],
+      [
+        "Nakhon Si Thammarat",
+        "TH"
+      ]
+    ],
+    "NUS": [
+      [
+        "Norsup",
+        "VU"
+      ],
+      [
+        "Nuussuaq",
+        "GL"
+      ]
+    ],
+    "OBI": [
+      [
+        "Tefé",
+        "BR"
+      ],
+      [
+        "Óbidos Municipal",
+        "BR"
+      ]
+    ],
+    "ODL": [
+      [
+        "Cordillo Downs",
+        "AU"
+      ],
+      [
+        "Guarapari",
+        "BR"
+      ]
+    ],
+    "OSO": [
+      [
+        "Osborne Mine",
+        "AU"
+      ],
+      [
+        "Sulaymaniyah",
+        "IQ"
+      ]
+    ],
+    "PBB": [
+      [
+        "Bento Gonçalves",
+        "BR"
+      ],
+      [
+        "Paranaíba",
+        "BR"
+      ]
+    ],
+    "PCA": [
+      [
+        "Picacho",
+        "US"
+      ],
+      [
+        "Portage Creek",
+        "US"
+      ]
+    ],
+    "PDG": [
+      [
+        "Minangkabau",
+        "ID"
+      ],
+      [
+        "Tabing",
+        "ID"
+      ]
+    ],
+    "PRM": [
+      [
+        "Portimao",
+        "PT"
+      ],
+      [
+        "Proma",
+        "CO"
+      ]
+    ],
+    "PSV": [
+      [
+        "Papa Stour",
+        "GB"
+      ],
+      [
+        "Rovere",
+        "AR"
+      ]
+    ],
+    "PTG": [
+      [
+        "Pietersburg Municipal",
+        "ZA"
+      ],
+      [
+        "Polokwane",
+        "ZA"
+      ]
+    ],
+    "RCH": [
+      [
+        "Almirante Padilla",
+        "CO"
+      ],
+      [
+        "Rocha",
+        "UY"
+      ]
+    ],
+    "REQ": [
+      [
+        "Reko Diq",
+        "PK"
+      ],
+      [
+        "Requena",
+        "PE"
+      ]
+    ],
+    "RZS": [
+      [
+        "Sawan",
+        "ID"
+      ],
+      [
+        "Sawan",
+        "PK"
+      ]
+    ],
+    "SAV": [
+      [
+        "Savannah Hilton Head",
+        "US"
+      ],
+      [
+        "Savissivik",
+        "GL"
+      ]
+    ],
+    "SFK": [
+      [
+        "Satipo",
+        "PE"
+      ],
+      [
+        "Soure",
+        "BR"
+      ]
+    ],
+    "SIO": [
+      [
+        "Siorapaluk",
+        "GL"
+      ],
+      [
+        "Smithton",
+        "AU"
+      ]
+    ],
+    "SMG": [
+      [
+        "Santa Maria",
+        "PE"
+      ],
+      [
+        "Sermiligaaq",
+        "GL"
+      ]
+    ],
+    "STI": [
+      [
+        "Cibao",
+        "DO"
+      ],
+      [
+        "Santiago Municipal",
+        "DO"
+      ]
+    ],
+    "SYC": [
+      [
+        "Shiringayoc",
+        "PE"
+      ],
+      [
+        "Shiringayoc/Hacienda Hda Mejia",
+        "PE"
+      ]
+    ],
+    "TBU": [
+      [
+        "Fua'amotu",
+        "CO"
+      ],
+      [
+        "Nuku'alofa",
+        "TO"
+      ]
+    ],
+    "TCG": [
+      [
+        "Tacheng",
+        "CN"
+      ],
+      [
+        "Tocache",
+        "PE"
+      ]
+    ],
+    "TGM": [
+      [
+        "Târgu Mureş Transilvania",
+        "MX"
+      ],
+      [
+        "Târgu Mureş Transilvania",
+        "RO"
+      ]
+    ],
+    "TNO": [
+      [
+        "Cabo Velas",
+        "CR"
+      ],
+      [
+        "Tamarindo De Santa Cruz",
+        "CR"
+      ]
+    ],
+    "UCN": [
+      [
+        "Buchanan",
+        "LR"
+      ],
+      [
+        "Lamco",
+        "LR"
+      ]
+    ],
+    "UKK": [
+      [
+        "Ukkusissat",
+        "GL"
+      ],
+      [
+        "Ust-Kamennogorsk",
+        "KZ"
+      ]
+    ],
+    "ULG": [
+      [
+        "Ulgii",
+        "MN"
+      ],
+      [
+        "Ölgii Mongolei",
+        "MN"
+      ]
+    ],
+    "VDP": [
+      [
+        "Kolding",
+        "DK"
+      ],
+      [
+        "Valle de La Pascua",
+        "VE"
+      ]
+    ],
+    "VME": [
+      [
+        "Villa Mercedes",
+        "AR"
+      ],
+      [
+        "Villa Reynolds",
+        "AR"
+      ]
+    ],
+    "YAX": [
+      [
+        "Lac Du Bonnet",
+        "CA"
+      ],
+      [
+        "Wapekeka",
+        "CA"
+      ]
+    ],
+    "YZY": [
+      [
+        "Mackenzie",
+        "CA"
+      ],
+      [
+        "Zhangye",
+        "CN"
+      ]
+    ],
+    "ZBF": [
+      [
+        "Bathurst",
+        "CA"
+      ],
+      [
+        "Ilford",
+        "CA"
+      ]
+    ]
+  },
+  "overlappingGroups": {
+    "TTN": [
+      "NYC",
+      "PHL_CITY"
+    ]
+  },
+  "missingGroupAirports": [
+    "FBU",
+    "NIC"
+  ],
+  "groupCountryMismatches": {},
+  "nonAirportGroupMembers": {
+    "NYC/TSS": [
+      "heliport"
+    ],
+    "YEG_CITY/YED": [
+      "heliport"
+    ],
+    "YHZ_CITY/YAW": [
+      "heliport"
+    ],
+    "YVR_CITY/CXH": [
+      "seaplanes"
+    ]
+  },
+  "enabledGroups": [
+    "ADL_CITY",
+    "AKL_CITY",
+    "AMM_CITY",
+    "AMS_CITY",
+    "ATH_CITY",
+    "ATL_CITY",
+    "BCN_CITY",
+    "BDO_CITY",
+    "BEG_CITY",
+    "BER_CITY",
+    "BGO_CITY",
+    "BHX_CITY",
+    "BHZ_CITY",
+    "BJS",
+    "BKK_CITY",
+    "BNA_CITY",
+    "BNE_CITY",
+    "BOD_CITY",
+    "BOM_CITY",
+    "BOS_CITY",
+    "BRS_CITY",
+    "BRU_CITY",
+    "BUD_CITY",
+    "BUE_CITY",
+    "BZE_CITY",
+    "CAI_CITY",
+    "CAN_CITY",
+    "CGP_CITY",
+    "CHI",
+    "CHS_CITY",
+    "CLE_CITY",
+    "CMB_CITY",
+    "CPH_CITY",
+    "CPT_CITY",
+    "CTU_CITY",
+    "CVG_CITY",
+    "CXB_CITY",
+    "DAC_CITY",
+    "DEL_CITY",
+    "DEN_CITY",
+    "DFW_CITY",
+    "DTW_CITY",
+    "DUS_CITY",
+    "DXB_CITY",
+    "FRA_CITY",
+    "GLA_CITY",
+    "HAM_CITY",
+    "HEL_CITY",
+    "HKG_CITY",
+    "HOU_CITY",
+    "ISB_CITY",
+    "IST_CITY",
+    "JKT_CITY",
+    "JNB_CITY",
+    "JSR_CITY",
+    "KHI_CITY",
+    "KIX_CITY",
+    "KTM_CITY",
+    "KUL_CITY",
+    "KWJ_CITY",
+    "LAS_CITY",
+    "LAX_CITY",
+    "LHE_CITY",
+    "LIS_CITY",
+    "LON",
+    "LOS_CITY",
+    "LPL_CITY",
+    "LYS_CITY",
+    "MAD_CITY",
+    "MAN_CITY",
+    "MCI_CITY",
+    "MEL_CITY",
+    "MEX_CITY",
+    "MIA_CITY",
+    "MIL",
+    "MNL_CITY",
+    "MOW",
+    "MRS_CITY",
+    "MSP_CITY",
+    "MUC_CITY",
+    "NBO_CITY",
+    "NCE_CITY",
+    "NCL_CITY",
+    "NGO_CITY",
+    "NIC_CITY",
+    "NYC",
+    "OPO_CITY",
+    "ORL_CITY",
+    "OSL_CITY",
+    "OTP_CITY",
+    "PAR",
+    "PDX_CITY",
+    "PER_CITY",
+    "PHL_CITY",
+    "PHX_CITY",
+    "PRG_CITY",
+    "RDU_CITY",
+    "RIO_CITY",
+    "ROM",
+    "RUH_CITY",
+    "SAN_CITY",
+    "SAO_CITY",
+    "SEA_CITY",
+    "SEL_CITY",
+    "SFO_CITY",
+    "SHA",
+    "SIN_CITY",
+    "SOF_CITY",
+    "SPK_CITY",
+    "STO",
+    "SYD_CITY",
+    "THR_CITY",
+    "TLS_CITY",
+    "TPA_CITY",
+    "TPE_CITY",
+    "TRD_CITY",
+    "TRN_CITY",
+    "TYO",
+    "VCE_CITY",
+    "VIE_CITY",
+    "VVI_CITY",
+    "WAS",
+    "WAW_CITY",
+    "YEG_CITY",
+    "YHZ_CITY",
+    "YOW_CITY",
+    "YUL_CITY",
+    "YVR_CITY",
+    "YWG_CITY",
+    "YYZ_CITY",
+    "ZAG_CITY",
+    "ZRH_CITY",
+    "ZYL_CITY"
+  ],
+  "groupsWithoutReview": [
+    "ADL_CITY",
+    "AKL_CITY",
+    "AMM_CITY",
+    "AMS_CITY",
+    "ATH_CITY",
+    "ATL_CITY",
+    "BCN_CITY",
+    "BDO_CITY",
+    "BEG_CITY",
+    "BER_CITY",
+    "BGO_CITY",
+    "BHX_CITY",
+    "BHZ_CITY",
+    "BJS",
+    "BKK_CITY",
+    "BNA_CITY",
+    "BNE_CITY",
+    "BOD_CITY",
+    "BOM_CITY",
+    "BOS_CITY",
+    "BRS_CITY",
+    "BRU_CITY",
+    "BUD_CITY",
+    "BUE_CITY",
+    "BZE_CITY",
+    "CAI_CITY",
+    "CAN_CITY",
+    "CGP_CITY",
+    "CHI",
+    "CHS_CITY",
+    "CLE_CITY",
+    "CMB_CITY",
+    "CPH_CITY",
+    "CPT_CITY",
+    "CTU_CITY",
+    "CVG_CITY",
+    "CXB_CITY",
+    "DAC_CITY",
+    "DEL_CITY",
+    "DEN_CITY",
+    "DFW_CITY",
+    "DTW_CITY",
+    "DUS_CITY",
+    "DXB_CITY",
+    "FRA_CITY",
+    "GLA_CITY",
+    "HAM_CITY",
+    "HEL_CITY",
+    "HKG_CITY",
+    "HOU_CITY",
+    "ISB_CITY",
+    "IST_CITY",
+    "JKT_CITY",
+    "JNB_CITY",
+    "JSR_CITY",
+    "KHI_CITY",
+    "KIX_CITY",
+    "KTM_CITY",
+    "KWJ_CITY",
+    "LAS_CITY",
+    "LAX_CITY",
+    "LHE_CITY",
+    "LIS_CITY",
+    "LON",
+    "LOS_CITY",
+    "LPL_CITY",
+    "LYS_CITY",
+    "MAD_CITY",
+    "MAN_CITY",
+    "MCI_CITY",
+    "MEL_CITY",
+    "MEX_CITY",
+    "MIA_CITY",
+    "MIL",
+    "MNL_CITY",
+    "MOW",
+    "MRS_CITY",
+    "MSP_CITY",
+    "MUC_CITY",
+    "NBO_CITY",
+    "NCE_CITY",
+    "NCL_CITY",
+    "NGO_CITY",
+    "NIC_CITY",
+    "NYC",
+    "OPO_CITY",
+    "ORL_CITY",
+    "OSL_CITY",
+    "OTP_CITY",
+    "PAR",
+    "PDX_CITY",
+    "PER_CITY",
+    "PHL_CITY",
+    "PHX_CITY",
+    "PRG_CITY",
+    "RDU_CITY",
+    "RIO_CITY",
+    "ROM",
+    "RUH_CITY",
+    "SAN_CITY",
+    "SAO_CITY",
+    "SEA_CITY",
+    "SEL_CITY",
+    "SFO_CITY",
+    "SOF_CITY",
+    "SPK_CITY",
+    "STO",
+    "SYD_CITY",
+    "THR_CITY",
+    "TLS_CITY",
+    "TPA_CITY",
+    "TPE_CITY",
+    "TRD_CITY",
+    "TRN_CITY",
+    "TYO",
+    "VCE_CITY",
+    "VIE_CITY",
+    "VVI_CITY",
+    "WAS",
+    "WAW_CITY",
+    "YEG_CITY",
+    "YHZ_CITY",
+    "YOW_CITY",
+    "YUL_CITY",
+    "YVR_CITY",
+    "YWG_CITY",
+    "YYZ_CITY",
+    "ZAG_CITY",
+    "ZRH_CITY",
+    "ZYL_CITY"
+  ],
+  "staleReviews": [],
+  "matchingPolicy": "exact airport or direct shared group; no transitive merge",
+  "sha256": {
+    "airports": "e8e85c7b0b5d792f398e32a6276154063e704c5f09fd65e1feff07952f25937c",
+    "groups": "fec2536d5ddd5d67c8fb00e7082bb9a3ca574017c48df74e1fa8d9c5f2243529",
+    "reviews": "f14674f1553a50ce4a4e4653ddff296176aa59defb543b02a31333de7a19125d"
+  }
+}

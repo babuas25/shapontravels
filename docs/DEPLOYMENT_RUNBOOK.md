@@ -791,3 +791,20 @@ request; no manual VPS deployment or production migration is authorized here.
   2026-09-29 for one adult. The results show BS-307, V, 22:30 via TakeOff at
   supplier fare BDT 39,866.99, confirming the cheaper source now reaches the
   displayed primary flight card. No Select/hold/booking/ticket action was taken.
+
+## Search scope correction prepared locally — 2026-09-21
+
+Development contains a pending correction for multi-supplier Search failures with
+`COMPLEX_SCOPE_MATCHING_UNRESOLVED`. Search and RePrice now use all 133 backend-configured
+city/metro groups, preserving matching offers and their requested-route markup.
+Direct overlapping memberships are retained without merging groups. Geography
+outside configured memberships remains guarded and does not suppress other
+verified results. Money/reference guards and exact selected
+flight validation remain in force. The paired frontend displays actual airport
+endpoints and airport-change notices, plus partial/all-unverified messages.
+See [diagnosis and regression evidence](evidence/SEARCH_SCOPE_ISOLATION_2026-09-21.md).
+Airport inputs are maintained in backend `data/`; generation and runtime require
+no frontend checkout. No migration, environment change or live supplier activation
+is required. This entry records local preparation only; the verified deployed release above is
+unchanged. Production promotion/deployment and fresh search verification require
+the user's production release authorization under this runbook.

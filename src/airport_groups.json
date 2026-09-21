@@ -1,0 +1,1209 @@
+[
+  {
+    "id": "ADL_CITY",
+    "city": "Adelaide",
+    "country": "AU",
+    "airports": [
+      "ADL"
+    ]
+  },
+  {
+    "id": "AKL_CITY",
+    "city": "Auckland",
+    "country": "NZ",
+    "airports": [
+      "AKL",
+      "WRE"
+    ]
+  },
+  {
+    "id": "AMM_CITY",
+    "city": "Amman",
+    "country": "JO",
+    "airports": [
+      "ADJ",
+      "AMM",
+      "OMF"
+    ]
+  },
+  {
+    "id": "AMS_CITY",
+    "city": "Amsterdam",
+    "country": "NL",
+    "airports": [
+      "AMS",
+      "EIN"
+    ]
+  },
+  {
+    "id": "ATH_CITY",
+    "city": "Athens",
+    "country": "GR",
+    "airports": [
+      "ATH",
+      "GPA"
+    ]
+  },
+  {
+    "id": "ATL_CITY",
+    "city": "Atlanta",
+    "country": "US",
+    "airports": [
+      "ATL",
+      "PDK"
+    ]
+  },
+  {
+    "id": "BCN_CITY",
+    "city": "Barcelona",
+    "country": "ES",
+    "airports": [
+      "BCN",
+      "GRO",
+      "REU"
+    ]
+  },
+  {
+    "id": "BDO_CITY",
+    "city": "Bandung",
+    "country": "ID",
+    "airports": [
+      "BDO"
+    ]
+  },
+  {
+    "id": "BEG_CITY",
+    "city": "Belgrade",
+    "country": "RS",
+    "airports": [
+      "BEG"
+    ]
+  },
+  {
+    "id": "BER_CITY",
+    "city": "Berlin",
+    "country": "DE",
+    "airports": [
+      "SXF",
+      "TXL"
+    ]
+  },
+  {
+    "id": "BGO_CITY",
+    "city": "Bergen",
+    "country": "NO",
+    "airports": [
+      "BGO",
+      "BOO"
+    ]
+  },
+  {
+    "id": "BHX_CITY",
+    "city": "Birmingham",
+    "country": "GB",
+    "airports": [
+      "BHX",
+      "CVT"
+    ]
+  },
+  {
+    "id": "BHZ_CITY",
+    "city": "Belo Horizonte",
+    "country": "BR",
+    "airports": [
+      "CNF",
+      "PLU"
+    ]
+  },
+  {
+    "id": "BJS",
+    "city": "Beijing",
+    "country": "CN",
+    "airports": [
+      "NAY",
+      "PEK"
+    ]
+  },
+  {
+    "id": "BKK_CITY",
+    "city": "Bangkok",
+    "country": "TH",
+    "airports": [
+      "BKK",
+      "DMK"
+    ]
+  },
+  {
+    "id": "BNA_CITY",
+    "city": "Nashville",
+    "country": "US",
+    "airports": [
+      "BNA"
+    ]
+  },
+  {
+    "id": "BNE_CITY",
+    "city": "Brisbane",
+    "country": "AU",
+    "airports": [
+      "BDB",
+      "BNE",
+      "OOL"
+    ]
+  },
+  {
+    "id": "BOD_CITY",
+    "city": "Bordeaux",
+    "country": "FR",
+    "airports": [
+      "BOD"
+    ]
+  },
+  {
+    "id": "BOM_CITY",
+    "city": "Mumbai",
+    "country": "IN",
+    "airports": [
+      "BOM"
+    ]
+  },
+  {
+    "id": "BOS_CITY",
+    "city": "Boston",
+    "country": "US",
+    "airports": [
+      "BOS",
+      "MHT",
+      "ORH",
+      "PVD"
+    ]
+  },
+  {
+    "id": "BRS_CITY",
+    "city": "Bristol",
+    "country": "GB",
+    "airports": [
+      "BRS",
+      "FZO"
+    ]
+  },
+  {
+    "id": "BRU_CITY",
+    "city": "Brussels",
+    "country": "BE",
+    "airports": [
+      "BRU",
+      "CRL"
+    ]
+  },
+  {
+    "id": "BUD_CITY",
+    "city": "Budapest",
+    "country": "HU",
+    "airports": [
+      "BUD"
+    ]
+  },
+  {
+    "id": "BUE_CITY",
+    "city": "Buenos Aires",
+    "country": "AR",
+    "airports": [
+      "AEP",
+      "EZE"
+    ]
+  },
+  {
+    "id": "BZE_CITY",
+    "city": "Belize City",
+    "country": "BZ",
+    "airports": [
+      "BZE",
+      "TZA"
+    ]
+  },
+  {
+    "id": "CAI_CITY",
+    "city": "Cairo",
+    "country": "EG",
+    "airports": [
+      "CAI"
+    ]
+  },
+  {
+    "id": "CAN_CITY",
+    "city": "Guangzhou",
+    "country": "CN",
+    "airports": [
+      "CAN"
+    ]
+  },
+  {
+    "id": "CGP_CITY",
+    "city": "Chittagong",
+    "country": "BD",
+    "airports": [
+      "CGP"
+    ]
+  },
+  {
+    "id": "CHI",
+    "city": "Chicago",
+    "country": "US",
+    "airports": [
+      "MDW",
+      "ORD",
+      "RFD"
+    ]
+  },
+  {
+    "id": "CHS_CITY",
+    "city": "Charleston",
+    "country": "US",
+    "airports": [
+      "CHS",
+      "CRW"
+    ]
+  },
+  {
+    "id": "CLE_CITY",
+    "city": "Cleveland",
+    "country": "US",
+    "airports": [
+      "BKL",
+      "CLE"
+    ]
+  },
+  {
+    "id": "CMB_CITY",
+    "city": "Colombo",
+    "country": "LK",
+    "airports": [
+      "CMB",
+      "RML"
+    ]
+  },
+  {
+    "id": "CPH_CITY",
+    "city": "Copenhagen",
+    "country": "DK",
+    "airports": [
+      "CPH"
+    ]
+  },
+  {
+    "id": "CPT_CITY",
+    "city": "Cape Town",
+    "country": "ZA",
+    "airports": [
+      "CPT"
+    ]
+  },
+  {
+    "id": "CTU_CITY",
+    "city": "Chengdu",
+    "country": "CN",
+    "airports": [
+      "CTU"
+    ]
+  },
+  {
+    "id": "CVG_CITY",
+    "city": "Cincinnati",
+    "country": "US",
+    "airports": [
+      "CVG",
+      "LUK"
+    ]
+  },
+  {
+    "id": "CXB_CITY",
+    "city": "Cox's Bazar",
+    "country": "BD",
+    "airports": [
+      "CXB"
+    ]
+  },
+  {
+    "id": "DAC_CITY",
+    "city": "Dhaka",
+    "country": "BD",
+    "airports": [
+      "DAC"
+    ]
+  },
+  {
+    "id": "DEL_CITY",
+    "city": "Delhi",
+    "country": "IN",
+    "airports": [
+      "DEL"
+    ]
+  },
+  {
+    "id": "DEN_CITY",
+    "city": "Denver",
+    "country": "US",
+    "airports": [
+      "APA",
+      "DEN"
+    ]
+  },
+  {
+    "id": "DFW_CITY",
+    "city": "Dallas",
+    "country": "US",
+    "airports": [
+      "DAL",
+      "DFW"
+    ]
+  },
+  {
+    "id": "DTW_CITY",
+    "city": "Detroit",
+    "country": "US",
+    "airports": [
+      "DET",
+      "DTW",
+      "YIP"
+    ]
+  },
+  {
+    "id": "DUS_CITY",
+    "city": "Düsseldorf",
+    "country": "DE",
+    "airports": [
+      "CGN",
+      "DTM",
+      "DUS",
+      "NRN"
+    ]
+  },
+  {
+    "id": "DXB_CITY",
+    "city": "Dubai",
+    "country": "AE",
+    "airports": [
+      "DWC",
+      "DXB",
+      "RKT",
+      "SHJ"
+    ]
+  },
+  {
+    "id": "FRA_CITY",
+    "city": "Frankfurt",
+    "country": "DE",
+    "airports": [
+      "FRA",
+      "HHN"
+    ]
+  },
+  {
+    "id": "GLA_CITY",
+    "city": "Glasgow",
+    "country": "GB",
+    "airports": [
+      "GLA",
+      "PIK"
+    ]
+  },
+  {
+    "id": "HAM_CITY",
+    "city": "Hamburg",
+    "country": "DE",
+    "airports": [
+      "HAM",
+      "XFW"
+    ]
+  },
+  {
+    "id": "HEL_CITY",
+    "city": "Helsinki",
+    "country": "FI",
+    "airports": [
+      "HEL"
+    ]
+  },
+  {
+    "id": "HKG_CITY",
+    "city": "Hong Kong",
+    "country": "HK",
+    "airports": [
+      "HKG"
+    ]
+  },
+  {
+    "id": "HOU_CITY",
+    "city": "Houston",
+    "country": "US",
+    "airports": [
+      "HOU",
+      "IAH"
+    ]
+  },
+  {
+    "id": "ISB_CITY",
+    "city": "Islamabad",
+    "country": "PK",
+    "airports": [
+      "ISB"
+    ]
+  },
+  {
+    "id": "IST_CITY",
+    "city": "Istanbul",
+    "country": "TR",
+    "airports": [
+      "IST",
+      "SAW"
+    ]
+  },
+  {
+    "id": "JKT_CITY",
+    "city": "Jakarta",
+    "country": "ID",
+    "airports": [
+      "CGK",
+      "HLP"
+    ]
+  },
+  {
+    "id": "JNB_CITY",
+    "city": "Johannesburg",
+    "country": "ZA",
+    "airports": [
+      "GCJ",
+      "HLA",
+      "JNB"
+    ]
+  },
+  {
+    "id": "JSR_CITY",
+    "city": "Jessore",
+    "country": "BD",
+    "airports": [
+      "JSR"
+    ]
+  },
+  {
+    "id": "KHI_CITY",
+    "city": "Karachi",
+    "country": "PK",
+    "airports": [
+      "KHI"
+    ]
+  },
+  {
+    "id": "KIX_CITY",
+    "city": "Osaka",
+    "country": "JP",
+    "airports": [
+      "ITM",
+      "KIX",
+      "UKB"
+    ]
+  },
+  {
+    "id": "KTM_CITY",
+    "city": "Kathmandu",
+    "country": "NP",
+    "airports": [
+      "KTM"
+    ]
+  },
+  {
+    "id": "KUL_CITY",
+    "city": "Kuala Lumpur",
+    "country": "MY",
+    "airports": [
+      "KUL",
+      "SZB"
+    ]
+  },
+  {
+    "id": "KWJ_CITY",
+    "city": "Gwangju",
+    "country": "KR",
+    "airports": [
+      "KWJ"
+    ]
+  },
+  {
+    "id": "LAS_CITY",
+    "city": "Las Vegas",
+    "country": "US",
+    "airports": [
+      "LAS"
+    ]
+  },
+  {
+    "id": "LAX_CITY",
+    "city": "Los Angeles",
+    "country": "US",
+    "airports": [
+      "BUR",
+      "LAX",
+      "LGB",
+      "ONT",
+      "SNA"
+    ]
+  },
+  {
+    "id": "LHE_CITY",
+    "city": "Lahore",
+    "country": "PK",
+    "airports": [
+      "LHE"
+    ]
+  },
+  {
+    "id": "LIS_CITY",
+    "city": "Lisbon",
+    "country": "PT",
+    "airports": [
+      "CBP",
+      "LIS"
+    ]
+  },
+  {
+    "id": "LON",
+    "city": "London",
+    "country": "GB",
+    "airports": [
+      "BQH",
+      "LCY",
+      "LGW",
+      "LHR",
+      "LTN",
+      "QFO",
+      "SEN",
+      "STN"
+    ]
+  },
+  {
+    "id": "LOS_CITY",
+    "city": "Lagos",
+    "country": "NG",
+    "airports": [
+      "LOS",
+      "QOW"
+    ]
+  },
+  {
+    "id": "LPL_CITY",
+    "city": "Liverpool",
+    "country": "GB",
+    "airports": [
+      "LPL"
+    ]
+  },
+  {
+    "id": "LYS_CITY",
+    "city": "Lyon",
+    "country": "FR",
+    "airports": [
+      "GNB",
+      "LYS"
+    ]
+  },
+  {
+    "id": "MAD_CITY",
+    "city": "Madrid",
+    "country": "ES",
+    "airports": [
+      "MAD",
+      "TOJ"
+    ]
+  },
+  {
+    "id": "MAN_CITY",
+    "city": "Manchester",
+    "country": "GB",
+    "airports": [
+      "MAN"
+    ]
+  },
+  {
+    "id": "MCI_CITY",
+    "city": "Kansas City",
+    "country": "US",
+    "airports": [
+      "MCI",
+      "MKC"
+    ]
+  },
+  {
+    "id": "MEL_CITY",
+    "city": "Melbourne",
+    "country": "AU",
+    "airports": [
+      "AVV",
+      "MBW",
+      "MEB",
+      "MEL"
+    ]
+  },
+  {
+    "id": "MEX_CITY",
+    "city": "Mexico City",
+    "country": "MX",
+    "airports": [
+      "MEX",
+      "TLC"
+    ]
+  },
+  {
+    "id": "MIA_CITY",
+    "city": "Miami",
+    "country": "US",
+    "airports": [
+      "FLL",
+      "MIA",
+      "PBI"
+    ]
+  },
+  {
+    "id": "MIL",
+    "city": "Milan",
+    "country": "IT",
+    "airports": [
+      "BGY",
+      "LIN",
+      "MXP"
+    ]
+  },
+  {
+    "id": "MNL_CITY",
+    "city": "Manila",
+    "country": "PH",
+    "airports": [
+      "CRK",
+      "MNL",
+      "SFS"
+    ]
+  },
+  {
+    "id": "MOW",
+    "city": "Moscow",
+    "country": "RU",
+    "airports": [
+      "DME",
+      "SVO",
+      "VKO"
+    ]
+  },
+  {
+    "id": "MRS_CITY",
+    "city": "Marseille",
+    "country": "FR",
+    "airports": [
+      "MRS"
+    ]
+  },
+  {
+    "id": "MSP_CITY",
+    "city": "Minneapolis",
+    "country": "US",
+    "airports": [
+      "MSP"
+    ]
+  },
+  {
+    "id": "MUC_CITY",
+    "city": "Munich",
+    "country": "DE",
+    "airports": [
+      "MUC"
+    ]
+  },
+  {
+    "id": "NBO_CITY",
+    "city": "Nairobi",
+    "country": "KE",
+    "airports": [
+      "NBO",
+      "WIL"
+    ]
+  },
+  {
+    "id": "NCE_CITY",
+    "city": "Nice",
+    "country": "FR",
+    "airports": [
+      "CEQ",
+      "NCE"
+    ]
+  },
+  {
+    "id": "NCL_CITY",
+    "city": "Newcastle",
+    "country": "GB",
+    "airports": [
+      "MME",
+      "NCL"
+    ]
+  },
+  {
+    "id": "NGO_CITY",
+    "city": "Nagoya",
+    "country": "JP",
+    "airports": [
+      "NGO",
+      "NKM"
+    ]
+  },
+  {
+    "id": "NIC_CITY",
+    "city": "Nicosia",
+    "country": "CY",
+    "airports": [
+      "GEC",
+      "NIC"
+    ]
+  },
+  {
+    "id": "NYC",
+    "city": "New York",
+    "country": "US",
+    "airports": [
+      "EWR",
+      "HPN",
+      "ISP",
+      "JFK",
+      "LGA",
+      "SWF",
+      "TSS",
+      "TTN"
+    ]
+  },
+  {
+    "id": "OPO_CITY",
+    "city": "Porto",
+    "country": "PT",
+    "airports": [
+      "OPO"
+    ]
+  },
+  {
+    "id": "ORL_CITY",
+    "city": "Orlando",
+    "country": "US",
+    "airports": [
+      "MCO",
+      "MLB",
+      "SFB"
+    ]
+  },
+  {
+    "id": "OSL_CITY",
+    "city": "Oslo",
+    "country": "NO",
+    "airports": [
+      "FBU",
+      "OLA",
+      "OSL",
+      "TRF"
+    ]
+  },
+  {
+    "id": "OTP_CITY",
+    "city": "Bucharest",
+    "country": "RO",
+    "airports": [
+      "BBU",
+      "OTP"
+    ]
+  },
+  {
+    "id": "PAR",
+    "city": "Paris",
+    "country": "FR",
+    "airports": [
+      "BVA",
+      "CDG",
+      "ORY",
+      "XCR"
+    ]
+  },
+  {
+    "id": "PDX_CITY",
+    "city": "Portland",
+    "country": "US",
+    "airports": [
+      "PDX"
+    ]
+  },
+  {
+    "id": "PER_CITY",
+    "city": "Perth",
+    "country": "AU",
+    "airports": [
+      "PER"
+    ]
+  },
+  {
+    "id": "PHL_CITY",
+    "city": "Philadelphia",
+    "country": "US",
+    "airports": [
+      "PHL",
+      "TTN"
+    ]
+  },
+  {
+    "id": "PHX_CITY",
+    "city": "Phoenix",
+    "country": "US",
+    "airports": [
+      "AZA",
+      "PHX"
+    ]
+  },
+  {
+    "id": "PRG_CITY",
+    "city": "Prague",
+    "country": "CZ",
+    "airports": [
+      "PRG"
+    ]
+  },
+  {
+    "id": "RDU_CITY",
+    "city": "Raleigh",
+    "country": "US",
+    "airports": [
+      "RDU",
+      "RWI"
+    ]
+  },
+  {
+    "id": "RIO_CITY",
+    "city": "Rio de Janeiro",
+    "country": "BR",
+    "airports": [
+      "GIG",
+      "SDU"
+    ]
+  },
+  {
+    "id": "ROM",
+    "city": "Rome",
+    "country": "IT",
+    "airports": [
+      "CIA",
+      "FCO"
+    ]
+  },
+  {
+    "id": "RUH_CITY",
+    "city": "Riyadh",
+    "country": "SA",
+    "airports": [
+      "AKH",
+      "RUH",
+      "XXN"
+    ]
+  },
+  {
+    "id": "SAN_CITY",
+    "city": "San Diego",
+    "country": "US",
+    "airports": [
+      "SAN"
+    ]
+  },
+  {
+    "id": "SAO_CITY",
+    "city": "São Paulo",
+    "country": "BR",
+    "airports": [
+      "CGH",
+      "GRU",
+      "VCP"
+    ]
+  },
+  {
+    "id": "SEA_CITY",
+    "city": "Seattle",
+    "country": "US",
+    "airports": [
+      "BFI",
+      "PAE",
+      "SEA"
+    ]
+  },
+  {
+    "id": "SEL_CITY",
+    "city": "Seoul",
+    "country": "KR",
+    "airports": [
+      "GMP",
+      "ICN"
+    ]
+  },
+  {
+    "id": "SFO_CITY",
+    "city": "San Francisco",
+    "country": "US",
+    "airports": [
+      "OAK",
+      "SFO",
+      "SJC"
+    ]
+  },
+  {
+    "id": "SHA",
+    "city": "Shanghai",
+    "country": "CN",
+    "airports": [
+      "PVG",
+      "SHA"
+    ]
+  },
+  {
+    "id": "SIN_CITY",
+    "city": "Singapore",
+    "country": "SG",
+    "airports": [
+      "SIN",
+      "XSP"
+    ]
+  },
+  {
+    "id": "SOF_CITY",
+    "city": "Sofia",
+    "country": "BG",
+    "airports": [
+      "SOF"
+    ]
+  },
+  {
+    "id": "SPK_CITY",
+    "city": "Sapporo",
+    "country": "JP",
+    "airports": [
+      "CTS",
+      "OKD"
+    ]
+  },
+  {
+    "id": "STO",
+    "city": "Stockholm",
+    "country": "SE",
+    "airports": [
+      "ARN",
+      "BMA",
+      "NYO",
+      "VST"
+    ]
+  },
+  {
+    "id": "SYD_CITY",
+    "city": "Sydney",
+    "country": "AU",
+    "airports": [
+      "BWU",
+      "SYD"
+    ]
+  },
+  {
+    "id": "THR_CITY",
+    "city": "Tehran",
+    "country": "IR",
+    "airports": [
+      "IKA",
+      "THR"
+    ]
+  },
+  {
+    "id": "TLS_CITY",
+    "city": "Toulouse",
+    "country": "FR",
+    "airports": [
+      "TLS"
+    ]
+  },
+  {
+    "id": "TPA_CITY",
+    "city": "Tampa",
+    "country": "US",
+    "airports": [
+      "PIE",
+      "SRQ",
+      "TPA"
+    ]
+  },
+  {
+    "id": "TPE_CITY",
+    "city": "Taipei",
+    "country": "TW",
+    "airports": [
+      "TPE",
+      "TSA"
+    ]
+  },
+  {
+    "id": "TRD_CITY",
+    "city": "Trondheim",
+    "country": "NO",
+    "airports": [
+      "TRD"
+    ]
+  },
+  {
+    "id": "TRN_CITY",
+    "city": "Turin",
+    "country": "IT",
+    "airports": [
+      "CUF",
+      "TRN"
+    ]
+  },
+  {
+    "id": "TYO",
+    "city": "Tokyo",
+    "country": "JP",
+    "airports": [
+      "HND",
+      "IBR",
+      "NRT"
+    ]
+  },
+  {
+    "id": "VCE_CITY",
+    "city": "Venice",
+    "country": "IT",
+    "airports": [
+      "TSF",
+      "VCE"
+    ]
+  },
+  {
+    "id": "VIE_CITY",
+    "city": "Vienna",
+    "country": "AT",
+    "airports": [
+      "VIE"
+    ]
+  },
+  {
+    "id": "VVI_CITY",
+    "city": "Santa Cruz",
+    "country": "BO",
+    "airports": [
+      "SRZ",
+      "VVI"
+    ]
+  },
+  {
+    "id": "WAS",
+    "city": "Washington",
+    "country": "US",
+    "airports": [
+      "BWI",
+      "DCA",
+      "IAD"
+    ]
+  },
+  {
+    "id": "WAW_CITY",
+    "city": "Warsaw",
+    "country": "PL",
+    "airports": [
+      "WAW"
+    ]
+  },
+  {
+    "id": "YEG_CITY",
+    "city": "Edmonton",
+    "country": "CA",
+    "airports": [
+      "YED",
+      "YEG"
+    ]
+  },
+  {
+    "id": "YHZ_CITY",
+    "city": "Halifax",
+    "country": "CA",
+    "airports": [
+      "YAW",
+      "YHZ"
+    ]
+  },
+  {
+    "id": "YOW_CITY",
+    "city": "Ottawa",
+    "country": "CA",
+    "airports": [
+      "YND",
+      "YOW",
+      "YRO",
+      "YRP"
+    ]
+  },
+  {
+    "id": "YUL_CITY",
+    "city": "Montreal",
+    "country": "CA",
+    "airports": [
+      "YHU",
+      "YMX",
+      "YUL"
+    ]
+  },
+  {
+    "id": "YVR_CITY",
+    "city": "Vancouver",
+    "country": "CA",
+    "airports": [
+      "CXH",
+      "YVR",
+      "YXX"
+    ]
+  },
+  {
+    "id": "YWG_CITY",
+    "city": "Winnipeg",
+    "country": "CA",
+    "airports": [
+      "YAV",
+      "YWG"
+    ]
+  },
+  {
+    "id": "YYZ_CITY",
+    "city": "Toronto",
+    "country": "CA",
+    "airports": [
+      "YHM",
+      "YTZ",
+      "YYZ"
+    ]
+  },
+  {
+    "id": "ZAG_CITY",
+    "city": "Zagreb",
+    "country": "HR",
+    "airports": [
+      "ZAG"
+    ]
+  },
+  {
+    "id": "ZRH_CITY",
+    "city": "Zurich",
+    "country": "CH",
+    "airports": [
+      "ZRH"
+    ]
+  },
+  {
+    "id": "ZYL_CITY",
+    "city": "Sylhet",
+    "country": "BD",
+    "airports": [
+      "ZYL"
+    ]
+  }
+]
