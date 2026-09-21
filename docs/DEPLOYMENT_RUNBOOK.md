@@ -169,10 +169,10 @@ Recheck before the next release:
 
 | Item | Development | Production |
 | --- | --- | --- |
-| Rust release | `96295fe` | `96295fe` |
+| Rust release | `eee8224` | `eee8224` |
 | Applied migration | `0063` | `0063` |
 | Canonical rollout revision | `3` | `5` |
-| Frontend release | `0c42355` | `0c42355` |
+| Frontend release | `5178694` | `5178694` |
 | Real business notification worker | Disabled | Active |
 
 Temporary operator capabilities were removed and maintenance was off on both
@@ -484,3 +484,45 @@ request; no manual VPS deployment or production migration is authorized here.
   final public live/ready checks pass. The old welcome remains blocked and was
   not replayed. Full SMTP message acceptance/inbox verification remains pending
   the requested test recipient; future registration events use the corrected sender.
+
+
+### Existing B2B partner approval correction — 2026-09-21
+
+- Production investigation found an active B2B owner with an active agency and a
+  pending application. The old review path accepted only customer identities and
+  reported this eligibility mismatch as `IDENTITY_VERSION_CONFLICT`.
+- Backend `eee82242e62e517739e2f1e1ed73e6be2c56a211` now permits an administrator to
+  approve that retained application against its existing active agency and wallet.
+  Identity/application/profile versions, ownership, scope and replay checks remain.
+  Existing API access is preserved. Pending applications block separate manual
+  agency provisioning; active owners awaiting review appear in the review queue.
+- [Development Actions 35563217302](https://github.com/babuas25/shapontravels/actions/runs/35563217302)
+  and [production Actions 35563996025](https://github.com/babuas25/shapontravels/actions/runs/35563996025)
+  passed checks, build and their deployment jobs. An earlier check-only run was
+  cancelled before deployment when the API-access preservation regression was added.
+  Both servers report the exact final SHA, migration `0063`, matching pins,
+  revisions 3/5, maintenance off and healthy internal/public live/ready endpoints.
+  No new migration or environment changes. Production backup:
+  `/var/backups/shapontravels/db-20260921T052715Z.dump`.
+- Frontend `5178694f9449bc0c25acbbe4ccdb4857a7e5b9c0` refreshes a stale application
+  without automatically retrying the decision, explains review for active owners,
+  and prevents the pending applicant's B2B role-dropdown bypass. Preview
+  `dpl_8xFNakpn3eEMiDXWpLmv9QfGJntY` and Production
+  `dpl_GzDMY6vinJvQLRz7v2tyZkf59GDZ` are READY. Production URL:
+  <https://shapontravels-frontend-7w0lju95w-shapontravels.vercel.app/>.
+- Browser verified both stable homepages with the existing Super Admin session,
+  then loaded the affected production application with its new active-owner notice
+  and enabled Approve application button. The live review decision was left to
+  the administrator; no production application, role or financial mutation was made
+  as a test. Synthetic browser and PostgreSQL tests verified deliberate approval,
+  stale/replay rejection and retained agency/wallet/balance/API access.
+- Rust all-target Clippy, onboarding, full application/document and agency financial
+  isolation matrices, frontend typecheck, Phase 5/onboarding, seven Preview readiness
+  checks and optional-image checks passed. Production business worker was validated
+  and resumed after activation; development real delivery remains disabled.
+- A user-triggered production submission is now recorded as `application_submitted`
+  / `sent` after the prior SMTP sender correction. This establishes provider
+  acceptance of a real receipt, not inbox placement. The old blocked welcome is
+  retained. Identity mail is enabled and Clerk account writers remain disabled.
+- Private evidence: `.local/approval-release/`. Working checkouts remain on
+  `development`; documentation-only release records use `[skip ci]`.
