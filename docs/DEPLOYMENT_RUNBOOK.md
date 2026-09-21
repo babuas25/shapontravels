@@ -169,7 +169,7 @@ Recheck before the next release:
 
 | Item | Development | Production |
 | --- | --- | --- |
-| Rust release | `eee8224` | `eee8224` |
+| Rust release | `df48e5b` | `df48e5b` |
 | Applied migration | `0063` | `0063` |
 | Canonical rollout revision | `3` | `5` |
 | Frontend release | `5178694` | `5178694` |
@@ -526,3 +526,38 @@ request; no manual VPS deployment or production migration is authorized here.
   retained. Identity mail is enabled and Clerk account writers remain disabled.
 - Private evidence: `.local/approval-release/`. Working checkouts remain on
   `development`; documentation-only release records use `[skip ci]`.
+
+### Approved partner flight-search connection recovery — 2026-09-21
+
+- Root cause: an accepted, active B2B agency had no linked search/pricing client.
+  The prebooking session returned `PORTAL_CLIENT_UNAVAILABLE` before supplier
+  dispatch. User search controls allowed searching; this was missing setup.
+- Immediate production recovery used the signed-in Super Admin's existing
+  **API Management → Connect partner** workflow. It created a Basic client with
+  `search:read`, external API access disabled and no credentials or machine
+  tokens, linked to the existing canonical agency wallet.
+- The affected owner's canonical session then returned 200. The reported
+  DAC–JSR search for 2026-09-24 returned two offers, BDT currency, partial=false,
+  and both pricing records. Wallet identity, balances and version were unchanged.
+- Backend `df48e5bcfc50b54ff3b8a9a086e0d1a8cd4bd0bc` makes first portal search
+  establish a missing connection for active canonical agencies. Concurrent first
+  searches share one connection; existing inactive/restricted clients remain
+  denied. Customer, agency and sub-user scope checks remain enforced.
+- Local canonical business integration and all-target clippy passed, including
+  concurrency, wallet identity, no external credentials and retained denials.
+- No new schema migration, frontend build, Vercel variable or identity pin change.
+  Private evidence: `.local/flight-search-release/evidence.json`.
+- Development Actions `35565565928` and production Actions `35566316270`
+  completed checks, build and their respective deployment jobs successfully.
+  Both servers report the code SHA above, migration `0063`, matching canonical
+  pins and maintenance off (development revision 3, production revision 5).
+  Internal/public live and ready health checks passed on both environments.
+- Stable development and production homepages successfully resolved the existing
+  signed-in Super Admin to the dashboard. Frontend remains `5178694` in both
+  environments; no new Vercel deployment was needed.
+- After production deployment, the affected B2B owner's session, same route/date
+  search and both offer pricing records again returned 200 with two offers and
+  unchanged wallet state. Production notification configuration was validated
+  and the business worker resumed; development delivery remains inactive.
+- Production deployment backup: `/var/backups/shapontravels/db-20260921T060748Z.dump`.
+  No test booking, ticket, deposit or email was created by this verification.
