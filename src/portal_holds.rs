@@ -218,7 +218,7 @@ async fn prepare(
         );
         sqlx::query("INSERT INTO flight_searches(id,client_id,request,currency,expires_at) SELECT $1,$2,request,currency,expires_at FROM flight_searches WHERE id=$3")
             .bind(search).bind(machine.client_id).bind(old_search).execute(&mut *tx).await?;
-        sqlx::query("INSERT INTO flight_offers(id,client_id,search_id,supplier_id,availability_epoch,original,selling,reference_map,rule_id,rule_version,expires_at) SELECT $1,$2,$3,supplier_id,availability_epoch,original,$4,$5,rule_id,rule_version,expires_at FROM flight_offers WHERE id=$6")
+        sqlx::query("INSERT INTO flight_offers(id,client_id,search_id,supplier_id,availability_epoch,original,selling,reference_map,rule_id,rule_version,tier_pricing,expires_at) SELECT $1,$2,$3,supplier_id,availability_epoch,original,$4,$5,rule_id,rule_version,tier_pricing,expires_at FROM flight_offers WHERE id=$6")
             .bind(offer).bind(machine.client_id).bind(search).bind(selling).bind(references).bind(input.source_offer_id).execute(&mut *tx).await?;
         let selection = json!({"uniqueTransID":search,"itemCodeRef":offer,"segmentCodeRefs":input.segment_code_refs});
         sqlx::query("INSERT INTO portal_hold_drafts(id,creator_external_user_id,owner_external_user_id,client_id,source_offer_id,offer_id,selection,owner_display) VALUES($1,$2,$3,$4,$5,$6,$7,$8)")

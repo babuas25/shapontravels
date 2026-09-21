@@ -135,6 +135,22 @@ async fn canonical_booking_ownership_and_unknown_dispatch() {
     assert_eq!(s, 200, "{view}");
     assert_ne!(view["owner"]["agencyCode"], "FOREIGN");
     assert_ne!(view["owner"]["name"], "FORGED");
+    // A B2B search snapshot and its prepared quote have the same commercial
+    // amounts. Cloning into a hold draft must not discard the comparison price.
+    let own_offer = Uuid::new_v4();
+    sqlx::query("INSERT INTO flight_offers(id,client_id,search_id,supplier_id,availability_epoch,original,selling,reference_map,rule_id,rule_version,tier_pricing,expires_at) SELECT $1,o.client_id,o.search_id,o.supplier_id,o.availability_epoch,r.original->'item1',jsonb_set(r.selling->'item1','{itemCodeRef}',to_jsonb($1::text)),r.reference_map,r.rule_id,r.rule_version,r.tier_pricing,o.expires_at FROM portal_hold_drafts d JOIN flight_offers o ON o.id=d.offer_id JOIN flight_reprices r ON r.id=d.price_id WHERE d.id=$2")
+        .bind(own_offer).bind(draft).execute(&pool).await.unwrap();
+    let own_identity = json!({"actor":{"external_user_id":"user_canonicalowner","role":"b2b"},"owner_external_user_id":"user_canonicalowner","draft_id":Uuid::new_v4()});
+    let (s, own_view) = business(app, "user_canonicalowner", "/admin/portal-holds/prepare", json!({"identity":own_identity,"source_offer_id":own_offer,"segment_code_refs":fixture.refs})).await;
+    assert_eq!(s, 200, "{own_view}");
+    assert_eq!(own_view["quote"]["isPriceChanged"], false, "{own_view}");
+    assert_eq!(own_view["pricing"], view["pricing"]);
+    assert_eq!(own_view["accepted"], false);
+    assert_eq!(
+        fixture.calls(),
+        0,
+        "Preparation never submits a supplier booking"
+    );
     let accept = json!({"identity":identity,"price_id":view["quote"]["priceCodeRef"],"pricing":view["pricing"]});
     let (s, v) = business(
         app,
