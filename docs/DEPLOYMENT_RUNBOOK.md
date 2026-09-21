@@ -169,10 +169,10 @@ Recheck before the next release:
 
 | Item | Development | Production |
 | --- | --- | --- |
-| Rust release | `df48e5b` | `df48e5b` |
+| Rust release | `6c4b227` | `6c4b227` |
 | Applied migration | `0063` | `0063` |
 | Canonical rollout revision | `3` | `5` |
-| Frontend release | `5178694` | `5178694` |
+| Frontend release | `ab6a3e5` | `ab6a3e5` |
 | Real business notification worker | Disabled | Active |
 
 Temporary operator capabilities were removed and maintenance was off on both
@@ -561,3 +561,49 @@ request; no manual VPS deployment or production migration is authorized here.
   and the business worker resumed; development delivery remains inactive.
 - Production deployment backup: `/var/backups/shapontravels/db-20260921T060748Z.dump`.
   No test booking, ticket, deposit or email was created by this verification.
+
+
+### B2B fare, supplier operations and dashboard release — 2026-09-21
+
+- Rust `6c4b227eed786216465994320ecdfc0326f24749` deployed to development and
+  production; Actions `35570344269` and `35571379612` passed checks, release build
+  and the matching deployment job. Frontend `ab6a3e5604285403c58cc67b770d56c75dce3ad7`
+  was published from development and promoted to main in the authorized new repo.
+- Vercel development `dpl_51jLS6hwev1cayNVXz5nugi1U48X` and production
+  `dpl_EUHtnCVmsU8EbLKXux3bb2xopoiE` are READY; stable aliases point to those
+  releases. Both authenticated homepages reached the Super Admin dashboard.
+- Hold preparation retains the search tier-pricing snapshot. B2B Select accepts
+  the exact verified quote and opens passenger details when customer-visible
+  amounts are unchanged. Changed fares, supplier-reported changes, failed
+  acceptance and staff booking on behalf retain their review/error behavior.
+- The six production supplier booking/ticketing environment flags were already
+  true. The active Triplover database connection still disabled booking,
+  ticketing and servicing. An audited, version-checked operator transaction
+  enabled those three controls, advancing its version from 2 to 3. Firsttrip and
+  Takeoff remain search-disabled and were not activated by this release.
+- `TICKET_MANAGEMENT_ENABLED=true` is configured independently in Vercel Production
+  and Preview scoped to development. My Bookings > Manage exposes Refund, Reissue
+  and VOID through canonical Rust routes. Existing ownership, entitlement,
+  quotation and financial approval checks remain enforced.
+- Super Admin now has the reference Summary cards and Recent Activity layout.
+  Optional Rust aggregates include portal and imported bookings, pending wallet
+  deposits and pending B2B applications; global totals are restricted to Super
+  Admin. They reflect the current Rust database, not the reference site's legacy
+  booking totals. B2B users continue to land on Flight Search.
+- Validation passed: all-target Clippy; fresh canonical booking/ownership/dashboard
+  database journey; native ticket-management financial journeys; frontend
+  typecheck, prebooking, holds, ticket-management routes, Preview readiness and
+  optional public-image checks. Actual flight-card browser fixtures covered
+  unchanged/changed/supplier-changed fares, failed acceptance and staff review.
+  Browser checks verified the new dashboard and Manage tabs in both environments.
+- Production B2B verification returned two DAC–JSR offers, identical search and
+  repriced pricing, `isPriceChanged=false`, and `submissionEnabled=true`. The B2B
+  Ticket Management list returned 200. No supplier booking or ticket was issued,
+  and the wallet remained unchanged. Start a new search to replace old drafts
+  that retain the earlier incomplete pricing snapshot.
+- Internal/public health, deployed SHAs, canonical readiness and matching pins
+  passed. Migration stays `0063`; revisions stay development `3` / production `5`.
+  No migration or identity authority change was needed. Production notification
+  configuration was validated and its worker restarted and verified active;
+  development real delivery remains disabled. Private evidence is under ignored
+  `.local/fare-checkout-release`.
