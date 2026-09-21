@@ -93,8 +93,11 @@ Exit 0 means the selected local operator/mapping/backlog snapshot is clear, main
 
 ### Reviewed provider-subject remap
 
-Migration `0065_portal_identity_subject_remaps.sql` supports a one-time Clerk
-provider-subject change for an existing, retained portal account. It does not
+Migrations `0065_portal_identity_subject_remaps.sql` and
+`0066_portal_identity_subject_remap_permissions.sql` support a one-time Clerk
+provider-subject change for an existing, retained portal account. The remap
+function is unavailable to `PUBLIC`, so the regular application role cannot
+invoke it. It does not
 discover users or match by email, name, role metadata, browser session or an
 invitation. An operator must independently verify the exact old and new Clerk
 subjects belong to the same person, then record those explicit pairs in a
