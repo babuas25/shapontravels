@@ -583,6 +583,8 @@ struct DashboardQuery {
 #[derive(Deserialize)]
 #[serde(deny_unknown_fields)]
 struct DashboardInput {
+    #[serde(default)]
+    include_summary: bool,
     reader: Reader,
     query: DashboardQuery,
     #[serde(default)]
@@ -681,7 +683,13 @@ async fn dashboard(
       AND ($8='' OR left(fly_date,10)>= $8) AND ($9='' OR left(fly_date,10)<= $9)
       AND ($10='' OR payable>=nullif($10,'')::numeric) AND ($11='' OR payable<=nullif($11,'')::numeric)
     ), page AS (SELECT * FROM filtered ORDER BY {sort} {direction} NULLS LAST,id DESC LIMIT $12 OFFSET $13)
-    SELECT jsonb_build_object('total',(SELECT count(*) FROM filtered),'bookings',coalesce((SELECT jsonb_agg(jsonb_build_object(
+    SELECT jsonb_build_object('summary',CASE WHEN $18 THEN jsonb_build_object(
+      'onHold',(SELECT count(*) FROM records WHERE status='on-hold'),
+      'pendingDeposit',(SELECT count(*) FROM wallet_requests WHERE kind='deposit' AND status='pending'),
+      'pendingB2bUsers',(SELECT count(*) FROM portal_identity_applications WHERE status='pending'),
+      'coTravelers',(SELECT coalesce(sum(pax_count),0) FROM records),
+      'tickets',(SELECT count(*) FROM records WHERE status='confirmed')) END,
+      'total',(SELECT count(*) FROM filtered),'bookings',coalesce((SELECT jsonb_agg(jsonb_build_object(
       'id',id,'draftId',draft_id,'detailHref',CASE WHEN draft_id IS NULL THEN '/dashboard/bookings/import/'||reference ELSE '/dashboard/bookings/hold/'||draft_id END,'reference',reference,'createdAt',created_at,'status',status,'pnr',pnr,'airlinePnrs',airline_pnrs,'name',name,'passengerCount',pax_count,
       'creatorId',creator,'ownerId',owner_id,'owner',owner,'currency',currency,'payable',payable::text,'gross',gross::text,'supplier',supplier::text,
       'flyDate',fly_date,'airline',airline,'route',route,
@@ -708,6 +716,7 @@ async fn dashboard(
         .bind(supplier_visible)
         .bind(import_agency)
         .bind(import_admin)
+        .bind(input.include_summary && supplier_visible)
         .fetch_one(&mut *tx)
         .await?;
     tx.commit().await?;

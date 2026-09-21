@@ -219,10 +219,14 @@ async fn canonical_booking_ownership_and_unknown_dispatch() {
             app,
             who,
             "/admin/portal-holds/dashboard",
-            json!({"query":query}),
+            json!({"query":query,"include_summary":true}),
         )
         .await;
         assert_eq!(s, 200, "{who}: {v}");
+        assert!(
+            v["summary"].is_null(),
+            "Only Super Admin may read global totals"
+        );
         assert!(
             v["bookings"]
                 .as_array()
@@ -234,6 +238,20 @@ async fn canonical_booking_ownership_and_unknown_dispatch() {
             assert_eq!(v["total"], 1);
         }
     }
+    let (s, overview) = business(
+        app,
+        "user_canonicalroot",
+        "/admin/portal-holds/dashboard",
+        json!({"query":query,"include_summary":true}),
+    )
+    .await;
+    assert_eq!(s, 200, "{overview}");
+    assert_eq!(overview["summary"]["onHold"], 1);
+    // Includes the three retained outcome-unknown fixture bookings.
+    assert_eq!(overview["summary"]["coTravelers"], 4);
+    assert_eq!(overview["summary"]["tickets"], 0);
+    assert!(overview["summary"]["pendingDeposit"].is_number());
+    assert!(overview["summary"]["pendingB2bUsers"].is_number());
     let newdraft = Uuid::new_v4();
     let mut identity2 = identity;
     identity2["draft_id"] = json!(newdraft);
