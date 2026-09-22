@@ -984,3 +984,38 @@ the user's production release authorization under this runbook.
   before a remap. Newly created Clerk accounts must use onboarding and receive no
   retained portal role automatically. Private backup, preflight and remap artifacts
   remain under restricted ignored `.local/identity-cutover-20260922/` storage.
+
+### Reviewed retained-account recovery — 2026-09-22 (Asia/Dhaka)
+
+- Backend `b858162a8ba60bedadadb73881070af7523b75c4` adds migration `0067`, which
+  supports a separately reviewed active B2B account whose new Clerk identity had
+  created an inert customer/onboarding placeholder. The restricted procedure
+  atomically retains the B2B role, agency and owned business references, tombstones
+  only the placeholder, and records immutable remap/displacement evidence. The
+  existing exact-subject procedure also now retains search controls.
+- A fresh root-only production backup
+  `/var/backups/shapontravels/db-20260922T033331Z.dump` restored successfully to
+  a new temporary database at schema `0067`; the production source database was
+  unchanged by the rehearsal and the temporary database was removed. A preliminary
+  maintenance validation performed no data transaction and was restored before the
+  reviewed cutover.
+- Fresh provider evidence was privately reviewed for two existing accounts. The
+  B2B placeholder account was remapped to its active B2B account, preserving its
+  retained business records; the retained Super Admin account was remapped to its
+  verified current Clerk identity. Post-remap database checks confirm the active
+  target roles and immutable remap evidence. Provider subjects, operation IDs and
+  private evidence remain outside the repository.
+- The remaining retained B2B account had no current Clerk identity, so a pending
+  Clerk invitation was created with the approved `preview.shapontravels.com`
+  sign-up redirect. It must be accepted before an exact-subject remap can be
+  reviewed and applied; it received no automatic portal role or agency mutation.
+- Production [Actions 35682784216](https://github.com/babuas25/shapontravels/actions/runs/35682784216)
+  passed checks, migration and deployment. Production reports deployed SHA
+  `b858162a8ba60bedadadb73881070af7523b75c4`, migration `0067`, maintenance off,
+  active API and notification services, and HTTP 200 from public live/ready health
+  endpoints. Frontend production remains the already deployed
+  `94c20cd32bab9e365d2b739b653d6d259ecdd629` release.
+- Development [Actions 35681671087](https://github.com/babuas25/shapontravels/actions/runs/35681671087)
+  passed its build and test jobs, but its deployment could not reach the development
+  VPS over SSH. No development migration or runtime activation is claimed until
+  connectivity to `160.25.226.72` is restored.
