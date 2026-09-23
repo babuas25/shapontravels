@@ -129,6 +129,7 @@ enum Command {
         cursor: Option<String>,
     },
     ReportSummary,
+    LedgerDashboard,
     Request {
         id: Uuid,
         kind: String,
@@ -257,6 +258,7 @@ async fn portal(
             super::workflows::lookup(&state.pool, &actor, id, &kind).await?
         }
         Command::ReportSummary => super::reports::summary(&state.pool, &actor).await?,
+        Command::LedgerDashboard => super::reports::ledger_dashboard(&state.pool, &actor).await?,
         Command::Setting {
             kind,
             operation,

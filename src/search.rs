@@ -99,14 +99,14 @@ pub struct ConfiguredSupplier {
 }
 pub type Suppliers = Arc<HashMap<String, ConfiguredSupplier>>;
 
-#[derive(Serialize, Deserialize, ToSchema)]
+#[derive(Clone, Serialize, Deserialize, ToSchema)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct Route {
     pub origin: String,
     pub destination: String,
     pub departure_date: String,
 }
-#[derive(Serialize, Deserialize, ToSchema)]
+#[derive(Clone, Serialize, Deserialize, ToSchema)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct SearchRequest {
     pub routes: Vec<Route>,
@@ -332,7 +332,14 @@ async fn search(
         json!(request.routes),
     )
     .await?;
+    let history_request = request.clone();
     let result = search_tracked(machine, admission, &state, request, &usage).await;
+    if matches!(&result, Ok(response) if response.status().is_success())
+        && let Err(error) =
+            crate::search_history::record(&state.pool, &usage, &history_request).await
+    {
+        tracing::warn!(error = ?error, "flight search history write failed");
+    }
     let (status, code) = match &result {
         Ok(response) => (
             response.status(),

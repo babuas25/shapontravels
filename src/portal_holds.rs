@@ -645,16 +645,19 @@ async fn dashboard(
         concat_ws(' ', b.request#>>'{{passengerInfoes,0,nameElement,firstName}}', b.request#>>'{{passengerInfoes,0,nameElement,lastName}}') name,
         jsonb_array_length(b.request->'passengerInfoes') pax_count,
         b.created_by_external_user_id creator,
+        coalesce(nullif(trim(concat_ws(' ',creator_user.first_name,creator_user.last_name)),''),creator_user.email,b.created_by_external_user_id) creator_name,
         d.owner_display owner, d.owner_external_user_id owner_id,
         r.tier_pricing->>'currency' currency,
         (r.tier_pricing->>'payable')::numeric payable,
         (r.tier_pricing->>'gross')::numeric gross,
         CASE WHEN $15 THEN (r.original#>>'{{item1,totalPrice}}')::numeric ELSE NULL END supplier,
+        CASE WHEN $15 THEN b.supplier_booking_ref END supplier_reference,
         r.selling#>>'{{item1,directions,0,0,segments,0,departure}}' fly_date,
         r.selling#>>'{{item1,platingCarrier}}' airline,
         (SELECT string_agg(concat_ws(' → ', x#>>'{{0,from}}',x#>>'{{0,to}}'),' → ') FROM jsonb_array_elements(r.selling#>'{{item1,directions}}') x) route
       FROM flight_bookings b JOIN portal_hold_drafts d ON d.id=b.portal_hold_draft_id AND d.client_id=b.client_id
       JOIN flight_reprices r ON r.id=b.price_id
+      LEFT JOIN portal_users creator_user ON creator_user.clerk_user_id=b.created_by_external_user_id
       LEFT JOIN flight_ticket_issues t ON t.booking_id=b.id
       LEFT JOIN flight_ticket_verifications v ON v.issue_id=t.id
       WHERE ($1 OR d.owner_external_user_id=$2)
@@ -663,10 +666,12 @@ async fn dashboard(
         coalesce(b.data->>'pnr',''),coalesce(b.data->'airlinesPnr','[]'::jsonb),
         concat_ws(' ',b.data#>>'{{passengers,travellers,0,firstName}}',b.data#>>'{{passengers,travellers,0,lastName}}'),
         jsonb_array_length(b.data#>'{{passengers,travellers}}'),creator.clerk_user_id,
+        coalesce(nullif(trim(concat_ws(' ',creator.first_name,creator.last_name)),''),creator.email,creator.clerk_user_id) creator_name,
         jsonb_build_object('name',coalesce(nullif(trim(concat_ws(' ',assigned.first_name,assigned.last_name)),''),assigned.clerk_user_id),
           'email',coalesce(assigned.email,''),'agencyName',coalesce(profile.fields->>'agencyName',''),'agencyCode',b.agency_code),
         assigned.clerk_user_id,b.currency,b.payable_minor::numeric/100,b.gross_minor::numeric/100,
         CASE WHEN $15 THEN coalesce((SELECT c.supplier_minor FROM portal_import_cost_corrections c WHERE c.booking_id=b.id),b.supplier_minor)::numeric/100 ELSE NULL END,
+        CASE WHEN $15 THEN b.display_supplier_reference END,
         coalesce(b.data#>>'{{itinerary,legs,0,departure}}',b.data#>>'{{itinerary,legs,0,segments,0,departure}}'),
         b.data#>>'{{itinerary,carrierCode}}',
         (SELECT string_agg(concat_ws(' → ',coalesce(l->>'from',l#>>'{{segments,0,from}}'),coalesce(l->>'to',l#>>'{{segments,-1,to}}')),' → ' ORDER BY n)
@@ -691,10 +696,10 @@ async fn dashboard(
       'tickets',(SELECT count(*) FROM records WHERE status='confirmed')) END,
       'total',(SELECT count(*) FROM filtered),'bookings',coalesce((SELECT jsonb_agg(jsonb_build_object(
       'id',id,'draftId',draft_id,'detailHref',CASE WHEN draft_id IS NULL THEN '/dashboard/bookings/import/'||reference ELSE '/dashboard/bookings/hold/'||draft_id END,'reference',reference,'createdAt',created_at,'status',status,'pnr',pnr,'airlinePnrs',airline_pnrs,'name',name,'passengerCount',pax_count,
-      'creatorId',creator,'ownerId',owner_id,'owner',owner,'currency',currency,'payable',payable::text,'gross',gross::text,'supplier',supplier::text,
+      'creatorId',creator,'creatorName',creator_name,'ownerId',owner_id,'owner',owner,'currency',currency,'payable',payable::text,'gross',gross::text,'supplier',supplier::text,
       'flyDate',fly_date,'airline',airline,'route',route,
       'lifecycleAt',CASE WHEN draft_id IS NULL THEN (SELECT coalesce(i.issued_at,i.updated_at) FROM portal_import_bookings i WHERE i.id=page.id) END,
-      'supplierReference',CASE WHEN $15 AND draft_id IS NULL THEN (SELECT i.display_supplier_reference FROM portal_import_bookings i WHERE i.id=page.id) END)) FROM page),'[]'::jsonb))
+      'supplierReference',supplier_reference)) FROM page),'[]'::jsonb))
     "#
     );
     let mut tx = crate::identity::business::begin(&state.pool).await?;

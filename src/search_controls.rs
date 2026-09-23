@@ -15,6 +15,26 @@ pub(crate) struct Usage {
     pub actor_key: String,
     pub subject: Option<String>,
 }
+/// The same actor partition is used by budgets, private history and API
+/// suggestions.  Keep unlinked credentials isolated from one another.
+pub(crate) async fn scope_key(
+    pool: &PgPool,
+    machine: &Machine,
+    subject: Option<String>,
+) -> Result<String, ApiError> {
+    let subject = match subject {
+        Some(s) => Some(s),
+        None => {
+            sqlx::query_scalar::<_, Option<String>>(
+                "SELECT external_user_id FROM api_clients WHERE id=$1",
+            )
+            .bind(machine.client_id)
+            .fetch_one(pool)
+            .await?
+        }
+    };
+    Ok(subject.unwrap_or_else(|| format!("client:{}", machine.client_id)))
+}
 pub(crate) async fn start(
     pool: &PgPool,
     machine: &Machine,
@@ -34,11 +54,10 @@ pub(crate) async fn start(
             .await?
         }
     };
+    let actor_key = scope_key(pool, machine, subject.clone()).await?;
     let usage = Usage {
         id: Uuid::new_v4(),
-        actor_key: subject
-            .clone()
-            .unwrap_or_else(|| format!("client:{}", machine.client_id)),
+        actor_key,
         subject,
     };
     sqlx::query(

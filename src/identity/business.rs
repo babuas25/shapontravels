@@ -268,6 +268,11 @@ pub async fn execute(
                     .await?;
             }
         }
+        ("/admin/portal-search-suggestions", "POST") => {
+            if !["superadmin", "admin", "b2b", "b2b_sub"].contains(&c.actor.role.as_str()) {
+                return Err(denied());
+            }
+        }
         ("/admin/markup-rules", "GET" | "POST")
         | ("/admin/markup-agents", "GET")
         | ("/admin/markup-preview", "POST") => {
@@ -668,6 +673,7 @@ pub async fn execute(
         .merge(crate::tier::routes())
         .merge(crate::markup::routes())
         .merge(crate::search_controls::routes())
+        .merge(crate::search_history::routes())
         .merge(crate::connections::routes())
         .merge(crate::site_content::routes())
         .merge(crate::sales_reports::routes())
@@ -866,7 +872,8 @@ pub(crate) async fn authenticate_search(
         ]
         .contains(&path))
         || (parts.method == Method::GET
-            && (path == "/auth/me"
+            && (path == "/api/SearchSuggestions"
+                || path == "/auth/me"
                 || path.starts_with("/api/pricing/offer/")
                 || path.starts_with("/api/pricing/reprice/")));
     if !allowed {

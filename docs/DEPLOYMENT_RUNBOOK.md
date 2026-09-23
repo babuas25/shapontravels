@@ -1019,3 +1019,33 @@ the user's production release authorization under this runbook.
   passed its build and test jobs, but its deployment could not reach the development
   VPS over SSH. No development migration or runtime activation is claimed until
   connectivity to `160.25.226.72` is restored.
+
+### Development ticket-page preview and Sendbox recovery — 2026-09-22 (Asia/Dhaka)
+
+- The Sendbox API host `160.25.226.72` was recovered without a backend source
+  deployment or migration. PostgreSQL was restarted to clear a stale shared-memory
+  state, and `shapontravels.service` was restarted after the database became ready.
+- `ufw.service` is enabled while the standalone `nftables.service` is disabled;
+  the active custom `ip filter INPUT` chain had a drop policy and lacked public
+  web ingress. The enabled one-shot `sendbox-firewall.service` now restores
+  loopback plus SSH, HTTP and HTTPS accepts at boot. Its `After=network-online.target`
+  ordering is transitively after UFW (`ufw.service` runs before
+  `network-pre.target`), so the recovery rules are installed after UFW's boot-time
+  configuration. The service's four `ExecStart` operations were verified
+  successful.
+- Two post-recovery external checks returned HTTP 200 from both public
+  `https://sendbox.shapontravels.com/health/live` and `/health/ready`; TCP ports
+  22, 80 and 443 on `160.25.226.72` also accepted connections. A controlled
+  Sendbox reboot was subsequently completed with VNC console access retained.
+  Once the normal boot sequence finished, the public live/ready endpoints again
+  returned HTTP 200 and all three ports accepted connections, confirming the
+  boot-time firewall recovery configuration.
+- Frontend development `2d0f3fd7cc9c77f0c5f50e32a004fefb4d32b12e` retriggers
+  the ticket-page release after backend recovery. Its matching
+  [Actions run 35725580426](https://github.com/babuas25/shapontravels-frontend/actions/runs/35725580426)
+  completed successfully, and Vercel marked Preview as deployed at
+  <https://shapontravels-frontend-eybciii3d-shapontravels.vercel.app>.
+  The stable development URL remains deployment-protected and returned its expected
+  Vercel SSO redirect to an unauthenticated check.
+- No production deployment, production configuration change, identity change or
+  stateful booking/ticket test occurred.
