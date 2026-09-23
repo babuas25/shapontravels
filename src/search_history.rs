@@ -22,7 +22,7 @@ use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
 use sha2::{Digest, Sha256};
 use sqlx::FromRow;
-use utoipa::{IntoParams, OpenApi};
+use utoipa::{IntoParams, OpenApi, ToSchema};
 use uuid::Uuid;
 
 const RECENT_LIMIT: i64 = 5;
@@ -59,6 +59,44 @@ impl Kind {
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 struct SuggestionsQuery {
     kind: Option<String>,
+}
+
+/// Public machine-client response. Popular items omit private traveller
+/// preferences; recent items are scoped to the authenticated actor.
+#[derive(Serialize, ToSchema)]
+#[serde(rename_all = "camelCase")]
+struct SearchSuggestionResponse {
+    kind: String,
+    items: Vec<SearchSuggestionItem>,
+}
+
+#[derive(Serialize, ToSchema)]
+#[serde(rename_all = "camelCase")]
+struct SearchSuggestionItem {
+    id: String,
+    input: SearchSuggestionInput,
+    searched_at: String,
+}
+
+#[derive(Serialize, ToSchema)]
+#[serde(rename_all = "camelCase")]
+struct SearchSuggestionInput {
+    trip_type: String,
+    routes: Vec<SearchSuggestionRoute>,
+    adults: i16,
+    children: i16,
+    infants: i16,
+    children_ages: Vec<u8>,
+    cabin_class: i16,
+    preferred_carriers: Vec<String>,
+}
+
+#[derive(Serialize, ToSchema)]
+#[serde(rename_all = "camelCase")]
+struct SearchSuggestionRoute {
+    origin: String,
+    destination: String,
+    departure_date: String,
 }
 
 #[derive(Deserialize)]
@@ -298,7 +336,7 @@ async fn suggestions(
 
 /// Machine API clients can request either their own recent searches or the
 /// anonymous popular list. A portal session keeps its per-user subject scope.
-#[utoipa::path(get,path="/api/SearchSuggestions",tag="Flights",params(SuggestionsQuery),security(("machine_token"=[])),responses((status=200,body=Object),(status=400,description="INVALID_SEARCH_SUGGESTION_KIND"),(status=403,description="search:read permission required")))]
+#[utoipa::path(get,path="/api/SearchSuggestions",tag="Flights",params(SuggestionsQuery),security(("machine_token"=[])),responses((status=200,body=SearchSuggestionResponse),(status=400,description="INVALID_SEARCH_SUGGESTION_KIND"),(status=403,description="search:read permission required")))]
 async fn api_suggestions(
     machine: Machine,
     authority: Option<Extension<SearchAuthority>>,
