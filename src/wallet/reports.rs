@@ -106,3 +106,36 @@ pub(super) async fn summary(pool: &PgPool, actor: &Actor) -> Result<Value> {
     tx.commit().await?;
     Ok(json!({"balances":balances,"owners":owners,"ledger":ledger,"requests":requests}))
 }
+
+/// Data required by the account-ledger screen.  Keep this deliberately
+/// narrower than `summary`: the page does not render report aggregates for
+/// every ledger entry or request category, and calculating them made a simple
+/// navigation wait on unrelated historical reporting work.
+pub(super) async fn ledger_dashboard(pool: &PgPool, actor: &Actor) -> Result<Value> {
+    if !actor.staff_read() {
+        return Err(forbidden());
+    }
+    let mut tx = pool.begin().await?;
+    sqlx::query("SET TRANSACTION ISOLATION LEVEL REPEATABLE READ READ ONLY")
+        .execute(&mut *tx)
+        .await?;
+    let balances: Vec<Value> = sqlx::query_scalar("SELECT jsonb_build_object('currency',a.currency,'availableMinor',sum(a.available_balance)::text,'holdMinor',sum(a.hold_balance)::text,'totalMinor',sum(a.available_balance::numeric+a.hold_balance)::text,'frozenMinor',COALESCE(sum(a.available_balance::numeric+a.hold_balance) FILTER(WHERE o.status='frozen'),0)::text,'accounts',count(*)::text,'frozenCount',count(*) FILTER(WHERE o.status='frozen')::text,'agencyMinor',COALESCE(sum(a.available_balance::numeric+a.hold_balance) FILTER(WHERE o.owner_type='agency'),0)::text,'userMinor',COALESCE(sum(a.available_balance::numeric+a.hold_balance) FILTER(WHERE o.owner_type='user'),0)::text) FROM wallet_accounts a JOIN wallet_owners o ON o.id=a.owner_id GROUP BY a.currency ORDER BY a.currency").fetch_all(&mut *tx).await?;
+    let owners: Value = sqlx::query_scalar("SELECT jsonb_build_object('active',count(*) FILTER(WHERE status='active')::text,'frozen',count(*) FILTER(WHERE status='frozen')::text) FROM wallet_owners")
+        .fetch_one(&mut *tx)
+        .await?;
+    let deposits: Vec<Value> = sqlx::query_scalar(&format!(
+        "{} WHERE r.kind='deposit' ORDER BY r.id DESC",
+        super::workflows::REQUEST_ROW
+    ))
+    .fetch_all(&mut *tx)
+    .await?;
+    tx.commit().await?;
+    Ok(json!({
+        "balances": balances,
+        "owners": owners,
+        "deposits": deposits
+            .into_iter()
+            .map(|row| integer_strings(row, &["amount", "current_balance"]))
+            .collect::<Vec<_>>(),
+    }))
+}

@@ -26,6 +26,7 @@ pub mod sales_reports;
 pub mod search;
 pub mod search_admission;
 pub mod search_controls;
+pub mod search_history;
 mod selection;
 pub mod site_content;
 pub mod supplier;
@@ -140,6 +141,7 @@ pub(crate) fn openapi_document(environment: &str) -> utoipa::openapi::OpenApi {
     doc.merge(connections::ConnectionDoc::openapi());
     doc.merge(markup::MarkupDoc::openapi());
     doc.merge(search_controls::SearchControlDoc::openapi());
+    doc.merge(search_history::SearchHistoryDoc::openapi());
     doc.merge(site_content::SiteContentDoc::openapi());
     doc.merge(search::SearchDoc::openapi());
     doc.merge(reprice::RepriceDoc::openapi());
@@ -196,6 +198,7 @@ pub fn router_with_search_limits(
         .merge(connections::routes())
         .merge(markup::routes())
         .merge(search_controls::routes())
+        .merge(search_history::routes())
         .merge(site_content::routes())
         .merge(sales_reports::routes())
         .merge(portal_imports::routes())

@@ -234,6 +234,13 @@ async fn canonical_booking_ownership_and_unknown_dispatch() {
                 .iter()
                 .all(|r| r["supplier"].is_null())
         );
+        assert!(
+            v["bookings"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .all(|r| r["supplierReference"].is_null())
+        );
         if who == "user_canonicalsub" {
             assert_eq!(v["total"], 1);
         }
@@ -252,6 +259,16 @@ async fn canonical_booking_ownership_and_unknown_dispatch() {
     assert_eq!(overview["summary"]["tickets"], 0);
     assert!(overview["summary"]["pendingDeposit"].is_number());
     assert!(overview["summary"]["pendingB2bUsers"].is_number());
+    let draft_id = draft.to_string();
+    assert_eq!(
+        overview["bookings"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|booking| booking["draftId"].as_str() == Some(draft_id.as_str()))
+            .unwrap()["supplierReference"],
+        "hold-booking"
+    );
     let newdraft = Uuid::new_v4();
     let mut identity2 = identity;
     identity2["draft_id"] = json!(newdraft);
