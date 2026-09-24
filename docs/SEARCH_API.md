@@ -20,11 +20,13 @@
 }
 ```
 
-Search accepts documented cabin classes 1–5. The initial request bounds are 1–9 total passengers including infants, at least one adult, at most one infant per adult, and at most six requested routes. Child ages must match the child count and lie in 2–11. Only the observed optional fareType `1` is supported until more supplier enum evidence exists. Unknown fields such as client-supplied agent/audience overrides are rejected.
+Search accepts documented cabin classes 1–5. The initial request bounds are 1–9 total passengers including infants, at least one adult, at most one infant per adult, and at most six requested routes. Child ages must match the child count and lie in 2–11. Optional request `fareType` may be omitted or set to `0` or `1`: `1` appears in supplier fixtures and Triplover UAT accepted `0` in a Search-only check on 2026-09-24. The supplier has not documented the enum meanings; other values remain rejected. Unknown fields such as client-supplied agent/audience overrides are rejected.
 
 ## Response and pricing
 
 Results are at `item1.airSearchResponses[]`. For B2B, each offer's `totalPrice` is count-aggregated **published gross (original base + taxes)**, excluding separate AIT. It is not the final payable. Read `fareBreakdown.payable` or the owner-scoped pricing API for the exact tier payable. For B2C, legacy totals retain the marked-up selling projection. Two-decimal per-passenger rounding precedes count aggregation. Original supplier pricing and rule versions remain private. See [the client guide](CLIENT_API_GUIDE.md) and [tier arithmetic](B2B_TIERS.md).
+
+The response field `passengerFares.<type>.fareType` is preserved from the selected supplier offer without conversion. It is supplier output metadata, not an echo of the optional request `fareType` selector. The supplier documentation does not define the selector's enum values or its relationship to the response field.
 
 Search summary/filter metadata is aggregated **after supplier selection and public price projection**, from the final `item1.airSearchResponses` only. `X-Search-Summary-Scope: retained-selling-offers` identifies this contract. Aggregation is separate from markup; the offer projection still changes only its permitted pricing fields.
 

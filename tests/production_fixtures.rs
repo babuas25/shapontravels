@@ -1,7 +1,7 @@
 use serde_json::Value;
 use shapontravels_api::{
     pricing::Markup,
-    projection::{ProjectionError, single_component},
+    projection::{ProjectionError, published_gross, single_component},
 };
 fn fixtures() -> Vec<Value> {
     [
@@ -59,6 +59,35 @@ fn production_shape_and_fixed_markup_preserve_every_nonpricing_value() {
             let old: bigdecimal::BigDecimal = original["totalPrice"].to_string().parse().unwrap();
             let new: bigdecimal::BigDecimal = result["totalPrice"].to_string().parse().unwrap();
             assert_eq!(new - old, bigdecimal::BigDecimal::from(500));
+        }
+    }
+}
+
+#[test]
+fn b2b_search_keeps_supplier_fare_type_for_every_passenger_fare() {
+    for envelope in fixtures() {
+        for fixture_offer in envelope["item1"]["airSearchResponses"].as_array().unwrap() {
+            for supplier_fare_type_zero in [false, true] {
+                let mut original = fixture_offer.clone();
+                if supplier_fare_type_zero {
+                    for fare in original["passengerFares"]
+                        .as_object_mut()
+                        .unwrap()
+                        .values_mut()
+                    {
+                        if let Some(fare_type) = fare.get_mut("fareType") {
+                            *fare_type = Value::from(0);
+                        }
+                    }
+                }
+                let public = published_gross(&original).unwrap();
+                for (kind, fare) in original["passengerFares"].as_object().unwrap() {
+                    if fare.is_object() {
+                        assert_eq!(public["passengerFares"][kind]["fareType"], fare["fareType"]);
+                    }
+                }
+                assert_preserved(&original, &public, "");
+            }
         }
     }
 }

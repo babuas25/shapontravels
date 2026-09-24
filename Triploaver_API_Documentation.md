@@ -320,7 +320,7 @@ Returns a list of priced itinerary options. Each option carries the references n
 | `childs` | int | ✓ | Passengers aged 2 to <12 (server splits into `chd` / `cnn` based on `childrenAges`) |
 | `infants` | int | ✓ | Passengers aged 0 to <2 |
 | `cabinClass` | int | ✓ | Cabin class enum (see §3.3) |
-| `fareType` | int | | Optional fare-type selector. The supplied multicity fixture sends `1`; the supplier PDF and Postman collection do not define the enum, so confirm other values with Triplover. |
+| `fareType` | int | | Optional fare-type selector. The supplied multicity fixture sends `1`; a 2026-09-24 Triplover UAT Search accepted `0`. The supplier PDF and Postman collection do not define the enum or meanings, so confirm other values with Triplover. |
 | `preferredCarriers` | string[] | ✓ | Allow-list of IATA carrier codes (empty = no preference) |
 | `prohibitedCarriers` | string[] | ✓ | Block-list of IATA carrier codes |
 | `childrenAges` | int[] | ✓ | Age of each child in `childs`, e.g. `[5, 6]` |

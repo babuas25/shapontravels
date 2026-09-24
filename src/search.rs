@@ -148,7 +148,7 @@ impl SearchRequest {
                 .iter()
                 .chain(&self.prohibited_carriers)
                 .all(carrier)
-            || self.fare_type.is_some_and(|n| n != 1)
+            || self.fare_type.is_some_and(|n| n != 0 && n != 1)
         {
             return Err(error("INVALID_SEARCH_REQUEST"));
         }
@@ -956,6 +956,28 @@ pub fn routes() -> Router<AppState> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn observed_fare_type_values_are_forwarded_without_rewriting() {
+        let date = (chrono::Utc::now() + chrono::Duration::days(21))
+            .format("%Y-%m-%d")
+            .to_string();
+        let mut request: SearchRequest = serde_json::from_value(json!({
+            "routes": [{"origin":"DAC","destination":"LHR","departureDate":date}],
+            "adults": 2, "childs": 2, "childrenAges": [6, 9], "infants": 1,
+            "cabinClass": 1, "preferredCarriers": [], "prohibitedCarriers": []
+        }))
+        .unwrap();
+        for value in [None, Some(0), Some(1)] {
+            request.fare_type = value;
+            assert!(request.validate().is_ok());
+            let payload = serde_json::to_value(&request).unwrap();
+            assert_eq!(payload.get("fareType").cloned(), value.map(|v| json!(v)));
+        }
+        for value in [-1, 2, 3, 4] {
+            request.fare_type = Some(value);
+            assert_eq!(request.validate().unwrap_err().1, "INVALID_SEARCH_REQUEST");
+        }
+    }
     fn return_fixture() -> (Value, SearchRequest, Vec<Rule>) {
         let body: Value = serde_json::from_str(include_str!(
             "../tests/fixtures/production/triplover-return.json"
