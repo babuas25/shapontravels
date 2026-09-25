@@ -19,6 +19,9 @@ use utoipa::{OpenApi, ToSchema};
 use uuid::Uuid;
 
 type ReadFuture<'a> = Pin<Box<dyn Future<Output = Result<Value, SupplierError>> + Send + 'a>>;
+// Keep each INSERT bounded while reducing database round trips for large
+// return and multi-city inventories. All rows still commit atomically.
+const OFFER_INSERT_BATCH_SIZE: usize = 64;
 pub trait ReadSupplier: Send + Sync {
     fn authorized_uat_cancellation(&self) -> bool {
         false
@@ -675,7 +678,7 @@ async fn search_tracked(
         // Smaller statements bound PostgreSQL's per-statement JSON/parameter
         // memory. Keep all batches in this transaction for atomic persistence.
         // Original snapshot JSON is retained only until this batch is written.
-        let originals: Vec<_> = remaining.by_ref().take(16).collect();
+        let originals: Vec<_> = remaining.by_ref().take(OFFER_INSERT_BATCH_SIZE).collect();
         if originals.is_empty() {
             break;
         }
@@ -789,6 +792,7 @@ async fn search_tracked(
     let commit_started = std::time::Instant::now();
     tx.commit().await?;
     tracing::info!(target: "search_performance", usage_id = %usage.id,
+        route_count = request.routes.len(),
         preflight_ms, dispatch_ms, supplier_wait_ms, supplier_ms, preparation_ms,
         projection_ms = projection_time.as_millis() as u64,
         sql_encode_ms = sql_encode_time.as_millis() as u64,
