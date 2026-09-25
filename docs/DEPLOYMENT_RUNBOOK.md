@@ -208,7 +208,7 @@ Recheck before the next release:
 | Rust release | `44c80a1` | `a351ee5` |
 | Applied migration | `0066` | `0069` |
 | Canonical rollout revision | `3` | `5` |
-| Frontend release | `94c20cd` | `da225bf` |
+| Frontend release | `94c20cd` | `c7af7df` |
 | Real business notification worker | Disabled | Active |
 
 Temporary operator capabilities were removed and maintenance was off on both
@@ -1213,3 +1213,36 @@ the user's production release authorization under this runbook.
 - No booking, ticket, deposit or notification delivery was created for this
   verification. Private deployment and diagnostic evidence remains under ignored
   `.local/evidence`; the release record contains no secrets or customer payloads.
+
+### Frontend function region release — 2026-09-25 (Asia/Dhaka)
+
+- The user authorized a further frontend release to reduce the production versus
+  local Search gap, set Vercel's project Function Region to `sin1`, and initiated
+  the deployment. Frontend `vercel.json` now records `regions: ["sin1"]`. The
+  source was committed to `development` as `a4db85d` and promoted to `main` as
+  `c7af7df`; GitHub quality/build runs `36140402357` and `36140552505` passed.
+- Local frontend lint, optimized build, type check and Vercel JSON schema
+  validation passed before publication. The source-only pushes used `[skip deploy]`.
+  Vercel production deployment
+  [`EA7J8vnNX84VBEtCXSVL61sgy7QV`](https://vercel.com/shapontravels/shapontravels-frontend/EA7J8vnNX84VBEtCXSVL61sgy7QV)
+  became Ready on `preview.shapontravels.com` from the exact `c7af7df` source.
+  A public production response returned `x-vercel-id: sin1::sin1::…`, confirming
+  execution in Singapore rather than the earlier `iad1` function location.
+- The controlled one-way DAC–BKK, 30 September 2026, one-adult Search returned
+  HTTP 200 and displayed 136 flights. Rust recorded all three suppliers as
+  successful (Takeoff 3,510 ms, Firsttrip 5,010 ms, Triplover 5,451 ms), 6,283 ms
+  search processing, 661 source offers, 651 retained offers, zero failed/blocked
+  suppliers and zero scope exclusions. The matching Vercel Search function ran
+  for 10.77 s and completed its response in 10.9 s, using one Search POST and one
+  complete search-pricing GET. Its request ID was
+  `rt5vv-1790342778622-2cdd021e8917`.
+- Before the region change, Chrome recorded 14.87 s for a matching route/date,
+  including 13.20 s server time, 3.20 s identity session, 7.94 s backend and
+  2.02 s complete pricing. The new Vercel and old browser durations have
+  different measurement points. Supplier latency and offer counts change between
+  requests; use repeated same-criteria samples before treating this as a stable
+  percentage improvement.
+- The production Rust release remains `a351ee5`, schema `0069` and canonical
+  identity revision `5`. The public/internal ready checks returned HTTP 200;
+  API and notification worker remained active. No local database data, dump,
+  secret or profile was transferred, and no booking or payment was created.
