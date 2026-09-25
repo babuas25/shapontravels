@@ -184,13 +184,13 @@ an explicit agency reassignment workflow and is rejected here.
 
 ## Last verified release and maintenance record
 
-Development last fully verified 2026-09-22; production released 2026-09-24.
+Development last fully verified 2026-09-22; production released 2026-09-25.
 Recheck before the next release:
 
 | Item | Development | Production |
 | --- | --- | --- |
-| Rust release | `44c80a1` | `619027d` |
-| Applied migration | `0066` | `0068` |
+| Rust release | `44c80a1` | `e80c066` |
+| Applied migration | `0066` | `0069` |
 | Canonical rollout revision | `3` | `5` |
 | Frontend release | `94c20cd` | `cc966c7` |
 | Real business notification worker | Disabled | Active |
@@ -207,7 +207,7 @@ Vercel deployment, applied migration, identity revision, health/browser/worker
 results and outstanding follow-ups. Keep public instructions current and store
 private backup/preflight/rollout artifacts separately with restricted permissions.
 
-### Backend source promotion pending deployment — 2026-09-25
+### Backend source promotion before deployment — 2026-09-25
 
 - The requested backend commit is promoted to `development` and `production` as
   source only. Its push uses `[skip ci]` because the push request does not
@@ -220,6 +220,28 @@ private backup/preflight/rollout artifacts separately with restricted permission
   actual deployed SHA, schema and frontend compatibility before a separately
   authorized release. Private local UAT captures and passenger data stay outside
   Git.
+
+### Backend deployment follow-up — 2026-09-25 (Asia/Dhaka)
+
+- Development commit `e4ca299f11d3e7bb1ffdeb9d6044c02e9391f84b` triggered
+  [Actions run 36105916468](https://github.com/babuas25/shapontravels/actions/runs/36105916468).
+  Checks and the Ubuntu release build passed. Deployment failed before upload or
+  migration because SSH to `160.25.226.72:22` timed out. Public HTTPS and TCP
+  ports 22, 80 and 443 were also unreachable from independent hosts. No new
+  development deployed SHA, schema or identity state is claimed. Restore VPS
+  access, then rerun the deployment job and verify the selected target.
+- Production commit `e80c06617ee788e2f6989662f90e5e79ed39089d` triggered
+  [Actions run 36106882308](https://github.com/babuas25/shapontravels/actions/runs/36106882308).
+  Checks, build and deployment passed. The production VPS reports this deployed
+  SHA, migration `0069`, active API, HTTP 200 from public live and ready health,
+  and authenticated canonical identity readiness at rollout revision `5` with
+  maintenance off. The deployment created backup
+  `db-20260925T072731Z.dump`; its restoration was not rehearsed in this release.
+  The notification worker stopped with the API; provider configuration and Rust
+  dispatch ownership were verified, then the worker was restarted and is active.
+  Frontend `main` remains `cc966c77669231a50cb86d38f796874a02ebbb78`;
+  no Vercel deployment or browser session test was performed in this backend-only
+  release. Development frontend also remains unchanged.
 
 
 ### Development login recovery release — 2026-09-20 17:54 UTC
