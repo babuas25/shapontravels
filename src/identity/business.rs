@@ -398,6 +398,13 @@ pub async fn execute(
                 input.body["actor"]["hold_draft_id"] = draft;
             }
         }
+        ("/admin/portal-holds/local-time-limit", "POST") => {
+            if !["superadmin", "admin", "staff_support"].contains(&c.actor.role.as_str()) {
+                return Err(denied());
+            }
+            verify_actor(&input.body["reader"], &c.actor)?;
+            input.body["reader"] = actor_value(&c.actor);
+        }
         (p, "POST")
             if p.starts_with("/admin/portal-holds/")
                 && [
@@ -408,11 +415,12 @@ pub async fn execute(
                     "receipt",
                     "recent",
                     "dashboard",
+                    "api-booking",
                     "ticket",
                 ]
                 .contains(&p.trim_start_matches("/admin/portal-holds/")) =>
         {
-            let scoped_read = ["receipt", "recent", "dashboard"]
+            let scoped_read = ["receipt", "recent", "dashboard", "api-booking"]
                 .contains(&p.trim_start_matches("/admin/portal-holds/"));
             if !["superadmin", "b2b"].contains(&c.actor.role.as_str())
                 && !(scoped_read
@@ -458,15 +466,25 @@ pub async fn execute(
                     input.body["reader"]["external_user_id"] = json!(c.actor.owner_subject);
                 }
                 if p.ends_with("/ticket") {
-                    let draft = Uuid::parse_str(input.body["draft_id"].as_str().ok_or_else(bad)?)
-                        .map_err(|_| bad())?;
-                    let subject: String = sqlx::query_scalar(
-                        "SELECT owner_external_user_id FROM portal_hold_drafts WHERE id=$1",
-                    )
-                    .bind(draft)
-                    .fetch_optional(&mut *tx)
-                    .await?
-                    .ok_or_else(denied)?;
+                    let draft = input.body["draft_id"].as_str();
+                    let booking = input.body["booking_id"].as_str();
+                    if draft.is_some() == booking.is_some() {
+                        return Err(bad());
+                    }
+                    let subject: String = if let Some(raw) = draft {
+                        let id = Uuid::parse_str(raw).map_err(|_| bad())?;
+                        sqlx::query_scalar(
+                            "SELECT owner_external_user_id FROM portal_hold_drafts WHERE id=$1",
+                        )
+                        .bind(id)
+                        .fetch_optional(&mut *tx)
+                        .await?
+                        .ok_or_else(denied)?
+                    } else {
+                        let id = Uuid::parse_str(booking.ok_or_else(bad)?).map_err(|_| bad())?;
+                        sqlx::query_scalar("SELECT c.external_user_id FROM flight_bookings b JOIN api_clients c ON c.id=b.client_id WHERE b.id=$1 AND b.portal_hold_draft_id IS NULL AND c.audience='b2b' AND c.api_management_enabled AND c.tier='enterprise'")
+                            .bind(id).fetch_optional(&mut *tx).await?.ok_or_else(denied)?
+                    };
                     if c.actor.role == "b2b" && subject != c.actor.subject {
                         return Err(denied());
                     }

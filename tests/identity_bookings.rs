@@ -260,15 +260,181 @@ async fn canonical_booking_ownership_and_unknown_dispatch() {
     assert!(overview["summary"]["pendingDeposit"].is_number());
     assert!(overview["summary"]["pendingB2bUsers"].is_number());
     let draft_id = draft.to_string();
+    let booking = overview["bookings"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|booking| booking["draftId"].as_str() == Some(draft_id.as_str()))
+        .unwrap();
+    assert_eq!(booking["supplierReference"], "hold-transaction");
+    let servicing_ref: String = sqlx::query_scalar(
+        "SELECT supplier_booking_ref FROM flight_bookings WHERE portal_hold_draft_id=$1",
+    )
+    .bind(draft)
+    .fetch_one(&pool)
+    .await
+    .unwrap();
+    assert_eq!(servicing_ref, "hold-booking");
+    let (original_deadline, original_response): (Option<String>, Value) = sqlx::query_as(
+        "SELECT ticketing_time_limit,original_response FROM flight_bookings WHERE portal_hold_draft_id=$1",
+    )
+    .bind(draft)
+    .fetch_one(&pool)
+    .await
+    .unwrap();
+    let limit_request = |deadline_at: &str| {
+        json!({"reader":{"external_user_id":"user_canonicalroot","role":"superadmin"},"draft_id":draft,
+        "deadline_at":deadline_at,"reason":"Supplier refresh unavailable; support confirmed the local cutoff."})
+    };
     assert_eq!(
-        overview["bookings"]
+        business(
+            app,
+            "user_canonicalroot",
+            "/admin/portal-holds/local-time-limit",
+            limit_request(&(chrono::Utc::now() + chrono::Duration::hours(2)).to_rfc3339())
+        )
+        .await
+        .0,
+        409
+    );
+    // Synthetic supplier evidence without a deadline permits a separate staff decision.
+    sqlx::query("UPDATE flight_bookings SET ticketing_time_limit=NULL,original_response=jsonb_set(original_response,'{item1,ticketingTimeLimit}','null'::jsonb) WHERE portal_hold_draft_id=$1")
+        .bind(draft).execute(&pool).await.unwrap();
+    let manual_deadline = (chrono::Utc::now() + chrono::Duration::hours(2)).to_rfc3339();
+    for (who, role, expected) in [
+        ("user_canonicalowner", "b2b", 403),
+        ("user_canonicalaccount", "staff_account", 403),
+        ("user_canonicaladmin", "admin", 200),
+        ("user_canonicalsupport", "staff_support", 200),
+        ("user_canonicalroot", "superadmin", 200),
+    ] {
+        let (status, result) = business(
+            app,
+            who,
+            "/admin/portal-holds/local-time-limit",
+            json!({"reader":{"external_user_id":who,"role":role},"draft_id":draft,
+                "deadline_at":manual_deadline,"reason":"Supplier refresh unavailable; support confirmed the local cutoff."}),
+        )
+        .await;
+        assert_eq!(status, expected, "{who}: {result}");
+        if expected == 200 {
+            assert_eq!(result["status"], "on-hold");
+        }
+    }
+    let (status, receipt) = business(
+        app,
+        "user_canonicalroot",
+        "/admin/portal-holds/receipt",
+        json!({"reader":{"external_user_id":"user_canonicalroot","role":"superadmin"},"draft_id":draft}),
+    )
+    .await;
+    assert_eq!(status, 200, "{receipt}");
+    assert_eq!(receipt["booking"]["state"], "held");
+    assert_eq!(receipt["booking"]["status"], "on-hold");
+    assert_eq!(
+        receipt["booking"]["details"]["manualTimeLimit"]["source"],
+        "staff_manual"
+    );
+    assert_eq!(
+        receipt["booking"]["details"]["manualTimeLimit"]["setByRole"],
+        "superadmin"
+    );
+    assert_eq!(
+        receipt["booking"]["details"]["ticketingTimeLimit"],
+        Value::Null
+    );
+    let booking_id: Uuid =
+        sqlx::query_scalar("SELECT id FROM flight_bookings WHERE portal_hold_draft_id=$1")
+            .bind(draft)
+            .fetch_one(&pool)
+            .await
+            .unwrap();
+    sqlx::query("INSERT INTO portal_hold_manual_time_limits(booking_id,deadline_at,actor_subject,actor_role,reason) VALUES($1,$2,'user_canonicalroot','superadmin','Synthetic elapsed cutoff for expiry regression')")
+        .bind(booking_id).bind(chrono::Utc::now()-chrono::Duration::minutes(2)).execute(&pool).await.unwrap();
+    let (status, expired) = business(
+        app,
+        "user_canonicalroot",
+        "/admin/portal-holds/dashboard",
+        json!({"query":query,"include_summary":true}),
+    )
+    .await;
+    assert_eq!(status, 200, "{expired}");
+    assert_eq!(expired["summary"]["onHold"], 0);
+    assert_eq!(
+        expired["bookings"]
             .as_array()
             .unwrap()
             .iter()
-            .find(|booking| booking["draftId"].as_str() == Some(draft_id.as_str()))
-            .unwrap()["supplierReference"],
-        "hold-booking"
+            .find(|row| row["draftId"] == draft_id)
+            .unwrap()["status"],
+        "expired"
     );
+    let (status, expired_receipt) = business(
+        app,
+        "user_canonicalroot",
+        "/admin/portal-holds/receipt",
+        json!({"reader":{"external_user_id":"user_canonicalroot","role":"superadmin"},"draft_id":draft}),
+    )
+    .await;
+    assert_eq!(status, 200, "{expired_receipt}");
+    assert_eq!(expired_receipt["booking"]["state"], "held");
+    assert_eq!(expired_receipt["booking"]["status"], "expired");
+    let (status, recent) = business(
+        app,
+        "user_canonicalroot",
+        "/admin/portal-holds/recent",
+        json!({"reader":{"external_user_id":"user_canonicalroot","role":"superadmin"}}),
+    )
+    .await;
+    assert_eq!(status, 200, "{recent}");
+    assert_eq!(
+        recent["bookings"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|row| row["draftId"] == draft_id)
+            .unwrap()["state"],
+        "expired"
+    );
+    let agency_code: String =
+        sqlx::query_scalar("SELECT agency_code FROM portal_agencies WHERE id=$1")
+            .bind(agency)
+            .fetch_one(&pool)
+            .await
+            .unwrap();
+    let ticket_preview = json!({"reader":{"external_user_id":"user_canonicalroot","role":"superadmin"},"draft_id":draft,
+        "owner":{"owner_type":"agency","owner_key":agency_code},"command":{"action":"preview"}});
+    let (status, blocked) = business(
+        app,
+        "user_canonicalroot",
+        "/admin/portal-holds/ticket",
+        ticket_preview.clone(),
+    )
+    .await;
+    assert_eq!(status, 200, "{blocked}");
+    assert_eq!(blocked["blockedReason"], "HOLD_TIME_LIMIT_EXPIRED");
+    assert_eq!(
+        business(
+            app,
+            "user_canonicalroot",
+            "/admin/portal-holds/local-time-limit",
+            limit_request(&manual_deadline)
+        )
+        .await
+        .0,
+        409
+    );
+    sqlx::query("UPDATE flight_bookings SET ticketing_time_limit=$2,original_response=$3 WHERE portal_hold_draft_id=$1")
+        .bind(draft).bind(original_deadline).bind(original_response).execute(&pool).await.unwrap();
+    let (status, superseded) = business(
+        app,
+        "user_canonicalroot",
+        "/admin/portal-holds/ticket",
+        ticket_preview,
+    )
+    .await;
+    assert_eq!(status, 200, "{superseded}");
+    assert_ne!(superseded["blockedReason"], "HOLD_TIME_LIMIT_EXPIRED");
     let newdraft = Uuid::new_v4();
     let mut identity2 = identity;
     identity2["draft_id"] = json!(newdraft);

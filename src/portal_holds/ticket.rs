@@ -11,7 +11,8 @@ use axum::extract::Path;
 #[serde(deny_unknown_fields)]
 struct Input {
     reader: Reader,
-    draft_id: Uuid,
+    draft_id: Option<Uuid>,
+    booking_id: Option<Uuid>,
     owner: Owner,
     command: Command,
 }
@@ -77,6 +78,9 @@ struct Context {
 }
 async fn context(admin: &Admin, state: &AppState, input: &Input) -> Result<Context, ApiError> {
     let staff = reader_authority(admin, state, &input.reader).await?;
+    if input.draft_id.is_some() == input.booking_id.is_some() {
+        return Err(invalid());
+    }
     input.owner.validate()?;
     if input.owner.owner_type != "agency" {
         return Err(invalid());
@@ -84,8 +88,8 @@ async fn context(admin: &Admin, state: &AppState, input: &Input) -> Result<Conte
     // A portal owner may issue an on-behalf booking after Book, regardless of
     // its creator. Only the trusted bridge supplies the fresh real reader role.
     let row:Option<OwnedBooking>=sqlx::query_as(
-        "SELECT b.id,b.client_id,d.owner_external_user_id,r.currency,b.request,b.original_response,b.supplier_id,(b.state='held' AND b.execution_mode='hold'),(r.accepted_at IS NOT NULL AND r.original#>'{item1,bookable}'='true'::jsonb AND o.original->'bookable'='true'::jsonb),r.tier_pricing,r.selling FROM portal_hold_drafts d JOIN flight_bookings b ON b.portal_hold_draft_id=d.id AND b.client_id=d.client_id JOIN api_clients c ON c.id=b.client_id JOIN flight_reprices r ON r.id=b.price_id JOIN flight_offers o ON o.id=b.offer_id WHERE d.id=$1 AND ($2 OR d.owner_external_user_id=$3) AND c.active AND c.audience='b2b' AND c.external_user_id=d.owner_external_user_id AND 'search:read'=ANY(c.permissions) AND NOT EXISTS(SELECT 1 FROM portal_staff_clients sc WHERE sc.client_id=c.id)"
-    ).bind(input.draft_id).bind(staff).bind(&input.reader.external_user_id).fetch_optional(&state.pool).await?;
+        "SELECT b.id,b.client_id,c.external_user_id,r.currency,b.request,b.original_response,b.supplier_id,(b.state='held' AND b.execution_mode='hold'),(r.accepted_at IS NOT NULL AND r.original#>'{item1,bookable}'='true'::jsonb AND o.original->'bookable'='true'::jsonb),r.tier_pricing,r.selling FROM flight_bookings b JOIN api_clients c ON c.id=b.client_id JOIN flight_reprices r ON r.id=b.price_id JOIN flight_offers o ON o.id=b.offer_id LEFT JOIN portal_hold_drafts d ON d.id=b.portal_hold_draft_id AND d.client_id=b.client_id WHERE (($1::uuid IS NOT NULL AND d.id=$1) OR ($2::uuid IS NOT NULL AND b.id=$2 AND b.portal_hold_draft_id IS NULL AND c.api_management_enabled AND c.tier='enterprise')) AND ($3 OR c.external_user_id=$4) AND c.active AND c.audience='b2b' AND c.external_user_id IS NOT NULL AND 'search:read'=ANY(c.permissions) AND NOT EXISTS(SELECT 1 FROM portal_staff_clients sc WHERE sc.client_id=c.id)"
+    ).bind(input.draft_id).bind(input.booking_id).bind(staff).bind(&input.reader.external_user_id).fetch_optional(&state.pool).await?;
     let (
         booking,
         client,
@@ -134,32 +138,50 @@ async fn preview(state: &AppState, c: &Context) -> Result<Value, ApiError> {
     let (enabled,timeout):(bool,i32)=sqlx::query_as("SELECT ticketing_enabled AND servicing_enabled,timeout_seconds FROM supplier_connections WHERE id=$1").bind(&c.supplier).fetch_one(&state.pool).await?;
     let configured = state.suppliers.get(&c.supplier);
     let observation:Option<Value>=sqlx::query_scalar("SELECT response FROM flight_booking_pnr_observations WHERE booking_id=$1 AND verified ORDER BY requested_at DESC,id DESC LIMIT 1").bind(c.booking).fetch_optional(&state.pool).await?;
+    let manual_deadline: Option<chrono::DateTime<chrono::Utc>> = sqlx::query_scalar(
+        "SELECT deadline_at FROM portal_hold_manual_time_limits WHERE booking_id=$1 ORDER BY id DESC LIMIT 1",
+    )
+    .bind(c.booking)
+    .fetch_optional(&state.pool)
+    .await?;
     let local = c
         .original
         .as_ref()
         .and_then(|v| ticketing::supplier_payload(v, &c.request));
+    let readiness = if let (Some(original), Some(payload)) = (&c.original, local) {
+        Some(ticketing::issue_preflight(
+            original,
+            &payload,
+            observation.as_ref(),
+            chrono::Utc::now(),
+            i64::from(timeout) + 30,
+        ))
+    } else {
+        None
+    };
+    let manual_expired = readiness.as_ref().is_some_and(|result| {
+        result.as_ref().is_ok_and(|evidence| {
+            ticketing::manual_cutoff_expired(evidence, manual_deadline, chrono::Utc::now())
+        })
+    });
     let reason = if !ticket.is_null() {
         Some("TICKET_OPERATION_EXISTS")
     } else if !c.held || !c.accepted {
         Some("VERIFIED_HELD_BOOKING_REQUIRED")
     } else if cancelled {
         Some("CANCELLATION_ALREADY_RESERVED")
+    } else if manual_expired {
+        Some("HOLD_TIME_LIMIT_EXPIRED")
     } else if !enabled || !configured.is_some_and(|s| s.transport.held_ticketing_enabled()) {
         Some("SUPPLIER_TICKETING_DISABLED")
     } else if configured.and_then(|s| s.currency.as_deref()) != Some(c.currency.as_str()) {
         Some("SUPPLIER_CURRENCY_MISMATCH")
-    } else if let (Some(original), Some(payload)) = (&c.original, local) {
-        ticketing::issue_preflight(
-            original,
-            &payload,
-            observation.as_ref(),
-            chrono::Utc::now(),
-            i64::from(timeout) + 30,
-        )
-        .err()
-        .map(|e| e.1)
     } else {
-        Some("MANUAL_RECONCILIATION_REQUIRED")
+        match readiness {
+            Some(Ok(_)) => None,
+            Some(Err(error)) => Some(error.1),
+            None => Some("MANUAL_RECONCILIATION_REQUIRED"),
+        }
     };
     let reason = reason.or(match &account {
         None => Some("WALLET_NOT_CONFIGURED"),
@@ -195,10 +217,13 @@ async fn ticket(
                 },
             },
             owner_external_user_id: c.owner_id.clone(),
-            draft_id: input.draft_id,
+            draft_id: input.draft_id.unwrap_or(Uuid::nil()),
         },
     )
     .await?;
+    if machine.client_id != c.client {
+        return Err(ApiError(StatusCode::CONFLICT, "HOLD_OWNER_MISMATCH"));
+    }
     machine.permissions.push("ticketing".into());
     match input.command {
         Command::Preview => unreachable!(),

@@ -130,6 +130,7 @@ pub(crate) fn openapi_document(environment: &str) -> utoipa::openapi::OpenApi {
     doc.merge(tier::TierDoc::openapi());
     doc.merge(portal::PortalDoc::openapi());
     doc.merge(portal_holds::PortalHoldDoc::openapi());
+    doc.merge(portal_holds::PortalManualTimeLimitDoc::openapi());
     doc.merge(portal_holds::PortalTicketDoc::openapi());
     doc.merge(passengers::PassengerDoc::openapi());
     doc.merge(wallet::WalletDoc::openapi());

@@ -207,6 +207,20 @@ Vercel deployment, applied migration, identity revision, health/browser/worker
 results and outstanding follow-ups. Keep public instructions current and store
 private backup/preflight/rollout artifacts separately with restricted permissions.
 
+### Backend source promotion pending deployment — 2026-09-25
+
+- The requested backend commit is promoted to `development` and `production` as
+  source only. Its push uses `[skip ci]` because the push request does not
+  authorize the workflow's automatic VPS deployment or database migration.
+- It adds owner-scoped Enterprise API-client Hold details, the staff-set local
+  cutoff and ticket preview/issue bridge, and migration `0069`. Supplier deadline
+  evidence remains authoritative. The local disposable-database booking journey,
+  Rust unit tests, formatting and all-target Clippy passed before the push.
+- Neither VPS has been migrated or activated by this source promotion. Check the
+  actual deployed SHA, schema and frontend compatibility before a separately
+  authorized release. Private local UAT captures and passenger data stay outside
+  Git.
+
 
 ### Development login recovery release — 2026-09-20 17:54 UTC
 
