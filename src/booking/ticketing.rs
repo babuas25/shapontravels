@@ -213,6 +213,15 @@ pub(crate) fn issue_preflight(
         "checkedAt": now,
     }))
 }
+
+pub(crate) fn manual_cutoff_expired(
+    preflight: &Value,
+    manual_deadline: Option<DateTime<Utc>>,
+    now: DateTime<Utc>,
+) -> bool {
+    preflight["deadlineCheck"] == "supplier_validation_required"
+        && manual_deadline.is_some_and(|deadline| deadline <= now)
+}
 pub(crate) fn supplier_payload(original: &Value, saved: &Value) -> Option<Value> {
     let mut payload = json!({});
     for (target, source) in [
@@ -500,6 +509,15 @@ pub(crate) async fn issue_as(
         Utc::now(),
         i64::from(timeout) + 30,
     )?;
+    let manual_deadline: Option<DateTime<Utc>> = sqlx::query_scalar(
+        "SELECT deadline_at FROM portal_hold_manual_time_limits WHERE booking_id=$1 ORDER BY id DESC LIMIT 1",
+    )
+    .bind(id)
+    .fetch_optional(&mut *tx)
+    .await?;
+    if manual_cutoff_expired(&preflight, manual_deadline, Utc::now()) {
+        return Err(conflict("HOLD_TIME_LIMIT_EXPIRED"));
+    }
     let issue_id = Uuid::new_v4();
     sqlx::query("INSERT INTO flight_ticket_issues(id,booking_id,client_id,idempotency_key,request_hash,state,request,preflight,wallet_required) VALUES($1,$2,$3,$4,$5,'pending',$6,$7,true)").bind(issue_id).bind(id).bind(machine.client_id).bind(&key).bind(&hash).bind(&payload).bind(&preflight).execute(&mut *tx).await?;
     crate::wallet::ticket::reserve(&mut tx, issue_id, id, machine.client_id, portal.as_ref())
@@ -851,6 +869,30 @@ mod tests {
             deadline_check(&json!("2026-09-11T19:00:00+06:00"), false, now, 90).unwrap(),
             "explicit_offset_checked"
         );
+    }
+
+    #[test]
+    fn staff_cutoff_only_closes_issue_when_supplier_deadline_is_unavailable() {
+        let now = DateTime::parse_from_rfc3339("2026-09-24T12:00:00Z")
+            .unwrap()
+            .with_timezone(&Utc);
+        let book = json!({"item1":{"bookingStatus":"Created","ticketingTimeLimit":null},"item2":{"isSuccess":true}});
+        let payload = json!({"PNR":"TESTPN"});
+        let missing = issue_preflight(&book, &payload, None, now, 90).unwrap();
+        assert!(!manual_cutoff_expired(&missing, None, now));
+        assert!(!manual_cutoff_expired(
+            &missing,
+            Some(now + Duration::minutes(5)),
+            now
+        ));
+        assert!(manual_cutoff_expired(&missing, Some(now), now));
+        let pnr = json!({"item1":{"pnr":"TESTPN","status":"Booked","lastTicketTime":"2026-09-24T14:00:00Z"},"item2":{"isSuccess":true}});
+        let verified = issue_preflight(&book, &payload, Some(&pnr), now, 90).unwrap();
+        assert!(!manual_cutoff_expired(
+            &verified,
+            Some(now - Duration::minutes(5)),
+            now
+        ));
     }
 
     #[test]

@@ -21,8 +21,14 @@ Only Super Admin can list assignees or provision a missing linked B2B client. Ex
 | `/admin/portal-holds/receipt` | reader, draft_id, optional refresh (default false) | Reserved receipt; explicit refresh reads supplier PNR after owner authorization |
 | `/admin/portal-holds/recent` | reader, optional before booking UUID | Twenty scoped records and next cursor |
 | `/admin/portal-holds/dashboard` | reader, validated table query, trusted creator IDs | Original Ticket table rows, database filtering and pagination |
+| `/admin/portal-holds/api-booking` | reader, booking_id | Owner-scoped or staff-visible detail for an Enterprise B2B API-client booking |
+| `/admin/portal-holds/local-time-limit` | reader, exactly one of draft_id or booking_id, deadline_at, reason | Audited staff-set cutoff when no supplier deadline is known |
 
-`reader` is `{external_user_id,role:"superadmin"|"b2b"}`, supplied by the authenticated bridge. History exposes only reserved bookings. Foreign-owner cursors and receipts reveal no records. Supplier cost is staff-only. Creator and owner equality distinguish self-bookings from on-behalf bookings in the dashboard.
+`reader` is `{external_user_id,role}`, supplied by the authenticated bridge. B2B owners can read their own eligible bookings; staff access follows the route's role checks. Recent history exposes only reserved portal bookings. Foreign-owner cursors and receipts reveal no records. Supplier cost is staff-only. Creator and owner equality distinguish self-bookings from on-behalf bookings in the dashboard.
+
+The booking dashboard also includes eligible Enterprise B2B machine-API Holds for their linked owner and authorized staff. Those rows use `/dashboard/bookings/api/{booking_id}`; the `api-booking` route rejects foreign owners and bookings linked to a portal draft. The ticket bridge accepts exactly one of `draft_id` or `booking_id`, verifies the same client and canonical agency wallet, and retains its existing preview, issue and verification gates.
+
+Migration `0069_portal_hold_manual_time_limits.sql` stores append-only staff cutoff decisions. Only Super Admin, Admin and Support Staff may set a future cutoff, with a reason, on a held booking that has no known supplier deadline or terminal ticket/cancellation operation. The latest decision is shown separately as `manualTimeLimit`; it never rewrites Book or verified PNR evidence. An elapsed manual cutoff marks the portal view `expired` and blocks Issue only while the supplier deadline remains unavailable. A later verified supplier deadline takes precedence. Setting or reading the cutoff does not call the supplier.
 
 ## Booking behavior
 

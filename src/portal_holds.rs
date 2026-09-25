@@ -1,5 +1,6 @@
 //! Trusted portal bridge for B2B self-booking and Super Admin on-behalf holds.
 //! Uses the native RePrice, acceptance and idempotent Book state machine.
+mod manual_time_limit;
 mod ticket;
 use crate::{
     AppState,
@@ -12,6 +13,7 @@ use axum::{
     http::{HeaderMap, HeaderValue, StatusCode},
     routing::post,
 };
+pub use manual_time_limit::PortalManualTimeLimitDoc;
 use serde::Deserialize;
 use serde_json::{Value, json};
 pub use ticket::PortalTicketDoc;
@@ -343,9 +345,45 @@ async fn snapshot(
             // A verified missing deadline supersedes the original Book deadline.
             details["ticketingTimeLimit"] = details["pnrObservation"]["lastTicketTime"].clone();
         }
+        let manual: Option<(chrono::DateTime<chrono::Utc>, chrono::DateTime<chrono::Utc>, String)> =
+            sqlx::query_as("SELECT deadline_at,created_at,actor_role FROM portal_hold_manual_time_limits WHERE booking_id=$1 ORDER BY id DESC LIMIT 1")
+                .bind(id).fetch_optional(&state.pool).await?;
+        details["manualTimeLimit"] = manual.map_or(Value::Null, |(deadline, set_at, role)| {
+            json!({"deadlineAt":deadline,"setAt":set_at,"setByRole":role,"source":"staff_manual"})
+        });
         let ticket = ticket::snapshot(state, id, d.client_id).await?;
+        let supplier_deadline_known = if details["pnrObservation"].is_null() {
+            details["ticketingTimeLimit"]
+                .as_str()
+                .is_some_and(|raw| chrono::DateTime::parse_from_rfc3339(raw).is_ok())
+        } else {
+            details["pnrObservation"]["lastTicketTimeIso"].is_string()
+        };
+        let manual_expired = status == "held"
+            && !supplier_deadline_known
+            && details["pnrObservation"]["manualResolutionRequired"] != true
+            && details["manualTimeLimit"]["deadlineAt"]
+                .as_str()
+                .and_then(|raw| chrono::DateTime::parse_from_rfc3339(raw).ok())
+                .is_some_and(|deadline| deadline <= chrono::Utc::now());
+        let effective_status = if ticket["state"] == "issued" {
+            "confirmed"
+        } else if (!ticket.is_null() && ticket["state"] != "not_issued")
+            || details["pnrObservation"]["manualResolutionRequired"] == true
+        {
+            "in-progress"
+        } else if manual_expired {
+            "expired"
+        } else {
+            match status.as_str() {
+                "held" => "on-hold",
+                "pending" => "pending",
+                "cancelled" => "cancelled",
+                _ => "in-progress",
+            }
+        };
         Some(
-            json!({"id":id,"reference":reference,"state":status,"response":response,"details":details,"ticket":ticket}),
+            json!({"id":id,"reference":reference,"state":status,"status":effective_status,"response":response,"details":details,"ticket":ticket}),
         )
     } else {
         None
@@ -551,7 +589,28 @@ async fn recent(
     Json(input): Json<RecentInput>,
 ) -> Result<Json<Value>, ApiError> {
     let staff = reader_authority(&admin, &state, &input.reader).await?;
-    let rows:Vec<(Uuid,Value)>=sqlx::query_as("SELECT b.id,jsonb_build_object('draftId',d.id,'reference',b.public_ref,'state',CASE WHEN EXISTS(SELECT 1 FROM flight_ticket_issues t LEFT JOIN flight_ticket_verifications v ON v.issue_id=t.id WHERE t.booking_id=b.id AND (t.state='issued' OR v.issue_id IS NOT NULL)) THEN 'issued' WHEN EXISTS(SELECT 1 FROM flight_ticket_issues t JOIN flight_ticket_outcomes s ON s.id=t.id WHERE t.booking_id=b.id AND s.state<>'not_issued') THEN 'ticket_pending' ELSE b.state END,'owner',d.owner_display->>'name','agency',d.owner_display->>'agencyName','createdAt',b.created_at,'currency',r.tier_pricing->>'currency','payable',r.tier_pricing->>'payable') FROM flight_bookings b JOIN portal_hold_drafts d ON d.id=b.portal_hold_draft_id AND d.client_id=b.client_id JOIN flight_reprices r ON r.id=b.price_id WHERE ($1 OR d.owner_external_user_id=$2) AND ($3::uuid IS NULL OR (b.created_at,b.id)<(SELECT x.created_at,x.id FROM flight_bookings x JOIN portal_hold_drafts xd ON xd.id=x.portal_hold_draft_id WHERE x.id=$3 AND ($1 OR xd.owner_external_user_id=$2))) ORDER BY b.created_at DESC,b.id DESC LIMIT 21")
+    let rows:Vec<(Uuid,Value)>=sqlx::query_as(r#"
+        SELECT b.id,jsonb_build_object('draftId',d.id,'reference',b.public_ref,
+          'state',CASE
+            WHEN EXISTS(SELECT 1 FROM flight_ticket_issues t LEFT JOIN flight_ticket_verifications v ON v.issue_id=t.id WHERE t.booking_id=b.id AND (t.state='issued' OR v.issue_id IS NOT NULL)) THEN 'issued'
+            WHEN EXISTS(SELECT 1 FROM flight_ticket_issues t JOIN flight_ticket_outcomes s ON s.id=t.id WHERE t.booking_id=b.id AND s.state<>'not_issued') THEN 'ticket_pending'
+            WHEN b.state='held' AND manual.deadline_at<=clock_timestamp()
+              AND (observed.response IS NULL OR observed.response#>>'{item1,status}' IN ('Booked','Created'))
+              AND NOT portal_hold_supplier_deadline_known(
+                CASE WHEN observed.response IS NULL THEN b.ticketing_time_limit ELSE observed.response#>>'{item1,lastTicketTime}' END,
+                observed.response IS NOT NULL) THEN 'expired'
+            ELSE b.state END,
+          'owner',d.owner_display->>'name','agency',d.owner_display->>'agencyName',
+          'createdAt',b.created_at,'currency',r.tier_pricing->>'currency','payable',r.tier_pricing->>'payable')
+        FROM flight_bookings b
+        JOIN portal_hold_drafts d ON d.id=b.portal_hold_draft_id AND d.client_id=b.client_id
+        JOIN flight_reprices r ON r.id=b.price_id
+        LEFT JOIN LATERAL (SELECT deadline_at FROM portal_hold_manual_time_limits m WHERE m.booking_id=b.id ORDER BY m.id DESC LIMIT 1) manual ON TRUE
+        LEFT JOIN LATERAL (SELECT response FROM flight_booking_pnr_observations p WHERE p.booking_id=b.id AND p.verified ORDER BY p.requested_at DESC,p.id DESC LIMIT 1) observed ON TRUE
+        WHERE ($1 OR d.owner_external_user_id=$2)
+          AND ($3::uuid IS NULL OR (b.created_at,b.id)<(SELECT x.created_at,x.id FROM flight_bookings x JOIN portal_hold_drafts xd ON xd.id=x.portal_hold_draft_id WHERE x.id=$3 AND ($1 OR xd.owner_external_user_id=$2)))
+        ORDER BY b.created_at DESC,b.id DESC LIMIT 21
+    "#)
         .bind(staff).bind(&input.reader.external_user_id).bind(input.before).fetch_all(&state.pool).await?;
     let next = if rows.len() > 20 {
         Some(rows[19].0)
@@ -589,6 +648,73 @@ struct DashboardInput {
     query: DashboardQuery,
     #[serde(default)]
     creator_ids: Vec<String>,
+}
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+struct ApiBookingInput {
+    reader: Reader,
+    booking_id: Uuid,
+}
+#[utoipa::path(post,path="/admin/portal-holds/api-booking",operation_id="portalApiClientBooking",tag="Portal holds",security(("admin_session"=[])),request_body=Object,responses((status=200,body=Object,description="Read-only API-client booking owned by the linked B2B user or visible to staff"),(status=404,description="Unknown or foreign booking")))]
+async fn api_booking(
+    admin: Admin,
+    State(state): State<AppState>,
+    Json(input): Json<ApiBookingInput>,
+) -> Result<Json<Value>, ApiError> {
+    let staff = reader_authority(&admin, &state, &input.reader).await?;
+    let row: Option<Value> = sqlx::query_scalar(
+        r#"SELECT jsonb_build_object(
+          'id',b.id,'reference',b.public_ref,'state',b.state,'pnr',coalesce(b.pnr,''),
+          'createdAt',b.created_at,'currency',r.tier_pricing->>'currency',
+          'payable',r.tier_pricing->>'payable','gross',r.tier_pricing->>'gross',
+          'clientName',c.name,'ownerId',c.external_user_id,'ownerEmail',coalesce(owner_user.email,''),
+          'agencyName',coalesce(nullif(owner_profile.fields->>'agencyName',''),c.name),
+          'agencyCode',coalesce(owner_agency.agency_code,''),
+          'executionMode',b.execution_mode,'quote',r.selling->'item1','pricing',r.tier_pricing,
+          'travellers',coalesce(b.request->'passengerInfoes','[]'::jsonb),
+          'airlinesPnr',coalesce(b.public_response#>'{item1,airlinesPNR}','[]'::jsonb),
+          'ticketingTimeLimit',b.ticketing_time_limit,
+          'manualTimeLimit',CASE WHEN manual.deadline_at IS NULL THEN NULL ELSE jsonb_build_object('deadlineAt',manual.deadline_at,'setAt',manual.created_at,'setByRole',manual.actor_role,'source','staff_manual') END,
+          'supplierBookingRef',b.supplier_booking_ref,
+          'airline',r.selling#>>'{item1,platingCarrier}',
+          'itinerary',coalesce(r.selling#>'{item1,directions}','[]'::jsonb),
+          'passengers',coalesce((SELECT jsonb_agg(jsonb_build_object(
+            'name',concat_ws(' ',p->'nameElement'->>'firstName',p->'nameElement'->>'lastName'),
+            'type',p->>'passengerType') ORDER BY ord)
+            FROM jsonb_array_elements(b.request->'passengerInfoes') WITH ORDINALITY AS pax(p,ord)),'[]'::jsonb),
+          'ticketState',issue.ticket_state,'ticketIssuedAt',issue.ticket_issued_at,
+          'ticketPaymentState',issue.payment_state,'ticketWalletRequired',issue.wallet_required,
+          'ticketResponse',issue.ticket_response)
+        FROM flight_bookings b
+        JOIN api_clients c ON c.id=b.client_id
+        JOIN flight_reprices r ON r.id=b.price_id
+        LEFT JOIN portal_users owner_user ON owner_user.clerk_user_id=c.external_user_id
+        LEFT JOIN portal_agencies owner_agency ON owner_agency.owner_user_id=owner_user.id
+        LEFT JOIN portal_identity_profiles owner_profile ON owner_profile.user_id=owner_user.id AND owner_profile.kind='profile'
+        LEFT JOIN LATERAL (SELECT deadline_at,created_at,actor_role FROM portal_hold_manual_time_limits m WHERE m.booking_id=b.id ORDER BY m.id DESC LIMIT 1) manual ON TRUE
+        LEFT JOIN LATERAL (
+          SELECT s.state ticket_state,s.updated_at ticket_issued_at,w.state payment_state,
+            t.wallet_required,coalesce(v.public_response,t.public_response) ticket_response
+          FROM flight_ticket_issues t
+          JOIN flight_ticket_outcomes s ON s.id=t.id
+          LEFT JOIN flight_ticket_verifications v ON v.issue_id=t.id
+          LEFT JOIN wallet_operations w ON w.subject_kind='ticket_issue' AND w.subject_id=t.id
+          WHERE t.booking_id=b.id ORDER BY t.created_at DESC LIMIT 1
+        ) issue ON TRUE
+        WHERE b.id=$1 AND b.portal_hold_draft_id IS NULL
+          AND c.external_user_id IS NOT NULL AND c.audience='b2b'
+          AND c.api_management_enabled AND c.tier='enterprise'
+          AND NOT EXISTS(SELECT 1 FROM portal_staff_clients sc WHERE sc.client_id=c.id)
+          AND ($2 OR c.external_user_id=$3)"#,
+    )
+    .bind(input.booking_id)
+    .bind(staff)
+    .bind(&input.reader.external_user_id)
+    .fetch_optional(&state.pool)
+    .await?;
+    Ok(Json(
+        row.ok_or(ApiError(StatusCode::NOT_FOUND, "NOT_FOUND"))?,
+    ))
 }
 async fn dashboard(
     admin: Admin,
@@ -636,33 +762,49 @@ async fn dashboard(
         _ => return Err(invalid()),
     };
     // Only allowlisted identifiers enter SQL; every user-supplied value is bound.
+    // Supplier REF is the booked supplier transaction, while bookingCodeRef stays private for servicing.
     let sql = format!(
         r#"
     WITH records AS (
-      SELECT b.id, d.id draft_id, b.public_ref reference, b.created_at, b.updated_at,
-        CASE WHEN t.state='issued' OR v.issue_id IS NOT NULL THEN 'confirmed' WHEN t.id IS NOT NULL AND (SELECT state FROM flight_ticket_outcomes s WHERE s.id=t.id)<>'not_issued' THEN 'in-progress' ELSE CASE b.state WHEN 'held' THEN 'on-hold' WHEN 'pending' THEN 'pending' WHEN 'cancelled' THEN 'cancelled' ELSE 'in-progress' END END status,
+      SELECT b.id, d.id draft_id, (d.id IS NULL) api_booking, b.public_ref reference, b.created_at, b.updated_at,
+        CASE WHEN t.state='issued' OR v.issue_id IS NOT NULL THEN 'confirmed'
+          WHEN t.id IS NOT NULL AND (SELECT state FROM flight_ticket_outcomes s WHERE s.id=t.id)<>'not_issued' THEN 'in-progress'
+          WHEN b.state='held' AND manual.deadline_at<=clock_timestamp()
+            AND (observed.response IS NULL OR observed.response#>>'{{item1,status}}' IN ('Booked','Created'))
+            AND NOT portal_hold_supplier_deadline_known(
+              CASE WHEN observed.response IS NULL THEN b.ticketing_time_limit ELSE observed.response#>>'{{item1,lastTicketTime}}' END,
+              observed.response IS NOT NULL) THEN 'expired'
+          ELSE CASE b.state WHEN 'held' THEN 'on-hold' WHEN 'pending' THEN 'pending' WHEN 'cancelled' THEN 'cancelled' ELSE 'in-progress' END END status,
         coalesce(b.pnr,'') pnr, coalesce(b.public_response#>'{{item1,airlinesPNR}}','[]'::jsonb) airline_pnrs,
         concat_ws(' ', b.request#>>'{{passengerInfoes,0,nameElement,firstName}}', b.request#>>'{{passengerInfoes,0,nameElement,lastName}}') name,
         jsonb_array_length(b.request->'passengerInfoes') pax_count,
-        b.created_by_external_user_id creator,
-        coalesce(nullif(trim(concat_ws(' ',creator_user.first_name,creator_user.last_name)),''),creator_user.email,b.created_by_external_user_id) creator_name,
-        d.owner_display owner, d.owner_external_user_id owner_id,
+        coalesce(b.created_by_external_user_id,c.external_user_id) creator,
+        coalesce(nullif(trim(concat_ws(' ',creator_user.first_name,creator_user.last_name)),''),creator_user.email,c.external_user_id) creator_name,
+        coalesce(d.owner_display,jsonb_build_object('name',coalesce(nullif(trim(concat_ws(' ',owner_user.first_name,owner_user.last_name)),''),owner_user.email,c.external_user_id),'email',coalesce(owner_user.email,''),'agencyName','','agencyCode',coalesce(owner_agency.agency_code,''))) owner,
+        coalesce(d.owner_external_user_id,c.external_user_id) owner_id,
         r.tier_pricing->>'currency' currency,
         (r.tier_pricing->>'payable')::numeric payable,
         (r.tier_pricing->>'gross')::numeric gross,
         CASE WHEN $15 THEN (r.original#>>'{{item1,totalPrice}}')::numeric ELSE NULL END supplier,
-        CASE WHEN $15 THEN b.supplier_booking_ref END supplier_reference,
+        CASE WHEN $15 THEN nullif(b.request->>'uniqueTransID','') END supplier_reference,
         r.selling#>>'{{item1,directions,0,0,segments,0,departure}}' fly_date,
         r.selling#>>'{{item1,platingCarrier}}' airline,
         (SELECT string_agg(concat_ws(' → ', x#>>'{{0,from}}',x#>>'{{0,to}}'),' → ') FROM jsonb_array_elements(r.selling#>'{{item1,directions}}') x) route
-      FROM flight_bookings b JOIN portal_hold_drafts d ON d.id=b.portal_hold_draft_id AND d.client_id=b.client_id
+      FROM flight_bookings b
+      LEFT JOIN portal_hold_drafts d ON d.id=b.portal_hold_draft_id AND d.client_id=b.client_id
+      JOIN api_clients c ON c.id=b.client_id
       JOIN flight_reprices r ON r.id=b.price_id
-      LEFT JOIN portal_users creator_user ON creator_user.clerk_user_id=b.created_by_external_user_id
+      LEFT JOIN portal_users creator_user ON creator_user.clerk_user_id=coalesce(b.created_by_external_user_id,c.external_user_id)
+      LEFT JOIN portal_users owner_user ON owner_user.clerk_user_id=c.external_user_id
+      LEFT JOIN portal_agencies owner_agency ON owner_agency.owner_user_id=owner_user.id
       LEFT JOIN flight_ticket_issues t ON t.booking_id=b.id
       LEFT JOIN flight_ticket_verifications v ON v.issue_id=t.id
-      WHERE ($1 OR d.owner_external_user_id=$2)
+      LEFT JOIN LATERAL (SELECT deadline_at FROM portal_hold_manual_time_limits m WHERE m.booking_id=b.id ORDER BY m.id DESC LIMIT 1) manual ON TRUE
+      LEFT JOIN LATERAL (SELECT response FROM flight_booking_pnr_observations p WHERE p.booking_id=b.id AND p.verified ORDER BY p.requested_at DESC,p.id DESC LIMIT 1) observed ON TRUE
+      WHERE ($1 OR coalesce(d.owner_external_user_id,c.external_user_id)=$2)
+        AND (d.id IS NOT NULL OR (b.portal_hold_draft_id IS NULL AND c.external_user_id IS NOT NULL AND c.audience='b2b' AND c.api_management_enabled AND c.tier='enterprise' AND NOT EXISTS(SELECT 1 FROM portal_staff_clients sc WHERE sc.client_id=c.id)))
       UNION ALL
-      SELECT b.id,NULL::uuid,coalesce(b.booking_reference,b.public_ref),b.created_at,b.updated_at,b.status,
+      SELECT b.id,NULL::uuid,false,coalesce(b.booking_reference,b.public_ref),b.created_at,b.updated_at,b.status,
         coalesce(b.data->>'pnr',''),coalesce(b.data->'airlinesPnr','[]'::jsonb),
         concat_ws(' ',b.data#>>'{{passengers,travellers,0,firstName}}',b.data#>>'{{passengers,travellers,0,lastName}}'),
         jsonb_array_length(b.data#>'{{passengers,travellers}}'),creator.clerk_user_id,
@@ -695,7 +837,7 @@ async fn dashboard(
       'coTravelers',(SELECT coalesce(sum(pax_count),0) FROM records),
       'tickets',(SELECT count(*) FROM records WHERE status='confirmed')) END,
       'total',(SELECT count(*) FROM filtered),'bookings',coalesce((SELECT jsonb_agg(jsonb_build_object(
-      'id',id,'draftId',draft_id,'detailHref',CASE WHEN draft_id IS NULL THEN '/dashboard/bookings/import/'||reference ELSE '/dashboard/bookings/hold/'||draft_id END,'reference',reference,'createdAt',created_at,'status',status,'pnr',pnr,'airlinePnrs',airline_pnrs,'name',name,'passengerCount',pax_count,
+      'id',id,'draftId',draft_id,'detailHref',CASE WHEN api_booking THEN '/dashboard/bookings/api/'||id WHEN draft_id IS NULL THEN '/dashboard/bookings/import/'||reference ELSE '/dashboard/bookings/hold/'||draft_id END,'reference',reference,'createdAt',created_at,'status',status,'pnr',pnr,'airlinePnrs',airline_pnrs,'name',name,'passengerCount',pax_count,
       'creatorId',creator,'creatorName',creator_name,'ownerId',owner_id,'owner',owner,'currency',currency,'payable',payable::text,'gross',gross::text,'supplier',supplier::text,
       'flyDate',fly_date,'airline',airline,'route',route,
       'lifecycleAt',CASE WHEN draft_id IS NULL THEN (SELECT coalesce(i.issued_at,i.updated_at) FROM portal_import_bookings i WHERE i.id=page.id) END,
@@ -730,15 +872,17 @@ async fn dashboard(
 pub fn routes() -> Router<AppState> {
     Router::new()
         .merge(ticket::routes())
+        .merge(manual_time_limit::routes())
         .route("/admin/portal-holds/prepare", post(prepare))
         .route("/admin/portal-holds/read", post(read))
         .route("/admin/portal-holds/accept", post(accept))
         .route("/admin/portal-holds/submit", post(submit))
         .route("/admin/portal-holds/receipt", post(receipt))
         .route("/admin/portal-holds/recent", post(recent))
+        .route("/admin/portal-holds/api-booking", post(api_booking))
         .route("/admin/portal-holds/dashboard", post(dashboard))
 }
 
 #[derive(OpenApi)]
-#[openapi(paths(prepare, read, accept, submit, receipt, recent))]
+#[openapi(paths(prepare, read, accept, submit, receipt, recent, api_booking))]
 pub struct PortalHoldDoc;
