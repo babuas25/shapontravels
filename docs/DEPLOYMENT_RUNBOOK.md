@@ -205,10 +205,10 @@ Recheck before the next release:
 
 | Item | Development | Production |
 | --- | --- | --- |
-| Rust release | `44c80a1` | `e80c066` |
+| Rust release | `44c80a1` | `a351ee5` |
 | Applied migration | `0066` | `0069` |
 | Canonical rollout revision | `3` | `5` |
-| Frontend release | `94c20cd` | `cc966c7` |
+| Frontend release | `94c20cd` | `da225bf` |
 | Real business notification worker | Disabled | Active |
 
 Temporary operator capabilities were removed and maintenance was off on both
@@ -1165,3 +1165,51 @@ the user's production release authorization under this runbook.
 - A future release must deploy and verify this backend before publishing the
   dependent frontend's new `/api/pricing/search/{id}` calls. Restore and verify
   development VPS readiness before relying on its Preview environment.
+
+### Search latency production release — 2026-09-25 (Asia/Dhaka)
+
+- After the source-only promotion, the user explicitly authorized production
+  deployment of backend `a351ee532b2a5802c496c4f3de0315c90b5daccc` and frontend
+  `da225bfa7d7a01437f91603330e2838b323c6a70`. Development services were not deployed
+  or reconfigured in this release.
+- Backend [Actions run 36137640748](https://github.com/babuas25/shapontravels/actions/runs/36137640748)
+  passed checks, optimized build and production activation. The deployed SHA and
+  running executable matched the approved release. Internal and public live/ready
+  checks returned HTTP 200; authenticated canonical readiness was active with
+  maintenance off. Durable and runtime identity pins remained at revision `5`.
+- Applied schema remains `0069`; this release adds no migrations. The activation
+  helper created the production-local backup
+  `/var/backups/shapontravels/db-20260925T130606Z.dump` before activation. No restore
+  rehearsal was performed for this compatible release. No local database rows,
+  dumps, credentials or profiles were transferred to production.
+- The notification worker stopped with the API during activation. Its configured
+  Rust dispatch ownership and notification checks were verified before resuming
+  it. API and notification services are active with zero automatic restarts.
+- Frontend [quality/build run 36135728602](https://github.com/babuas25/shapontravels-frontend/actions/runs/36135728602)
+  passed for the exact approved SHA. After backend readiness, the canceled
+  source-only deployment was redeployed to Production with the per-deployment
+  "Use project's Ignore Build Step" option unchecked. The project ignore command
+  and environment variables were unchanged. Vercel deployment
+  [`BQxtGHz6Rg9P5PtcYiNEZ53t7wm9`](https://vercel.com/shapontravels/shapontravels-frontend/BQxtGHz6Rg9P5PtcYiNEZ53t7wm9)
+  became Ready at 13:12:20 UTC and was assigned to `preview.shapontravels.com`.
+- Browser verification on the production alias confirmed the homepage redirects
+  the existing signed-in user to the dashboard with the correct Super Admin role.
+  A single Search click at 13:13:47.033 UTC submitted DAC–SIN, 30 September 2026,
+  one adult, Economy. Vercel received the Search POST at 13:13:47.187 UTC, before
+  the results-page GET at 13:13:47.211 UTC. The immediate disabled Searching state
+  appeared, and exactly one corresponding Rust search was recorded.
+- This search returned HTTP 200 and displayed 126 grouped flights. All three
+  suppliers succeeded: Firsttrip 4,368 ms, Takeoff 4,509 ms, Triplover 5,879 ms.
+  Rust search time was 6,829 ms; supplier phase 5,917 ms, preparation 21 ms and
+  persistence 827 ms. There were zero failed/blocked suppliers and zero offers
+  excluded for unverified markup scope (633 source offers, 626 returned offers).
+- Vercel recorded 14.4 s total response time (13.20 s function, 297 ms middleware)
+  for request `qf9wd-1790342027187-f330b90bfa0b`. Its trace contains one Search POST
+  followed by one complete `/api/pricing/search/{id}` GET, with no legacy pricing
+  batches. The prior same-criteria production sample took 35.1 s, including
+  15.504 s in Rust and seven serial pricing/name batches. The new sample is about
+  59% lower in total duration; supplier timings vary, so this is an observed
+  comparison rather than a latency guarantee. Vercel compute remains `iad1`.
+- No booking, ticket, deposit or notification delivery was created for this
+  verification. Private deployment and diagnostic evidence remains under ignored
+  `.local/evidence`; the release record contains no secrets or customer payloads.
