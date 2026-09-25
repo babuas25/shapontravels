@@ -328,22 +328,32 @@ pub(crate) fn bind_references(value: &mut Value, map: &mut serde_json::Map<Strin
 async fn search(
     machine: Machine,
     authority: Option<Extension<crate::identity::business::SearchAuthority>>,
+    runtime: Option<Extension<crate::identity::api::Runtime>>,
     Extension(admission): Extension<crate::search_admission::Admission>,
     State(state): State<AppState>,
+    request_headers: HeaderMap,
     Json(request): Json<SearchRequest>,
 ) -> Result<Response, ApiError> {
     machine.require("search:read")?;
     request.validate()?;
+    let inline_pricing = request_headers
+        .get("x-portal-search-pricing")
+        .is_some_and(|value| value.as_bytes() == b"1");
     let started = std::time::Instant::now();
     let usage = crate::search_controls::start(
         &state.pool,
         &machine,
-        authority.map(|a| a.0.0.subject),
+        authority.as_ref().map(|a| a.0.0.subject.clone()),
         json!(request.routes),
     )
     .await?;
     let history_request = request.clone();
-    let result = search_tracked(machine, admission, &state, request, &usage).await;
+    let pricing = PricingContext {
+        authority: authority.map(|a| a.0),
+        runtime: runtime.as_ref().map(|r| &r.0),
+        requested: inline_pricing,
+    };
+    let result = search_tracked(machine, pricing, admission, &state, request, &usage).await;
     if matches!(&result, Ok(response) if response.status().is_success())
         && let Err(error) =
             crate::search_history::record(&state.pool, &usage, &history_request).await
@@ -371,8 +381,15 @@ async fn search(
     .await?;
     result
 }
+struct PricingContext<'a> {
+    authority: Option<crate::identity::business::SearchAuthority>,
+    runtime: Option<&'a crate::identity::api::Runtime>,
+    requested: bool,
+}
+
 async fn search_tracked(
     machine: Machine,
+    pricing: PricingContext<'_>,
     admission: crate::search_admission::Admission,
     state: &AppState,
     request: SearchRequest,
@@ -798,15 +815,39 @@ async fn search_tracked(
     tracing::debug!(target: "search_memory", phase = "offers_persisted");
     let commit_started = std::time::Instant::now();
     tx.commit().await?;
+    let commit_ms = commit_started.elapsed().as_millis() as u64;
+    let persistence_ms = persistence_started.elapsed().as_millis() as u64;
+    let pricing_started = std::time::Instant::now();
+    // Only the canonical portal can request inline details. The shared pricing
+    // read rechecks current authority and stored ownership after the search
+    // transaction commits, matching the standalone pricing endpoint.
+    let portal_pricing = if pricing.requested && !returned.is_empty() {
+        if let Some(guard) = pricing.authority.as_ref() {
+            let runtime = pricing.runtime.ok_or(ApiError(
+                StatusCode::SERVICE_UNAVAILABLE,
+                "IDENTITY_UNAVAILABLE",
+            ))?;
+            crate::identity::business::verify_search_provider(runtime, guard).await?;
+            Some(
+                crate::tier::search_pricing_snapshot(&machine, Some(guard), state, search_id)
+                    .await?,
+            )
+        } else {
+            None
+        }
+    } else {
+        None
+    };
+    let inline_pricing_ms = pricing_started.elapsed().as_millis() as u64;
     tracing::info!(target: "search_performance", usage_id = %usage.id,
         route_count = request.routes.len(),
         preflight_ms, dispatch_ms, supplier_wait_ms, supplier_ms, preparation_ms,
         projection_ms = projection_time.as_millis() as u64,
         sql_encode_ms = sql_encode_time.as_millis() as u64,
         sql_execute_ms = sql_execute_time.as_millis() as u64,
-        commit_ms = commit_started.elapsed().as_millis() as u64,
+        commit_ms,
         sql_batches,
-        persistence_ms = persistence_started.elapsed().as_millis() as u64,
+        persistence_ms, inline_pricing_ms,
         total_ms = started.elapsed().as_millis() as u64,
         successful_suppliers = successes, failed_or_blocked_suppliers = failures,
         blocked_suppliers = blocked,
@@ -827,6 +868,9 @@ async fn search_tracked(
     );
     envelope["item1"]["airSearchResponses"] = Value::Array(returned);
     envelope["item2"] = Value::Array(statuses);
+    if let Some(details) = portal_pricing {
+        envelope["portalPricing"] = details;
+    }
     // Metadata describes the final returned selling offers, after supplier selection.
     headers.insert(
         "x-search-summary-scope",

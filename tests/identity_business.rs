@@ -570,6 +570,7 @@ async fn canonical_business_wallet_passenger_client_matrix() {
     let ((s, fresh), (other_status, again)) = tokio::join!(session(), session());
     assert_eq!(s, 200, "{fresh}");
     assert_eq!(other_status, 200, "{again}");
+    assert_eq!(fresh["role"], "b2b");
     assert_eq!(fresh["client_id"], again["client_id"]);
     let fresh_id = Uuid::parse_str(fresh["client_id"].as_str().unwrap()).unwrap();
     let state: (bool, String, Vec<String>, bool, bool, i64, i64) = sqlx::query_as("SELECT c.active,c.tier,c.permissions,c.api_management_enabled,l.owner_id=aw.wallet_owner_id,(SELECT count(*) FROM client_credentials k WHERE k.client_id=c.id),(SELECT count(*) FROM machine_tokens t WHERE t.client_id=c.id) FROM api_clients c JOIN wallet_client_links l ON l.client_id=c.id JOIN portal_agencies a ON a.owner_user_id=$2 JOIN portal_agency_wallets aw ON aw.agency_id=a.id WHERE c.id=$1")
@@ -666,6 +667,7 @@ async fn canonical_business_wallet_passenger_client_matrix() {
     )
     .await;
     assert_eq!(status, 200, "{token}");
+    assert_eq!(token["role"], "b2b_sub");
     let token = token["access_token"].as_str().unwrap().to_owned();
     assert!(token.starts_with("sti_"));
     let response = app
@@ -706,18 +708,16 @@ async fn canonical_business_wallet_passenger_client_matrix() {
         .0,
         403
     );
-    assert_eq!(
-        call(
-            &app,
-            "user_root",
-            "/admin/portal-prebooking-sessions",
-            "POST",
-            json!({"staff_pricing":true})
-        )
-        .await
-        .0,
-        200
-    );
+    let (status, staff_session) = call(
+        &app,
+        "user_root",
+        "/admin/portal-prebooking-sessions",
+        "POST",
+        json!({"staff_pricing":true}),
+    )
+    .await;
+    assert_eq!(status, 200);
+    assert_eq!(staff_session["role"], "superadmin");
     assert_eq!(
         sqlx::query_scalar::<_, i64>("SELECT count(*) FROM wallet_client_links WHERE client_id=$1")
             .bind(Uuid::parse_str(c["id"].as_str().unwrap()).unwrap())

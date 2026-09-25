@@ -30,6 +30,12 @@ about 0.3–0.6 seconds. Those HEAD calls do not benchmark an authenticated
 Search POST, but they do not indicate a 30-second connection setup problem.
 The VPS had low load and ample available memory at the time of review.
 
+Two later single-supplier Takeoff searches completed in 4.0 and 7.2 seconds
+inside Rust. Their supplier waits were 3.6 and 6.8 seconds; offer persistence
+was about 0.35 seconds each. This shows why the browser can still take longer
+than a supplier's 4–5-second response: the portal creates a short-lived search
+session before Search, then retrieves complete pricing after Search.
+
 Two completed searches with all three supplier results show the round/multi-city
 critical path. Both were single adult, economy searches:
 
@@ -63,3 +69,22 @@ were unavailable, so no database write benchmark was run.
 
 No supplier contact, production deployment, database migration, or production
 configuration change was made as part of this review.
+
+## Local portal-path improvement (not released)
+
+The canonical portal now receives its verified role with the search session,
+removing a separate identity-session read. It requests the complete pricing
+snapshot in the Search response, removing a follow-up HTTP request. Rust checks
+the provider and current database authority again after supplier work before
+including that snapshot. Rust verifies stored ownership; the frontend validates
+every offer's pricing, currency and supplier-name visibility as before. Old
+backend responses retain the existing identity and pricing fallback. All
+suppliers and all returned fares remain in the result. The development VPS is
+off and there is no local test PostgreSQL listener, so a production latency gain
+has not yet been measured.
+
+Local verification: Rust formatting, all-target type checking and strict Clippy,
+117 unit tests, integration-test compilation and optimized release build passed.
+The matching frontend passed lint, TypeScript, its prebooking fixture checks and
+the optimized Next build. The database-backed inline-pricing assertion could only
+be compiled because the isolated PostgreSQL test database is unavailable.

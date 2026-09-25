@@ -871,7 +871,11 @@ pub(crate) async fn issue_search(
     sqlx::query("INSERT INTO portal_identity_search_sessions(token_hash,user_id,authorization_version,client_id,staff_pricing) VALUES($1,$2,$3,$4,$5)")
         .bind(crate::auth::digest(&token)).bind(c.actor.id).bind(c.actor.authorization_version).bind(client).bind(staff).execute(&mut *tx).await?;
     tx.commit().await?;
-    Ok(json!({"access_token":token,"token_type":"Bearer","expires_in":300,"client_id":client}))
+    // The trusted frontend can use this freshly verified role without making a
+    // separate identity-session round trip before every flight search.
+    Ok(
+        json!({"access_token":token,"token_type":"Bearer","expires_in":300,"client_id":client,"role":c.actor.role}),
+    )
 }
 pub(crate) async fn authenticate_search(
     state: &AppState,
@@ -1065,6 +1069,16 @@ pub(crate) async fn notification_worker(
 
 #[derive(Clone)]
 pub(crate) struct SearchAuthority(pub(crate) Principal);
+
+/// Inline pricing replaces a second authenticated HTTP request. Repeat that
+/// request's provider check after supplier work before exposing the snapshot.
+pub(crate) async fn verify_search_provider(
+    runtime: &Runtime,
+    guard: &SearchAuthority,
+) -> Result<(), ApiError> {
+    api::verified(runtime, &guard.0.subject).await?;
+    Ok(())
+}
 
 /// Keep confidential search metadata reads under the same authority barrier as
 /// role/access changes, including changes after the token extractor completed.

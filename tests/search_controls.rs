@@ -37,18 +37,21 @@ async fn control(app: &Router, actor: &str, body: Value) -> (u16, Value) {
     business(app, actor, "/admin/search-control", body).await
 }
 async fn search(app: &Router, token: &str) -> (u16, Value) {
+    search_with_inline(app, token, false).await
+}
+async fn search_with_inline(app: &Router, token: &str, inline: bool) -> (u16, Value) {
     let body = json!({"routes":[{"origin":"DAC","destination":"CXB","departureDate":(chrono::Utc::now()+chrono::Duration::days(21)).format("%Y-%m-%d").to_string()}],"adults":1,"childs":0,"infants":0,"cabinClass":1,"preferredCarriers":[],"prohibitedCarriers":[],"childrenAges":[]});
+    let mut request = Request::builder()
+        .method("POST")
+        .uri("/api/Search")
+        .header("authorization", format!("Bearer {token}"))
+        .header("content-type", "application/json");
+    if inline {
+        request = request.header("x-portal-search-pricing", "1");
+    }
     let response = app
         .clone()
-        .oneshot(
-            Request::builder()
-                .method("POST")
-                .uri("/api/Search")
-                .header("authorization", format!("Bearer {token}"))
-                .header("content-type", "application/json")
-                .body(Body::from(body.to_string()))
-                .unwrap(),
-        )
+        .oneshot(request.body(Body::from(body.to_string())).unwrap())
         .await
         .unwrap();
     let status = response.status().as_u16();
@@ -170,8 +173,38 @@ async fn search_control_role_report_and_concurrent_limits() {
         200
     );
     assert_eq!(control(&app, "user_root", supplier_cmd).await.0, 409);
-    let (status, body) = search(&app, token).await;
+    let (status, body) = search_with_inline(&app, token, true).await;
     assert_eq!(status, 200, "{body}");
+    let offers = body["item1"]["airSearchResponses"].as_array().unwrap();
+    assert!(!offers.is_empty());
+    let search_id = offers[0]["uniqueTransID"].as_str().unwrap();
+    assert_eq!(body["portalPricing"]["searchId"], search_id);
+    assert_eq!(
+        body["portalPricing"]["pricing"].as_object().unwrap().len(),
+        offers.len()
+    );
+    assert_eq!(
+        body["portalPricing"]["suppliers"]
+            .as_object()
+            .unwrap()
+            .len(),
+        offers.len()
+    );
+    let response = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .uri(format!("/api/pricing/search/{search_id}"))
+                .header("authorization", format!("Bearer {token}"))
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(response.status(), 200);
+    let complete: Value =
+        serde_json::from_slice(&response.into_body().collect().await.unwrap().to_bytes()).unwrap();
+    assert_eq!(body["portalPricing"], complete);
     assert_eq!(mock.calls.load(Ordering::SeqCst), 2);
     let (_, data) = control(&app, "user_root", report.clone()).await;
     assert_eq!(data["totals"]["requestCount"], 1);

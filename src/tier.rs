@@ -404,12 +404,21 @@ async fn search_pricing(
     State(state): State<AppState>,
     Path(id): Path<Uuid>,
 ) -> Result<Json<Value>, ApiError> {
+    Ok(Json(
+        search_pricing_snapshot(&machine, guard.as_ref().map(|g| &g.0), &state, id).await?,
+    ))
+}
+
+pub(crate) async fn search_pricing_snapshot(
+    machine: &Machine,
+    guard: Option<&crate::identity::business::SearchAuthority>,
+    state: &AppState,
+    id: Uuid,
+) -> Result<Value, ApiError> {
     machine.require("search:read")?;
-    let names_visible = machine.portal_staff
-        && guard
-            .as_ref()
-            .is_some_and(|guard| guard.0.0.role == "superadmin");
-    let mut tx = if let Some(Extension(guard)) = &guard {
+    let names_visible =
+        machine.portal_staff && guard.is_some_and(|guard| guard.0.role == "superadmin");
+    let mut tx = if let Some(guard) = guard {
         crate::identity::business::begin_search_read(&state.pool, guard).await?
     } else {
         state.pool.begin().await?
@@ -446,9 +455,7 @@ async fn search_pricing(
         }
     }
     tx.commit().await?;
-    Ok(Json(
-        json!({"searchId":id,"pricing":pricing,"suppliers":suppliers}),
-    ))
+    Ok(json!({"searchId":id,"pricing":pricing,"suppliers":suppliers}))
 }
 
 #[derive(OpenApi)]
