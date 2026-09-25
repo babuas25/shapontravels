@@ -7,6 +7,7 @@ use serde_json::Value;
 use std::time::Duration;
 use tokio::sync::Mutex;
 use url::Url;
+use uuid::Uuid;
 
 // Bound Search separately: unfiltered return fares exceed the normal read budget.
 const READ_RESPONSE_LIMIT: usize = 8 * 1024 * 1024;
@@ -269,7 +270,23 @@ impl SupplierAdapter {
         operation: ReadOperation,
         payload: &Value,
     ) -> Result<Value, SupplierError> {
-        tokio::time::timeout(self.timeout, self.read_inner(operation, payload))
+        self.read_with_usage(operation, payload, None).await
+    }
+    pub async fn read_search(
+        &self,
+        payload: &Value,
+        usage_id: Uuid,
+    ) -> Result<Value, SupplierError> {
+        self.read_with_usage(ReadOperation::Search, payload, Some(usage_id))
+            .await
+    }
+    async fn read_with_usage(
+        &self,
+        operation: ReadOperation,
+        payload: &Value,
+        usage_id: Option<Uuid>,
+    ) -> Result<Value, SupplierError> {
+        tokio::time::timeout(self.timeout, self.read_inner(operation, payload, usage_id))
             .await
             .map_err(|_| SupplierError::Timeout)?
     }
@@ -277,6 +294,7 @@ impl SupplierAdapter {
         &self,
         operation: ReadOperation,
         payload: &Value,
+        usage_id: Option<Uuid>,
     ) -> Result<Value, SupplierError> {
         let base = if matches!(operation, ReadOperation::Search) {
             &self.search_base
@@ -284,8 +302,13 @@ impl SupplierAdapter {
             &self.base
         };
         let endpoint = Self::endpoint(base, operation.path())?;
-        self.read_endpoint(endpoint, Some(payload), operation.response_limit())
-            .await
+        self.read_endpoint(
+            endpoint,
+            Some(payload),
+            operation.response_limit(),
+            usage_id,
+        )
+        .await
     }
     /// Read-only report; supplier transaction is encoded as one URL path segment.
     pub async fn ticket_report(&self, transaction: &str) -> Result<Value, SupplierError> {
@@ -314,7 +337,7 @@ impl SupplierAdapter {
             .push(filter);
         tokio::time::timeout(
             self.timeout,
-            self.read_endpoint(endpoint, None, READ_RESPONSE_LIMIT),
+            self.read_endpoint(endpoint, None, READ_RESPONSE_LIMIT, None),
         )
         .await
         .map_err(|_| SupplierError::Timeout)?
@@ -324,15 +347,20 @@ impl SupplierAdapter {
         endpoint: Url,
         payload: Option<&Value>,
         limit: usize,
+        usage_id: Option<Uuid>,
     ) -> Result<Value, SupplierError> {
         let mut auth_retried = false;
         let mut transient_retried = false;
         let search = limit == SEARCH_RESPONSE_LIMIT;
+        let usage_id = usage_id.map(|id| id.to_string()).unwrap_or_default();
+        let mut attempt = 0_u8;
         loop {
+            attempt += 1;
             let token_started = std::time::Instant::now();
             let token = self.token().await?;
             if search {
                 tracing::info!(target: "search_performance", supplier = self.id,
+                    usage_id = %usage_id, attempt,
                     phase = "supplier_auth", elapsed_ms = token_started.elapsed().as_millis() as u64,
                     "Supplier search transport phase completed");
             }
@@ -355,6 +383,7 @@ impl SupplierAdapter {
             };
             if search {
                 tracing::info!(target: "search_performance", supplier = self.id,
+                    usage_id = %usage_id, attempt,
                     phase = "supplier_headers", elapsed_ms = headers_started.elapsed().as_millis() as u64,
                     status = response.status().as_u16(),
                     http_version = ?response.version(),
@@ -385,6 +414,7 @@ impl SupplierAdapter {
                 match &body {
                     Ok((_, timings)) => {
                         tracing::info!(target: "search_performance", supplier = self.id,
+                            usage_id = %usage_id, attempt,
                             phase = "supplier_body", elapsed_ms = body_started.elapsed().as_millis() as u64,
                             download_ms = timings.download_ms, parse_ms = timings.parse_ms,
                             decoded_bytes = timings.decoded_bytes, success = true,
@@ -392,6 +422,7 @@ impl SupplierAdapter {
                     }
                     Err(_) => {
                         tracing::info!(target: "search_performance", supplier = self.id,
+                            usage_id = %usage_id, attempt,
                             phase = "supplier_body", elapsed_ms = body_started.elapsed().as_millis() as u64,
                             success = false, "Supplier search transport phase completed");
                     }
@@ -744,7 +775,7 @@ mod tests {
         .unwrap();
         assert_eq!(
             adapter
-                .read(ReadOperation::Search, &Value::Null)
+                .read_search(&Value::Null, Uuid::new_v4())
                 .await
                 .unwrap(),
             expected

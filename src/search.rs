@@ -62,6 +62,10 @@ pub trait ReadSupplier: Send + Sync {
         Box::pin(async { Err(SupplierError::Configuration) })
     }
     fn read<'a>(&'a self, operation: ReadOperation, payload: &'a Value) -> ReadFuture<'a>;
+
+    fn read_search<'a>(&'a self, payload: &'a Value, _usage_id: Uuid) -> ReadFuture<'a> {
+        self.read(ReadOperation::Search, payload)
+    }
 }
 impl ReadSupplier for SupplierAdapter {
     fn authorized_uat_cancellation(&self) -> bool {
@@ -94,6 +98,9 @@ impl ReadSupplier for SupplierAdapter {
     }
     fn read<'a>(&'a self, operation: ReadOperation, payload: &'a Value) -> ReadFuture<'a> {
         Box::pin(SupplierAdapter::read(self, operation, payload))
+    }
+    fn read_search<'a>(&'a self, payload: &'a Value, usage_id: Uuid) -> ReadFuture<'a> {
+        Box::pin(SupplierAdapter::read_search(self, payload, usage_id))
     }
 }
 pub struct ConfiguredSupplier {
@@ -436,7 +443,7 @@ async fn search_tracked(
             let supplier_started = std::time::Instant::now();
             let result = tokio::time::timeout(
                 Duration::from_secs(connection.timeout_seconds as u64),
-                transport.read(ReadOperation::Search, &payload),
+                transport.read_search(&payload, usage_id),
             )
             .await;
             let successful = match &result {
