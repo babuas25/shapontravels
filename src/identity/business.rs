@@ -892,6 +892,9 @@ pub(crate) async fn authenticate_search(
         || (parts.method == Method::GET
             && (path == "/api/SearchSuggestions"
                 || path == "/auth/me"
+                || path
+                    .strip_prefix("/api/pricing/search/")
+                    .is_some_and(|id| Uuid::parse_str(id).is_ok())
                 || path.starts_with("/api/pricing/offer/")
                 || path.starts_with("/api/pricing/reprice/")));
     if !allowed {
@@ -1062,6 +1065,21 @@ pub(crate) async fn notification_worker(
 
 #[derive(Clone)]
 pub(crate) struct SearchAuthority(pub(crate) Principal);
+
+/// Keep confidential search metadata reads under the same authority barrier as
+/// role/access changes, including changes after the token extractor completed.
+pub(crate) async fn begin_search_read<'a>(
+    pool: &'a PgPool,
+    guard: &SearchAuthority,
+) -> Result<Transaction<'a, Postgres>, ApiError> {
+    let mut tx = super::begin_mutation(pool).await?;
+    let current = principal(&mut tx, &guard.0.subject).await?;
+    if !same_authority(&guard.0, &current) {
+        return Err(ApiError(StatusCode::CONFLICT, "IDENTITY_AUTHORITY_CHANGED"));
+    }
+    Ok(tx)
+}
+
 pub(crate) async fn accept_search(
     guard: SearchAuthority,
     machine: crate::auth::Machine,

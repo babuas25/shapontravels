@@ -1636,6 +1636,20 @@
       "$ref": "#/components/schemas/PricingSnapshot"
     }
   },
+  "SearchPricing": {
+    "type": "object",
+    "properties": {
+      "searchId": { "type": "string", "format": "uuid" },
+      "pricing": { "$ref": "#/components/schemas/PricingBatch" },
+      "suppliers": {
+        "type": "object",
+        "additionalProperties": { "type": "string", "enum": ["FirstTrip", "TakeOff", "Triplover"] },
+        "description": "Populated only for a freshly authorized canonical Super Admin staff session; empty for other callers."
+      }
+    },
+    "required": ["searchId", "pricing", "suppliers"],
+    "additionalProperties": false
+  },
   "WalletBalance": {
     "type": "object",
     "properties": {

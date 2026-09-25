@@ -32,6 +32,22 @@ Inspect branch, remote and uncommitted changes in both repositories before work.
 A general backend push request does not include the frontend. The authorized
 frontend remote is the new private repository above, never `babuas25/shopontravels`.
 
+## Source-only commit and push requests
+
+A request to commit and push branches does not authorize activating services or
+applying database migrations. For a source-only backend push, include `[skip ci]`
+in the final commit on each pushed branch; its normal Actions workflow also
+deploys and migrates. Run the required lint, type, build and relevant tests locally
+before committing. For a source-only frontend push, include `[skip deploy]` in
+each final pushed commit, including a production merge commit. The frontend's
+`vercel.json` ignore command skips publication for that literal marker while
+allowing GitHub quality/build CI. Future unmarked release commits retain the
+normal deployment path below. Verify the remote branch SHAs after each push.
+
+Git source promotion never includes local database rows, `.env` files, private
+profiles, dumps or ignored evidence. A later authorized deployment must verify
+backend readiness before publishing a frontend that depends on new API routes.
+
 ## Ordinary development release
 
 1. Review the diff, migrations and affected checks. Preserve unrelated local work
@@ -1122,3 +1138,30 @@ the user's production release authorization under this runbook.
   booking, ticket, deposit or notification delivery was created as a check.
   Sendbox availability and the unpublished frontend development tip remain
   separate follow-ups; neither is needed by the production release.
+
+### Search latency and portal source promotion — 2026-09-25
+
+- The user requested all pending backend and frontend source updates on both
+  development and production branches, with local lint/build/type checks first.
+  Backend commits use `[skip ci]`; the paired frontend commits use `[skip deploy]`.
+  This is source promotion only. The last verified deployed revisions above
+  remain the running-release record until a separately authorized deployment.
+- Backend changes add complete search pricing reads with fresh identity checks,
+  supplier gzip decoding and phase timing, an optional offline replay request,
+  regression coverage and the search-latency evidence report. There are no new
+  schema migrations in this change set.
+- Backend validation passed: `cargo fmt --all --check`, strict all-target Clippy,
+  `cargo check --all-targets --locked`, `cargo test --locked` (148 passed, zero
+  failed; 53 opt-in tests ignored), and the locked release binary build. New
+  search-pricing and search-control integrations both passed against newly
+  initialized disposable PostgreSQL databases. The temporary cluster was stopped.
+- Frontend source includes search startup/pricing improvements, API endpoint
+  testing/documentation, API-client booking details and staff-set hold deadlines.
+  See its `docs/DEVELOPMENT_RELEASES.md` for checks and source-push controls.
+- Staged source excludes local database rows/dumps, `.env`, credentials, private
+  profiles and generated output. No local database is uploaded or restored,
+  and no remote database, runtime configuration, authority pin, supplier control
+  or service is modified by this source promotion.
+- A future release must deploy and verify this backend before publishing the
+  dependent frontend's new `/api/pricing/search/{id}` calls. Restore and verify
+  development VPS readiness before relying on its Preview environment.

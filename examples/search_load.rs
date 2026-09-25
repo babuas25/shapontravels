@@ -150,7 +150,13 @@ async fn main() {
         },
         limits,
     );
-    let request = json!({"routes":[{"origin":"DAC","destination":"SIN","departureDate":"2026-10-15"},{"origin":"SIN","destination":"DAC","departureDate":"2026-10-20"}],"adults":2,"childs":2,"infants":1,"childrenAges":[3,11],"cabinClass":1,"preferredCarriers":[],"prohibitedCarriers":[]});
+    let request: Value = match std::env::var("LOAD_REQUEST_FILE") {
+        Ok(path) => serde_json::from_slice(&std::fs::read(path).unwrap()).unwrap(),
+        Err(std::env::VarError::NotPresent) => {
+            json!({"routes":[{"origin":"DAC","destination":"SIN","departureDate":"2026-10-15"},{"origin":"SIN","destination":"DAC","departureDate":"2026-10-20"}],"adults":2,"childs":2,"infants":1,"childrenAges":[3,11],"cabinClass":1,"preferredCarriers":[],"prohibitedCarriers":[]})
+        }
+        Err(error) => panic!("invalid LOAD_REQUEST_FILE: {error}"),
+    };
     let barrier = Arc::new(tokio::sync::Barrier::new(concurrent));
     let mut tasks = tokio::task::JoinSet::new();
     let overall = Instant::now();

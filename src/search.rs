@@ -411,6 +411,8 @@ async fn search_tracked(
         return Err(error("PRICING_CONFIGURATION_ERROR"));
     }
     let payload = serde_json::to_value(&request).map_err(|_| error("INVALID_SEARCH_REQUEST"))?;
+    let preflight_ms = started.elapsed().as_millis() as u64;
+    let dispatch_started = std::time::Instant::now();
     let mut tasks = tokio::task::JoinSet::new();
     let mut blocked = 0;
     let mut last_block = None;
@@ -428,6 +430,7 @@ async fn search_tracked(
         let transport = state.suppliers[&connection.id].transport.clone();
         let payload = payload.clone();
         tasks.spawn(async move {
+            let supplier_started = std::time::Instant::now();
             let result = tokio::time::timeout(
                 Duration::from_secs(connection.timeout_seconds as u64),
                 transport.read(ReadOperation::Search, &payload),
@@ -452,9 +455,19 @@ async fn search_tracked(
                 successful,
             )
             .await;
+            let outcome = match &result {
+                Ok(Ok(_)) if successful => "success",
+                Ok(Ok(_)) => "invalid_response",
+                Ok(Err(_)) => "error",
+                Err(_) => "timeout",
+            };
+            tracing::info!(target: "search_performance", usage_id = %usage_id,
+                supplier = %connection.id, elapsed_ms = supplier_started.elapsed().as_millis() as u64,
+                outcome, "Search supplier completed");
             (connection, result, recorded)
         });
     }
+    let dispatch_ms = dispatch_started.elapsed().as_millis() as u64;
     if tasks.is_empty()
         && let Some(e) = last_block
     {
@@ -463,6 +476,7 @@ async fn search_tracked(
     let mut failures = blocked;
     let mut successes = 0;
     let mut batches = Vec::new();
+    let supplier_wait_started = std::time::Instant::now();
     while let Some(task) = tasks.join_next().await {
         let (connection, mut body) = match task {
             Ok((_, _, Err(e))) => return Err(e),
@@ -509,6 +523,7 @@ async fn search_tracked(
         body["item1"]["airSearchResponses"] = Value::Array(Vec::new());
         batches.push((connection, offers, body));
     }
+    let supplier_wait_ms = supplier_wait_started.elapsed().as_millis() as u64;
     if successes == 0 {
         return Err(ApiError(
             StatusCode::SERVICE_UNAVAILABLE,
@@ -773,7 +788,8 @@ async fn search_tracked(
     tracing::debug!(target: "search_memory", phase = "offers_persisted");
     let commit_started = std::time::Instant::now();
     tx.commit().await?;
-    tracing::info!(target: "search_performance", supplier_ms, preparation_ms,
+    tracing::info!(target: "search_performance", usage_id = %usage.id,
+        preflight_ms, dispatch_ms, supplier_wait_ms, supplier_ms, preparation_ms,
         projection_ms = projection_time.as_millis() as u64,
         sql_encode_ms = sql_encode_time.as_millis() as u64,
         sql_execute_ms = sql_execute_time.as_millis() as u64,
@@ -781,6 +797,8 @@ async fn search_tracked(
         sql_batches,
         persistence_ms = persistence_started.elapsed().as_millis() as u64,
         total_ms = started.elapsed().as_millis() as u64,
+        successful_suppliers = successes, failed_or_blocked_suppliers = failures,
+        blocked_suppliers = blocked,
         source_offers = source_count, excluded_scope_offers, returned_offers = returned.len(),
         "Search processing completed");
     let mut headers = HeaderMap::new();
