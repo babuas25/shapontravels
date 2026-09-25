@@ -205,7 +205,7 @@ Recheck before the next release:
 
 | Item | Development | Production |
 | --- | --- | --- |
-| Rust release | `44c80a1` | `a351ee5` |
+| Rust release | `44c80a1` | `54e5c30` |
 | Applied migration | `0066` | `0069` |
 | Canonical rollout revision | `3` | `5` |
 | Frontend release | `94c20cd` | `c7af7df` |
@@ -1246,3 +1246,48 @@ the user's production release authorization under this runbook.
   identity revision `5`. The public/internal ready checks returned HTTP 200;
   API and notification worker remained active. No local database data, dump,
   secret or profile was transferred, and no booking or payment was created.
+
+### Flight search offer-batch production release — 2026-09-25 (Asia/Dhaka)
+
+- The user authorized this backend-only production release after local formatting,
+  strict Clippy, all-target type check, optimized build, Rust unit tests, fixtures
+  and disposable-database search integration tests passed. The source changes
+  increase atomic Search offer INSERT batches from 16 to 64 and cover one-way,
+  round-trip and multi-city persistence across batch boundaries. There is no
+  frontend code change, identity-pin change or schema migration.
+- Backend production commit `54e5c304e968a30f1e0ecba085f299be21003701`
+  passed checks, Ubuntu release build and deployment in
+  [Actions run 36145698837](https://github.com/babuas25/shapontravels/actions/runs/36145698837).
+  Production `160.25.226.236` reports that exact deployed SHA, active API,
+  internal and public live/ready HTTP 200, schema `0069`, and an enabled backup
+  timer. The deployment created production-local backup
+  `/var/backups/shapontravels/db-20260925T142041Z.dump`; no restore rehearsal was
+  performed for this compatible release.
+- Authenticated canonical identity readiness remains true at rollout revision `5`,
+  maintenance off, worker unpaused, and durable/runtime pins matching. The API
+  activation stopped the business notification worker. Rust dispatch ownership
+  and provider configuration were verified before starting it; the worker is
+  active with zero automatic restarts. The production frontend remains the
+  previously verified `c7af7df` deployment on `preview.shapontravels.com`.
+- Browser searches through the production frontend after activation all rendered
+  results with 3/3 successful suppliers and zero supplier failures. For DAC–SIN
+  20 October / SIN–DAC 30 October, Rust processed 2,505 retained offers in
+  33.875 s, including 30.036 s supplier wait and 3.602 s persistence with 40 SQL
+  batches. The previous same-criteria sample was 37.654 s, including 33.346 s
+  supplier wait and 4.087 s persistence with 162 batches (2,591 offers).
+- For DAC–SIN 20 October / SIN–KUL 24 October / KUL–DAC 30 October, Rust processed
+  all 1,637 eligible offers in 35.786 s, including 32.969 s supplier wait and
+  2.687 s persistence with 26 SQL batches. The prior same-criteria sample was
+  12.846 s, including 9.655 s supplier wait and 3.086 s persistence with 103
+  batches (1,647 offers). Firsttrip varied from 9.673 s to 32.984 s, which
+  dominates the observed end-to-end regression despite faster persistence.
+- One-way DAC–SIN 30 September returned 642 retained offers in 6.445 s, including
+  5.431 s supplier wait, 0.955 s persistence and 11 SQL batches. The prior
+  same-criteria sample was 6.829 s. These are individual live samples with
+  differing supplier times and offer counts, not a latency guarantee. Supplier
+  responses arrive in parallel, and the slowest full response still gates the
+  complete result; no partial-result cutoff was introduced.
+- No local database rows, dumps, secrets or profiles were transferred. No booking,
+  ticket, deposit or notification delivery was created by verification. The
+  development VPS remained unreachable, so no development service deployment
+  or readiness claim is made for this release.
