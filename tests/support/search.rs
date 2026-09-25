@@ -464,6 +464,69 @@ pub async fn verify(original_app: &Router, admin: &str, machine: &str, pool: &Pg
         );
         assert_eq!(selling["totalPrice"].to_string(), "4349");
     }
+    // Large two-leg responses cross the same insert boundaries. Cover both a
+    // return journey and a non-return multi-city journey with every supplier.
+    for (fixture, routes) in [
+        (
+            include_str!("../fixtures/production/triplover-return.json"),
+            [("DAC", "SIN"), ("SIN", "DAC")],
+        ),
+        (
+            include_str!("../fixtures/production/triplover-multicity.json"),
+            [("DAC", "BKK"), ("BKK", "SIN")],
+        ),
+    ] {
+        let mut response: Value = serde_json::from_str(fixture).unwrap();
+        let sample = response["item1"]["airSearchResponses"][0].clone();
+        response["item1"]["airSearchResponses"] = json!(
+            (0..130)
+                .map(|n| {
+                    let mut offer = sample.clone();
+                    offer["itemCodeRef"] = json!(format!("two-leg-offer-{n}"));
+                    offer["bulkRow"] = json!(n);
+                    offer
+                })
+                .collect::<Vec<_>>()
+        );
+        response["item1"]["totalFlights"] = json!(130);
+        for mock in &mocks {
+            *mock.response.lock().unwrap() = response.clone();
+        }
+        let departure = (chrono::Utc::now() + chrono::Duration::days(21))
+            .format("%Y-%m-%d")
+            .to_string();
+        let later = (chrono::Utc::now() + chrono::Duration::days(28))
+            .format("%Y-%m-%d")
+            .to_string();
+        let input = json!({
+            "routes": [
+                {"origin": routes[0].0, "destination": routes[0].1, "departureDate": departure},
+                {"origin": routes[1].0, "destination": routes[1].1, "departureDate": later}
+            ],
+            "adults": 2, "childs": 1, "infants": 1, "cabinClass": 1,
+            "preferredCarriers": [], "prohibitedCarriers": [], "childrenAges": [5]
+        });
+        let (status, result) = call(&app, "POST", "/api/Search", Some(machine), input).await;
+        assert_eq!(status, 200, "{result}");
+        let offers = result["item1"]["airSearchResponses"].as_array().unwrap();
+        assert_eq!(offers.len(), 130);
+        assert!(offers.iter().all(|offer| {
+            offer["directions"]
+                .as_array()
+                .is_some_and(|legs| legs.len() == 2)
+        }));
+        let search_id = Uuid::parse_str(offers[0]["uniqueTransID"].as_str().unwrap()).unwrap();
+        let saved_count: i64 =
+            sqlx::query_scalar("SELECT count(*) FROM flight_offers WHERE search_id=$1")
+                .bind(search_id)
+                .fetch_one(pool)
+                .await
+                .unwrap();
+        assert_eq!(saved_count, 130);
+    }
+    for mock in &mocks {
+        *mock.response.lock().unwrap() = bulk.clone();
+    }
     // A database failure in a later batch rolls back earlier batches and the search header.
     sqlx::query("CREATE FUNCTION fail_bulk_test() RETURNS trigger LANGUAGE plpgsql AS $$ BEGIN IF NEW.original->>'bulkRow'='64' THEN RAISE EXCEPTION 'deliberate batch failure'; END IF; RETURN NEW; END $$").execute(pool).await.unwrap();
     sqlx::query("CREATE TRIGGER fail_bulk_test BEFORE INSERT ON flight_offers FOR EACH ROW EXECUTE FUNCTION fail_bulk_test()").execute(pool).await.unwrap();
