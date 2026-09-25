@@ -63,6 +63,19 @@ jobs:
           PGUSER: test
           PGPASSWORD: test
           SUPPLIER_CONTROL_TEST_DATABASE_URL: postgres://test:test@127.0.0.1:5432/supplier_control_identity_test
+      - name: Canonical Search pricing and session authority
+        run: |
+          createdb -T template0 -E UTF8 flight_search_control_test
+          createdb -T template0 -E UTF8 flight_identity_test
+          cargo test --locked --test search_controls -- --ignored
+          cargo test --locked --test identity_business -- --ignored
+        env:
+          PGHOST: 127.0.0.1
+          PGPORT: '5432'
+          PGUSER: test
+          PGPASSWORD: test
+          SEARCH_CONTROL_TEST_DATABASE_URL: postgres://test:test@127.0.0.1:5432/flight_search_control_test
+          IDENTITY_BUSINESS_TEST_DATABASE_URL: postgres://test:test@127.0.0.1:5432/flight_identity_test
       - name: B2B onboarding and registration mail integration
         run: |
           createdb -T template0 -E UTF8 onboarding_identity_test

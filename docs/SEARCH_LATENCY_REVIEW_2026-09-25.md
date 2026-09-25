@@ -87,4 +87,6 @@ Local verification: Rust formatting, all-target type checking and strict Clippy,
 117 unit tests, integration-test compilation and optimized release build passed.
 The matching frontend passed lint, TypeScript, its prebooking fixture checks and
 the optimized Next build. The database-backed inline-pricing assertion could only
-be compiled because the isolated PostgreSQL test database is unavailable.
+be compiled because the isolated PostgreSQL test database is unavailable. The
+production CI now runs that assertion and the search-session role test against
+new disposable PostgreSQL databases before it can build or deploy.
