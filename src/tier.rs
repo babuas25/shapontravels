@@ -4,7 +4,7 @@ use crate::{
     auth::{Admin, ApiError, Machine},
 };
 use axum::{
-    Json, Router,
+    Extension, Json, Router,
     extract::{Path, State},
     http::{HeaderMap, StatusCode},
     routing::get,
@@ -159,6 +159,23 @@ fn staff_pricing(original: &Value, mut pricing: Value) -> Result<Value, ApiError
     pricing["commission"] = json!("0.00");
     pricing["payable"] = json!(decimal(&total_gross));
     Ok(pricing)
+}
+
+fn offer_snapshot(
+    original: &Value,
+    pricing: Option<Value>,
+    portal_staff: bool,
+) -> Result<Value, ApiError> {
+    let mut pricing = pricing.ok_or(ApiError(
+        StatusCode::CONFLICT,
+        "PRICING_SNAPSHOT_UNAVAILABLE",
+    ))?;
+    crate::fare_breakdown::enrich(&mut pricing, original);
+    if portal_staff {
+        staff_pricing(original, pricing)
+    } else {
+        Ok(pricing)
+    }
 }
 
 /// Global B2B shares, updated atomically so tier ordering cannot be torn.
@@ -369,26 +386,82 @@ async fn offer_pricing(
     }
     let mut offers = serde_json::Map::new();
     for (id, original, pricing) in rows {
-        let mut pricing = pricing.ok_or(ApiError(
-            StatusCode::CONFLICT,
-            "PRICING_SNAPSHOT_UNAVAILABLE",
-        ))?;
-        crate::fare_breakdown::enrich(&mut pricing, &original);
         offers.insert(
             id.to_string(),
-            if machine.portal_staff {
-                staff_pricing(&original, pricing)?
-            } else {
-                pricing
-            },
+            offer_snapshot(&original, pricing, machine.portal_staff)?,
         );
     }
     Ok(Json(Value::Object(offers)))
 }
 
+/// One complete read of the stored search. Supplier identities require fresh
+/// canonical Super Admin authority; other accepted callers receive pricing only.
+/// A single query snapshot also distinguishes empty/foreign searches.
+#[utoipa::path(get,path="/api/pricing/search/{id}",tag="B2B tiers",security(("machine_token"=[])),params(("id"=String,Path)),responses((status=200,body=Object,description="Complete pricing keyed by owned search offer UUID; suppliers visible only to canonical Super Admin staff"),(status=404,description="Unknown or foreign search"),(status=409,description="Historical snapshot unavailable or authority changed"),(status=410,description="Search expired; run a new search")))]
+async fn search_pricing(
+    machine: Machine,
+    guard: Option<Extension<crate::identity::business::SearchAuthority>>,
+    State(state): State<AppState>,
+    Path(id): Path<Uuid>,
+) -> Result<Json<Value>, ApiError> {
+    machine.require("search:read")?;
+    let names_visible = machine.portal_staff
+        && guard
+            .as_ref()
+            .is_some_and(|guard| guard.0.0.role == "superadmin");
+    let mut tx = if let Some(Extension(guard)) = &guard {
+        crate::identity::business::begin_search_read(&state.pool, guard).await?
+    } else {
+        state.pool.begin().await?
+    };
+    type SearchPricingRow = (bool, Option<Uuid>, Value, Option<Value>, Option<String>);
+    let rows: Vec<SearchPricingRow> = sqlx::query_as(
+        "SELECT s.expires_at>clock_timestamp() AND (o.id IS NULL OR o.expires_at>clock_timestamp()),o.id,jsonb_build_object('passengerCounts',o.original->'passengerCounts','passengerFares',o.original->'passengerFares'),o.tier_pricing,o.supplier_id FROM flight_searches s JOIN api_clients c ON c.id=s.client_id AND c.active AND 'search:read'=ANY(c.permissions) LEFT JOIN flight_offers o ON o.search_id=s.id AND o.client_id=s.client_id WHERE s.id=$1 AND s.client_id=$2 ORDER BY o.id",
+    )
+    .bind(id)
+    .bind(machine.client_id)
+    .fetch_all(&mut *tx)
+    .await?;
+    if rows.is_empty() {
+        return Err(ApiError(StatusCode::NOT_FOUND, "NOT_FOUND"));
+    }
+    if rows.iter().any(|row| !row.0) {
+        return Err(ApiError(StatusCode::GONE, "OFFER_EXPIRED"));
+    }
+    let mut pricing = serde_json::Map::new();
+    let mut suppliers = serde_json::Map::new();
+    for (_, offer_id, original, snapshot, supplier) in rows {
+        let Some(offer_id) = offer_id else { continue };
+        pricing.insert(
+            offer_id.to_string(),
+            offer_snapshot(&original, snapshot, machine.portal_staff)?,
+        );
+        if names_visible {
+            suppliers.insert(
+                offer_id.to_string(),
+                json!(crate::portal::supplier_name(
+                    supplier.as_deref().unwrap_or("")
+                )?),
+            );
+        }
+    }
+    tx.commit().await?;
+    Ok(Json(
+        json!({"searchId":id,"pricing":pricing,"suppliers":suppliers}),
+    ))
+}
+
 #[derive(OpenApi)]
 #[openapi(
-    paths(set_tier, get_tier, pricing, offer_pricing, get_policy, set_policy),
+    paths(
+        set_tier,
+        get_tier,
+        pricing,
+        offer_pricing,
+        search_pricing,
+        get_policy,
+        set_policy
+    ),
     components(schemas(Tier, TierInput, OfferPricingInput, TierPolicy, TierPolicyInput))
 )]
 pub struct TierDoc;
@@ -396,6 +469,7 @@ pub fn routes() -> Router<AppState> {
     Router::new()
         .route("/admin/tier-policy", get(get_policy).put(set_policy))
         .route("/api/pricing/offers", axum::routing::post(offer_pricing))
+        .route("/api/pricing/search/{id}", get(search_pricing))
         .route("/admin/clients/{id}/tier", get(get_tier).put(set_tier))
         .route("/api/pricing/{kind}/{id}", get(pricing))
 }

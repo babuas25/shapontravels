@@ -113,6 +113,7 @@ impl SupplierAdapter {
         }
         let client = Client::builder()
             .redirect(reqwest::redirect::Policy::none())
+            .gzip(true)
             .timeout(timeout)
             .connect_timeout(timeout.min(Duration::from_secs(5)))
             .build()
@@ -326,13 +327,21 @@ impl SupplierAdapter {
     ) -> Result<Value, SupplierError> {
         let mut auth_retried = false;
         let mut transient_retried = false;
+        let search = limit == SEARCH_RESPONSE_LIMIT;
         loop {
+            let token_started = std::time::Instant::now();
             let token = self.token().await?;
+            if search {
+                tracing::info!(target: "search_performance", supplier = self.id,
+                    phase = "supplier_auth", elapsed_ms = token_started.elapsed().as_millis() as u64,
+                    "Supplier search transport phase completed");
+            }
             let request = if let Some(payload) = payload {
                 self.client.post(endpoint.clone()).json(payload)
             } else {
                 self.client.get(endpoint.clone())
             };
+            let headers_started = std::time::Instant::now();
             let result = request.bearer_auth(&token).send().await;
             let response = match result {
                 Ok(response) => response,
@@ -344,6 +353,13 @@ impl SupplierAdapter {
                 }
                 Err(error) => return Err(transport(error)),
             };
+            if search {
+                tracing::info!(target: "search_performance", supplier = self.id,
+                    phase = "supplier_headers", elapsed_ms = headers_started.elapsed().as_millis() as u64,
+                    status = response.status().as_u16(),
+                    http_version = ?response.version(),
+                    "Supplier search transport phase completed");
+            }
             if response.status() == reqwest::StatusCode::UNAUTHORIZED && !auth_retried {
                 auth_retried = true;
                 let mut session = self.session.lock().await;
@@ -363,7 +379,25 @@ impl SupplierAdapter {
             if !response.status().is_success() {
                 return Err(SupplierError::Response);
             }
-            return bounded_json(response, limit).await;
+            let body_started = std::time::Instant::now();
+            let body = bounded_json_with_timings(response, limit).await;
+            if search {
+                match &body {
+                    Ok((_, timings)) => {
+                        tracing::info!(target: "search_performance", supplier = self.id,
+                            phase = "supplier_body", elapsed_ms = body_started.elapsed().as_millis() as u64,
+                            download_ms = timings.download_ms, parse_ms = timings.parse_ms,
+                            decoded_bytes = timings.decoded_bytes, success = true,
+                            "Supplier search transport phase completed");
+                    }
+                    Err(_) => {
+                        tracing::info!(target: "search_performance", supplier = self.id,
+                            phase = "supplier_body", elapsed_ms = body_started.elapsed().as_millis() as u64,
+                            success = false, "Supplier search transport phase completed");
+                    }
+                }
+            }
+            return body.map(|(body, _)| body);
         }
     }
 }
@@ -374,21 +408,46 @@ fn transport(error: reqwest::Error) -> SupplierError {
         SupplierError::Transport
     }
 }
-async fn bounded_json(
+async fn bounded_json(response: reqwest::Response, limit: usize) -> Result<Value, SupplierError> {
+    bounded_json_with_timings(response, limit)
+        .await
+        .map(|(body, _)| body)
+}
+
+struct BodyTimings {
+    download_ms: u64,
+    parse_ms: u64,
+    decoded_bytes: usize,
+}
+
+async fn bounded_json_with_timings(
     mut response: reqwest::Response,
     limit: usize,
-) -> Result<Value, SupplierError> {
+) -> Result<(Value, BodyTimings), SupplierError> {
+    let download_started = std::time::Instant::now();
     if response.content_length().is_some_and(|n| n > limit as u64) {
         return Err(SupplierError::TooLarge);
     }
     let mut bytes = Vec::new();
+    // Reqwest yields decoded chunks for gzip responses; cap the expanded JSON,
+    // even when the compressed Content-Length is small or no length is known.
     while let Some(chunk) = response.chunk().await.map_err(transport)? {
         if chunk.len() > limit - bytes.len() {
             return Err(SupplierError::TooLarge);
         }
         bytes.extend_from_slice(&chunk);
     }
-    serde_json::from_slice(&bytes).map_err(|_| SupplierError::Response)
+    let download_ms = download_started.elapsed().as_millis() as u64;
+    let parse_started = std::time::Instant::now();
+    let body = serde_json::from_slice(&bytes).map_err(|_| SupplierError::Response)?;
+    Ok((
+        body,
+        BodyTimings {
+            download_ms,
+            parse_ms: parse_started.elapsed().as_millis() as u64,
+            decoded_bytes: bytes.len(),
+        },
+    ))
 }
 
 #[cfg(test)]
@@ -629,6 +688,108 @@ mod tests {
             bounded_json(response, 4).await.unwrap_err(),
             SupplierError::TooLarge
         );
+        task.abort();
+    }
+
+    fn gzip_json(value: &Value) -> Vec<u8> {
+        use std::io::Write;
+        let mut encoder = flate2::write::GzEncoder::new(Vec::new(), flate2::Compression::fast());
+        encoder
+            .write_all(&serde_json::to_vec(value).unwrap())
+            .unwrap();
+        encoder.finish().unwrap()
+    }
+
+    #[tokio::test]
+    async fn search_advertises_gzip_and_decodes_exact_json() {
+        let expected = serde_json::json!({"item1":{"airSearchResponses":[{"opaque":"unchanged","padding":"x".repeat(4096)}]}});
+        let compressed = gzip_json(&expected);
+        let (base, task) = server(
+            Router::new()
+                .route("/api/user/apiLogIn", post(login))
+                .route(
+                    "/api/Search",
+                    post(move |headers: HeaderMap| {
+                        let compressed = compressed.clone();
+                        async move {
+                            assert!(
+                                headers["accept-encoding"]
+                                    .to_str()
+                                    .unwrap()
+                                    .split(',')
+                                    .any(|value| value.trim() == "gzip")
+                            );
+                            (
+                                [
+                                    ("content-encoding", "gzip".to_owned()),
+                                    ("content-type", "application/json".to_owned()),
+                                    ("content-length", compressed.len().to_string()),
+                                ],
+                                compressed,
+                            )
+                        }
+                    }),
+                )
+                .with_state(Mock::default()),
+        )
+        .await;
+        let adapter = SupplierAdapter::build(
+            "triplover",
+            base.clone(),
+            base,
+            "test@example.invalid".into(),
+            "already-encoded".into(),
+            Duration::from_secs(3),
+        )
+        .unwrap();
+        assert_eq!(
+            adapter
+                .read(ReadOperation::Search, &Value::Null)
+                .await
+                .unwrap(),
+            expected
+        );
+        task.abort();
+    }
+
+    #[tokio::test]
+    async fn gzip_body_limit_checks_decoded_bytes_at_exact_boundary() {
+        let expected = serde_json::json!({"payload":"x".repeat(16 * 1024)});
+        let decoded_size = serde_json::to_vec(&expected).unwrap().len();
+        let compressed = gzip_json(&expected);
+        assert!(compressed.len() < decoded_size - 1);
+        let (base, task) = server(Router::new().route(
+            "/body",
+            post(move || {
+                let compressed = compressed.clone();
+                async move {
+                    (
+                        [
+                            ("content-encoding", "gzip".to_owned()),
+                            ("content-type", "application/json".to_owned()),
+                            ("content-length", compressed.len().to_string()),
+                        ],
+                        compressed,
+                    )
+                }
+            }),
+        ))
+        .await;
+        let client = Client::new();
+        for limit in [decoded_size, decoded_size - 1] {
+            let response = client
+                .post(base.join("body").unwrap())
+                .send()
+                .await
+                .unwrap();
+            assert_eq!(response.content_length(), None);
+            let result = bounded_json(response, limit).await;
+            if limit == decoded_size {
+                assert_eq!(result.unwrap(), expected);
+            } else {
+                assert_eq!(result.unwrap_err(), SupplierError::TooLarge);
+            }
+        }
         task.abort();
     }
 

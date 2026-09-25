@@ -29,6 +29,7 @@ fn success(path: &str, status: &str) -> Option<&'static str> {
         "/api/pnr" | "/api/bookings/{id}/reconcile" => "PnrResponse",
         "/api/pricing/{kind}/{id}" => "PricingSnapshot",
         "/api/pricing/offers" => "PricingBatch",
+        "/api/pricing/search/{id}" => "SearchPricing",
         "/api/wallet/balance" => "WalletBalance",
         "/api/wallet/statement" => "WalletStatement",
         "/api/Cancel" | "/api/bookings/{id}/cancellation" => "CancellationResponse",

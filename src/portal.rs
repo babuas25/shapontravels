@@ -164,20 +164,22 @@ async fn offer_suppliers(
     }
     let mut names = serde_json::Map::new();
     for (id, supplier) in rows {
-        let name = match supplier.as_str() {
-            "firsttrip" => "FirstTrip",
-            "takeoff" => "TakeOff",
-            "triplover" => "Triplover",
-            _ => {
-                return Err(ApiError(
-                    StatusCode::INTERNAL_SERVER_ERROR,
-                    "SUPPLIER_CONFIGURATION_ERROR",
-                ));
-            }
-        };
+        let name = supplier_name(&supplier)?;
         names.insert(id.to_string(), json!(name));
     }
     Ok(Json(Value::Object(names)))
+}
+
+pub(crate) fn supplier_name(supplier: &str) -> Result<&'static str, ApiError> {
+    match supplier {
+        "firsttrip" => Ok("FirstTrip"),
+        "takeoff" => Ok("TakeOff"),
+        "triplover" => Ok("Triplover"),
+        _ => Err(ApiError(
+            StatusCode::INTERNAL_SERVER_ERROR,
+            "SUPPLIER_CONFIGURATION_ERROR",
+        )),
+    }
 }
 
 pub(crate) async fn authenticate(
