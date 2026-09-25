@@ -1326,3 +1326,49 @@ the user's production release authorization under this runbook.
   is not verified or claimed active. Restore the correct retained local config
   and database before changing its supplier controls; do not substitute the
   production database, a production copy or another test identity target.
+
+### Complete Search response optimization — 2026-09-25 (Asia/Dhaka)
+
+- The user authorized this paired production release while the development VPS
+  remained off. Backend `e2afe1cc151b3a2e5adf20487643b285eddb4e0b`
+  (Search changes `ab55865`, `e125797` plus integration-test gate `e2afe1c`)
+  passed local formatting, all-target type check, strict Clippy, unit tests and
+  optimized build. [Actions run 36161702198](https://github.com/babuas25/shapontravels/actions/runs/36161702198)
+  passed disposable-PostgreSQL integration tests, checks, build and production
+  deploy. The production VPS reports the exact deployed SHA. No migration was
+  added; applied schema remains `0069` and canonical identity revision is `5`.
+- Frontend `ea0c58c9bdc46ace8a9ad28780a5fe28660d7988` merged tested
+  development `ffb7261` into production `main`. Local lint, type check,
+  prebooking fixtures and optimized build passed; main
+  [Actions run 36162986413](https://github.com/babuas25/shapontravels-frontend/actions/runs/36162986413)
+  passed quality and build jobs. Vercel production deployment
+  [`AbEZ9fZwXv34PveEmk4MuQWpkVNW`](https://vercel.com/shapontravels/shapontravels-frontend/AbEZ9fZwXv34PveEmk4MuQWpkVNW)
+  became Ready on `preview.shapontravels.com` from the exact main SHA. Browser
+  sign-in/dashboard/role verification passed. The frontend now uses the
+  verified Search session role and complete inline pricing snapshot, with an
+  older-backend fallback. Rust records supplier transport and Search phases.
+- Public API live/ready returned HTTP 200 after release. The API and real
+  notification worker are active, the worker has zero automatic restarts, and
+  the backup timer remains enabled. Authenticated canonical readiness, schema,
+  maintenance-off and worker-unpaused checks passed. No local database data,
+  dump, profile or secret was transferred; no booking, ticket, deposit or
+  notification delivery was created for verification.
+- Controlled production browser searches on the new frontend returned results
+  from all three suppliers, with zero supplier failures or scope exclusions:
+
+  | Search | Browser Search request | Rust total | Supplier wait | Offer persistence | Inline pricing | Retained offers |
+  | --- | ---: | ---: | ---: | ---: | ---: | ---: |
+  | One-way DAC–SIN, 30 Sep | 11.32 s | 8.130 s | 6.637 s | 0.923 s | 0.498 s | 677 |
+  | Round-trip DAC–SIN 20 Oct / SIN–DAC 30 Oct | 41.32 s | 36.354 s | 30.681 s | 4.498 s | 0.910 s | 2,490 |
+  | Multi-city DAC–SIN 20 Oct / SIN–KUL 24 Oct / KUL–DAC 30 Oct | 19.68 s | 15.627 s | 11.541 s | 3.200 s | 0.774 s | 1,778 |
+
+- For the round-trip sample, Firsttrip took 29.927 s to send response headers
+  and 30.702 s overall; Takeoff finished in 6.702 s and Triplover in
+  18.658 s. The complete-result requirement makes the slowest supplier a
+  lower bound. One-way browser Server-Timing measured session 1.29 s, backend
+  9.30 s and final pricing 0.081 s; round-trip measured session 1.31 s,
+  backend 39.04 s and final pricing 0.134 s; multi-city measured session
+  1.30 s, backend 17.60 s and final pricing 0.073 s. These are individual
+  live samples, with variable supplier times and offer counts, not a stable
+  percentage improvement or latency guarantee. The development VPS was off,
+  so no development deployment or runtime result is claimed.
