@@ -1291,3 +1291,38 @@ the user's production release authorization under this runbook.
   ticket, deposit or notification delivery was created by verification. The
   development VPS remained unreachable, so no development service deployment
   or readiness claim is made for this release.
+
+### Production supplier Hold and ticketing controls — 2026-09-25 (Asia/Dhaka)
+
+- The user requested enabling booking and ticketing for the separate localhost:3000
+  setup and production. The checkout warning came from `submissionEnabled=false`.
+  Production Rust already had all three suppliers' booking/ticketing transport
+  flags set to `true`, but Firsttrip and Takeoff database controls still had
+  servicing, booking and ticketing disabled. Triplover was already enabled.
+- On production `160.25.226.236`, the live Firsttrip, Takeoff and Triplover base
+  and search endpoints, configured credentials, BDT currencies and existing
+  supplier-control versions were reviewed without exposing secrets. A production
+  backup was created at `/var/backups/shapontravels/db-20260925T143739Z.dump`.
+  A single version-guarded transaction enabled servicing, booking and ticketing
+  for Firsttrip (version `7` to `8`) and Takeoff (version `5` to `6`), preserved
+  their Search switches, and appended one `supplier.configuration` audit event
+  per supplier. Triplover remains at version `9` with all four controls enabled.
+- The running backend remains `54e5c30`, schema `0069` and canonical identity
+  rollout revision `5`; no code deployment, migration, frontend publication or
+  runtime environment edit was needed. API and notification worker remain active;
+  internal/public live and ready endpoints returned HTTP 200. One existing held
+  booking and one existing ticket issue were present before and after this control
+  change. No live Book, NewTicket, Cancel or notification was submitted to verify
+  the configuration. A fresh Search/RePrice/acceptance is needed for an expired
+  checkout; the old client view does not refresh its admission flags by itself.
+  Issuance still requires a verified held booking, eligible client and funded
+  wallet; Direct Issue and cancellation remain disabled.
+- The ignored local backend `.env` now sets booking and ticketing transport flags
+  for Firsttrip, Takeoff and Triplover to `true`. The selected localhost:3000 Rust
+  config `.local/identity-local/config.json`, its PostgreSQL port `55439` and
+  listener `18081` are absent in this workspace. The available PostgreSQL test
+  databases on port `55440` do not match the frontend's local identity pin, so
+  their supplier controls were not changed and localhost:3000 booking/ticketing
+  is not verified or claimed active. Restore the correct retained local config
+  and database before changing its supplier controls; do not substitute the
+  production database, a production copy or another test identity target.
